@@ -11,9 +11,13 @@ import {
 
 import { hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
+import { AppShell } from "./components/Layout/AppShell";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
-import Home from "./routes/Home";
+import History from "./routes/History";
+import Reports from "./routes/Reports";
+import Settings from "./routes/Settings";
 import Setup from "./routes/Setup";
+import Today from "./routes/Today";
 
 /**
  * Shared QueryClient instance. Sensible defaults for a desktop app:
@@ -72,8 +76,16 @@ export default function App() {
         <MemoryRouter initialEntries={[initialRoute]}>
           <NavigationBridge />
           <Routes>
-            <Route path="/" element={<Home />} />
+            {/* Setup wizard is rendered outside the AppShell so it owns the
+                full window. */}
             <Route path="/setup" element={<Setup />} />
+            {/* Everything else lives inside the shell (TopBar + SideNav). */}
+            <Route element={<AppShell />}>
+              <Route index element={<Today />} />
+              <Route path="/history" element={<History />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </MemoryRouter>
