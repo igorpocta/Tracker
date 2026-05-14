@@ -139,4 +139,21 @@ describe("Popover", () => {
     );
     expect(screen.getByRole("button", { name: /ukončit/i })).toBeInTheDocument();
   });
+
+  it("subscribes to popover:opened to refetch timer state (Phase 18B Item 17)", async () => {
+    setupInvoke({ timer: null, recent: [] });
+
+    render(<Popover />);
+    await waitFor(() => {
+      // The popover wires up many listeners — `popover:opened` must be one.
+      const listenedEvents = eventMock.listen.mock.calls.map(
+        (call) => call[0] as string,
+      );
+      expect(listenedEvents).toContain("popover:opened");
+      expect(listenedEvents).toContain("timer-started");
+      expect(listenedEvents).toContain("timer-stopped");
+      expect(listenedEvents).toContain("timer-updated");
+      expect(listenedEvents).toContain("worklog-saved");
+    });
+  });
 });
