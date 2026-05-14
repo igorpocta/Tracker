@@ -16,6 +16,10 @@ src-tauri/gen/
 # Env / secrets
 .env
 .env.local
+# Tracker's on-disk secret store. It only ever lives in the per-user app data
+# directory on real installs, but this defensive ignore prevents an accidental
+# commit if it ever surfaces inside the working tree.
+secret.toml
 
 # Logs
 *.log
