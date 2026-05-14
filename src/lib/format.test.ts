@@ -5,6 +5,7 @@ import {
   formatDuration,
   formatDurationShort,
   formatHours,
+  formatMoney,
   formatRelativeTime,
   isToday,
 } from "./format";
@@ -87,6 +88,43 @@ describe("formatClockTime", () => {
   it("pads HH and MM", () => {
     const d = new Date(2024, 0, 1, 9, 5, 0);
     expect(formatClockTime(d)).toBe("09:05");
+  });
+});
+
+describe("formatMoney", () => {
+  // CZK uses thin-space grouping + "Kč" suffix, rounded to whole units.
+  const thin = " ";
+
+  it("formats CZK with thin-space groups and Kč suffix", () => {
+    expect(formatMoney(1234, "CZK")).toBe(`1${thin}234${thin}Kč`);
+    expect(formatMoney(0, "CZK")).toBe(`0${thin}Kč`);
+    expect(formatMoney(1234567.4, "CZK")).toBe(`1${thin}234${thin}567${thin}Kč`);
+  });
+
+  it("formats EUR with euro prefix and two decimals", () => {
+    expect(formatMoney(42.5, "EUR")).toBe("€42.50");
+    expect(formatMoney(1234.56, "EUR")).toBe("€1,234.56");
+  });
+
+  it("formats USD with dollar prefix", () => {
+    expect(formatMoney(1234.5, "USD")).toBe("$1,234.50");
+  });
+
+  it("formats GBP with pound prefix", () => {
+    expect(formatMoney(7.25, "GBP")).toBe("£7.25");
+  });
+
+  it("formats PLN with thin-space + zł suffix", () => {
+    expect(formatMoney(150, "PLN")).toBe(`150${thin}zł`);
+  });
+
+  it("falls back to ISO code suffix for unknown currencies", () => {
+    expect(formatMoney(10, "JPY")).toBe(`10.00${thin}JPY`);
+  });
+
+  it("handles non-finite gracefully", () => {
+    expect(formatMoney(NaN, "EUR")).toBe("—");
+    expect(formatMoney(Infinity, "USD")).toBe("—");
   });
 });
 
