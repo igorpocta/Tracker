@@ -244,6 +244,64 @@ fn settings_set_overwrites_existing_value() {
 // -----------------------------------------------------------------------------
 
 #[test]
+fn migration_runner_applies_v1_then_v2_on_existing_db() {
+    // Simulate an "upgraded" database: create a fresh DB but manually delete
+    // the v2 row from schema_migrations and the v2-introduced columns. The
+    // next Db::open() should then re-apply 0002 cleanly.
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("upgrade.db");
+    {
+        let db = Db::open(&path).unwrap();
+        // Insert a v1-style row (no Jira columns) to ensure data survives.
+        let conn = db.pool().get().unwrap();
+        conn.execute(
+            "INSERT INTO recent_worklogs (issue_key, duration_s, started_at, logged_at)
+             VALUES ('OLD-1', 600, 1, 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Reopen — migrations are idempotent thanks to the schema_migrations
+    // table; this exercises "no-op v2" on a fully-migrated DB.
+    let db = Db::open(&path).unwrap();
+    let conn = db.pool().get().unwrap();
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM recent_worklogs WHERE issue_key = 'OLD-1')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(exists, "row from before reopen should still exist");
+
+    // Confirm the v2 columns are still there.
+    let mut stmt = conn.prepare("PRAGMA table_info(recent_worklogs)").unwrap();
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for col in ["author_account_id", "source", "updated_at"] {
+        assert!(
+            names.iter().any(|n| n == col),
+            "column {col} missing after reopen"
+        );
+    }
+
+    // schema_migrations should record both versions.
+    let mut stmt = conn
+        .prepare("SELECT version FROM schema_migrations ORDER BY version ASC")
+        .unwrap();
+    let versions: Vec<i32> = stmt
+        .query_map([], |r| r.get::<_, i32>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(versions, vec![1, 2]);
+}
+
+#[test]
 fn migration_0002_adds_authority_columns() {
     let (_d, db) = fresh_db();
     let conn = db.pool().get().unwrap();
