@@ -1,5 +1,8 @@
 use tempfile::TempDir;
-use tracker_lib::cache::audit::{record as audit_record, recent as audit_recent, AuditEvent, AuditOp};
+use tracker_lib::cache::audit::{
+    get_by_id as audit_get_by_id, list as audit_list, purge_older_than as audit_purge,
+    record as audit_record, recent as audit_recent, AuditEvent, AuditOp,
+};
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
@@ -301,7 +304,7 @@ fn migration_runner_applies_v1_then_v2_on_existing_db() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5]);
 }
 
 #[test]
@@ -664,6 +667,7 @@ fn audit_record_and_recent_roundtrip() {
             after: Some(&row),
             success: true,
             error: None,
+            source_audit_id: None,
         },
     )
     .unwrap();
@@ -678,6 +682,7 @@ fn audit_record_and_recent_roundtrip() {
             after: None,
             success: false,
             error: Some("network glitch"),
+            source_audit_id: None,
         },
     )
     .unwrap();
@@ -711,4 +716,158 @@ fn worklog_default_recent_hides_tombstoned() {
         .collect();
     assert!(ids.contains(&"j-2"));
     assert!(!ids.contains(&"j-1"));
+}
+
+// -----------------------------------------------------------------------------
+// Phase 16 — audit log pagination + filter + linkage
+// -----------------------------------------------------------------------------
+
+fn seed_audit_op(db: &Db, op: AuditOp, occurred_at: i64, success: bool, key: &str) -> i64 {
+    audit_record(
+        db,
+        AuditEvent {
+            occurred_at,
+            op,
+            issue_key: Some(key),
+            worklog_id: Some(&format!("wl-{occurred_at}")),
+            before: None,
+            after: None,
+            success,
+            error: if success { None } else { Some("boom") },
+            source_audit_id: None,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn audit_log_pagination_by_before_id_returns_correct_slice() {
+    let (_d, db) = fresh_db();
+    // Seed 5 rows with strictly increasing occurred_at.
+    let _id1 = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
+    let _id2 = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
+    let _id3 = seed_audit_op(&db, AuditOp::Delete, 300, true, "K-2");
+    let _id4 = seed_audit_op(&db, AuditOp::Update, 400, true, "K-2");
+    let id5 = seed_audit_op(&db, AuditOp::Delete, 500, true, "K-3");
+
+    // First page (newest first) — limit 2 → ids 5, 4.
+    let page1 = audit_list(&db, 2, None, None, false).unwrap();
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1[0].id, id5);
+    assert_eq!(page1[0].occurred_at, 500);
+
+    // Pagination: pass the last id of page1 as `before_id`.
+    let last_id = page1.last().unwrap().id;
+    let page2 = audit_list(&db, 2, Some(last_id), None, false).unwrap();
+    assert_eq!(page2.len(), 2);
+    // Should be ids 3, 2.
+    assert_eq!(page2[0].occurred_at, 300);
+    assert_eq!(page2[1].occurred_at, 200);
+
+    // Final page.
+    let last_id = page2.last().unwrap().id;
+    let page3 = audit_list(&db, 2, Some(last_id), None, false).unwrap();
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3[0].occurred_at, 100);
+}
+
+#[test]
+fn audit_log_filter_ops_restricts_results() {
+    let (_d, db) = fresh_db();
+    let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Delete, 300, true, "K-2");
+    let _ = seed_audit_op(&db, AuditOp::Update, 400, true, "K-2");
+    let _ = seed_audit_op(&db, AuditOp::Delete, 500, true, "K-3");
+
+    let ops = vec!["delete".to_string()];
+    let filtered = audit_list(&db, 50, None, Some(&ops), false).unwrap();
+    assert_eq!(filtered.len(), 2);
+    assert!(filtered.iter().all(|e| e.op == "delete"));
+
+    let ops2 = vec!["update".to_string(), "delete".to_string()];
+    let filtered2 = audit_list(&db, 50, None, Some(&ops2), false).unwrap();
+    assert_eq!(filtered2.len(), 4);
+
+    // Empty ops list ≡ no filter.
+    let empty: Vec<String> = Vec::new();
+    let no_filter = audit_list(&db, 50, None, Some(&empty), false).unwrap();
+    assert_eq!(no_filter.len(), 5);
+}
+
+#[test]
+fn audit_log_filter_only_failed_excludes_successful_entries() {
+    let (_d, db) = fresh_db();
+    let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Create, 200, false, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Delete, 300, false, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Update, 400, true, "K-1");
+
+    let failed = audit_list(&db, 50, None, None, true).unwrap();
+    assert_eq!(failed.len(), 2);
+    assert!(failed.iter().all(|e| !e.success));
+}
+
+#[test]
+fn audit_log_default_uses_50_limit_by_recent() {
+    let (_d, db) = fresh_db();
+    for i in 0..60 {
+        seed_audit_op(&db, AuditOp::Create, 100 + i, true, "K-1");
+    }
+    // `recent` is the convenience for "first page, no filters".
+    let entries = audit_recent(&db, 50).unwrap();
+    assert_eq!(entries.len(), 50);
+    // Newest first → highest occurred_at on top.
+    assert!(entries[0].occurred_at > entries[entries.len() - 1].occurred_at);
+}
+
+#[test]
+fn audit_get_by_id_returns_full_entry_or_none() {
+    let (_d, db) = fresh_db();
+    let id = seed_audit_op(&db, AuditOp::Delete, 100, true, "K-1");
+    let entry = audit_get_by_id(&db, id).unwrap().expect("present");
+    assert_eq!(entry.op, "delete");
+    assert_eq!(entry.issue_key.as_deref(), Some("K-1"));
+
+    assert!(audit_get_by_id(&db, 9999).unwrap().is_none());
+}
+
+#[test]
+fn audit_purge_older_than_removes_old_rows_only() {
+    let (_d, db) = fresh_db();
+    let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
+    let _ = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
+    let kept = seed_audit_op(&db, AuditOp::Delete, 400, true, "K-1");
+
+    let removed = audit_purge(&db, 300).unwrap();
+    assert_eq!(removed, 2);
+
+    let remaining = audit_list(&db, 50, None, None, false).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, kept);
+}
+
+#[test]
+fn audit_source_audit_id_linkage_persists() {
+    let (_d, db) = fresh_db();
+    let original = seed_audit_op(&db, AuditOp::Delete, 100, true, "K-1");
+    let restore_id = audit_record(
+        &db,
+        AuditEvent {
+            occurred_at: 200,
+            op: AuditOp::Restore,
+            issue_key: Some("K-1"),
+            worklog_id: Some("new-id"),
+            before: None,
+            after: None,
+            success: true,
+            error: None,
+            source_audit_id: Some(original),
+        },
+    )
+    .unwrap();
+
+    let entry = audit_get_by_id(&db, restore_id).unwrap().expect("present");
+    assert_eq!(entry.source_audit_id, Some(original));
+    assert_eq!(entry.op, "restore");
 }

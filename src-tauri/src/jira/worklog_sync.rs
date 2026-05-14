@@ -172,18 +172,23 @@ pub async fn sync_worklogs_for_range(
     for local_id in &local_ids {
         if !seen_ids.contains(local_id) {
             cache::worklogs::mark_tombstoned_by_jira_id(db, local_id, now_unix)?;
-            // Audit the synthetic tombstone for traceability.
+            // Audit the synthetic tombstone for traceability. We also pull
+            // the row's `before` snapshot (last known state) so the UI can
+            // surface a "Smazáno mimo aplikaci" entry with enough context to
+            // reconstruct from.
+            let before = cache::worklogs::get_by_jira_id(db, local_id).ok().flatten();
             let _ = crate::cache::audit::record(
                 db,
                 crate::cache::audit::AuditEvent {
                     occurred_at: now_unix,
                     op: crate::cache::audit::AuditOp::SyncTombstone,
-                    issue_key: None,
+                    issue_key: before.as_ref().map(|r| r.issue_key.as_str()),
                     worklog_id: Some(local_id.as_str()),
-                    before: None,
+                    before: before.as_ref(),
                     after: None,
                     success: true,
                     error: None,
+                    source_audit_id: None,
                 },
             );
         }
