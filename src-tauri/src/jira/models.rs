@@ -123,3 +123,25 @@ pub struct SearchPage {
     #[serde(default, rename = "isLast")]
     pub is_last: bool,
 }
+
+/// Outgoing body for `POST /rest/api/3/issue/{key}/worklog`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorklogRequest {
+    pub started: String,
+    #[serde(rename = "timeSpentSeconds")]
+    pub time_spent_seconds: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<Value>,
+}
+
+/// Response from Jira after creating a worklog.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorklogResponse {
+    pub id: String,
+    #[serde(default, rename = "issueId")]
+    pub issue_id: Option<String>,
+    #[serde(default, rename = "timeSpentSeconds")]
+    pub time_spent_seconds: Option<i64>,
+    #[serde(default)]
+    pub started: Option<String>,
+}

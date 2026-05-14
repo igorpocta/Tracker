@@ -7,10 +7,14 @@
 //!
 //! The client uses `reqwest` with `rustls-tls` and Basic auth (email + API token).
 
+pub mod adf;
 pub mod client;
 pub mod jql;
 pub mod models;
 
+pub use adf::make_adf_comment;
 pub use client::{JiraClient, JiraError};
 pub use jql::DEFAULT_JQL;
-pub use models::{JiraIssue, JiraIssueFields, JiraUser, SearchPage};
+pub use models::{
+    JiraIssue, JiraIssueFields, JiraUser, SearchPage, WorklogRequest, WorklogResponse,
+};

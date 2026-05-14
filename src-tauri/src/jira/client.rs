@@ -1,10 +1,12 @@
+use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use serde_json::json;
 use thiserror::Error;
 use url::Url;
 
-use super::models::{JiraUser, SearchPage};
+use super::adf::make_adf_comment;
+use super::models::{JiraUser, SearchPage, WorklogResponse};
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -118,5 +120,41 @@ impl JiraClient {
             .await?;
         let resp = Self::check_status(resp).await?;
         Ok(resp.json::<SearchPage>().await?)
+    }
+
+    /// `POST /rest/api/3/issue/{key}/worklog` — add a worklog with an optional ADF comment.
+    ///
+    /// `started` is formatted as `YYYY-MM-DDTHH:MM:SS.SSS+0000` (Jira's required shape).
+    /// `comment` is converted via [`make_adf_comment`]; empty/whitespace strings are
+    /// dropped so the field is omitted from the request body entirely.
+    pub async fn add_worklog(
+        &self,
+        issue_key: &str,
+        started: DateTime<Utc>,
+        time_spent_seconds: i64,
+        comment: Option<&str>,
+    ) -> Result<WorklogResponse, JiraError> {
+        let url = self.url(&format!("/rest/api/3/issue/{issue_key}/worklog"))?;
+        let started_str = started.format("%Y-%m-%dT%H:%M:%S%.3f+0000").to_string();
+
+        let mut body = json!({
+            "started": started_str,
+            "timeSpentSeconds": time_spent_seconds,
+        });
+        if let Some(text) = comment {
+            if let Some(adf) = make_adf_comment(text) {
+                body["comment"] = adf;
+            }
+        }
+
+        let resp = self
+            .http
+            .post(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .json(&body)
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<WorklogResponse>().await?)
     }
 }
