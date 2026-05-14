@@ -1,0 +1,33 @@
+//! Tauri command surface exposed to the React frontend via the IPC bridge.
+//!
+//! Each submodule groups commands by concern (config, timer, issues, …) and
+//! intentionally splits each command into two parts:
+//!
+//! 1. A `*_inner` (or similarly suffixed) plain function operating on the
+//!    underlying primitives (`Db`, `JiraClient`, …). These are easily unit
+//!    testable from `tests/`.
+//! 2. A thin `#[tauri::command]` wrapper that pulls the right pieces out of
+//!    [`crate::state::AppState`] and forwards to the inner function, mapping
+//!    any error to `String` (Tauri requires the error type to be `Serialize`).
+
+pub mod browser;
+pub mod config;
+pub mod issues;
+pub mod misc;
+pub mod prefs;
+pub mod timer;
+pub mod tray;
+pub mod worklog;
+
+pub use browser::{
+    get_browser_context, get_current_visible_ticket, get_extension_last_heartbeat,
+};
+pub use config::{enter_main_app, enter_setup, has_config, open_main_window, save_config};
+pub use issues::{
+    get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache,
+};
+pub use misc::{haptic_feedback, open_jira_issue, open_url};
+pub use prefs::{get_daily_goal, set_app_icon, set_daily_goal, set_widget_format};
+pub use timer::{get_timer_state, start_timer, stop_timer_inner, update_timer_start};
+pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
+pub use worklog::get_worklog_issues;

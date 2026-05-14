@@ -82,6 +82,43 @@ pub fn get_by_key(db: &Db, key: &str) -> Result<Option<IssueRow>, DbError> {
     }
 }
 
+pub fn recent(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT issue_key, issue_id, summary, status_category, priority_order,
+                assignee_email, assignee_account_id, parent_key, parent_summary,
+                issue_type, time_spent, aggregate_time_spent, time_original_estimate,
+                time_estimate, epic_key, epic_summary, updated_at
+         FROM issues
+         ORDER BY updated_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], row_to_issue)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Return issues that have at least one entry in `recent_worklogs`, ordered by
+/// the most recent worklog timestamp. Useful as a "suggested" / "frequently
+/// tracked" picker on the main window.
+pub fn suggested(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT i.issue_key, i.issue_id, i.summary, i.status_category, i.priority_order,
+                i.assignee_email, i.assignee_account_id, i.parent_key, i.parent_summary,
+                i.issue_type, i.time_spent, i.aggregate_time_spent, i.time_original_estimate,
+                i.time_estimate, i.epic_key, i.epic_summary, i.updated_at
+         FROM issues i
+         INNER JOIN (
+            SELECT issue_key, MAX(logged_at) AS last_logged
+            FROM recent_worklogs
+            GROUP BY issue_key
+         ) w ON w.issue_key = i.issue_key
+         ORDER BY w.last_logged DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], row_to_issue)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 pub fn search(db: &Db, query: &str, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let q = format!("%{}%", query.to_lowercase());
