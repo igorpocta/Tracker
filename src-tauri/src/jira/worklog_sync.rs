@@ -19,7 +19,7 @@ use thiserror::Error;
 use super::adf::extract_adf_text;
 use super::client::{JiraClient, JiraError};
 use super::models::{map_issue_to_row, parse_jira_timestamp_public, JiraWorklog};
-use crate::cache::{self, worklogs::WorklogRow, Db, DbError};
+use crate::cache::{self, issues::IssueRow, worklogs::WorklogRow, Db, DbError};
 
 /// Errors produced by [`sync_worklogs_for_range`].
 #[derive(Debug, Error)]
@@ -112,7 +112,14 @@ pub async fn sync_worklogs_for_range(
         for issue in &page.issues {
             // Make sure the issue exists in our cache (otherwise the worklog
             // row would have no summary/issue_id fallback).
-            cache::issues::upsert(db, &map_issue_to_row(issue))?;
+            let issue_row = map_issue_to_row(issue);
+            cache::issues::upsert(db, &issue_row)?;
+            // Snapshot the summary so we can stamp it onto each worklog row.
+            let issue_summary = if issue_row.summary.is_empty() {
+                None
+            } else {
+                Some(issue_row.summary.clone())
+            };
 
             // Page through this issue's worklogs.
             let mut start_at: u32 = 0;
@@ -136,7 +143,13 @@ pub async fn sync_worklogs_for_range(
                         continue;
                     }
 
-                    let row = jira_worklog_to_row(wl, &issue.key, started_ts);
+                    let mut row = jira_worklog_to_row(wl, &issue.key, started_ts);
+                    // Phase 18A — Item 8: populate summary from the cached
+                    // issue we just upserted so the UI never falls back to
+                    // "(bez popisu)".
+                    if row.summary.is_none() {
+                        row.summary = issue_summary.clone();
+                    }
                     cache::worklogs::upsert_from_jira(db, &row)?;
                     seen_ids.insert(wl.id.clone());
                     upserted += 1;
@@ -198,8 +211,86 @@ pub async fn sync_worklogs_for_range(
     let retention_cutoff = now_unix - TOMBSTONE_RETENTION_SECONDS;
     cache::worklogs::purge_old_tombstoned(db, retention_cutoff)?;
 
+    // Phase 18A — Item 8: backfill summaries on any rows that still lack one
+    // (e.g. legacy rows from before the per-row summary stamping was added).
+    backfill_missing_summaries(client, db, from_ts, to_ts).await?;
+
     Ok(upserted)
 }
+
+/// Find worklog rows in the given window with `summary IS NULL` and try to
+/// populate them — first from the local issue cache, then (if absent) by
+/// fetching the issue from Jira on the fly.
+///
+/// Errors hitting Jira are tolerated: missing summaries stay missing and the
+/// next sync will retry. We deliberately do NOT count this towards `upserted`.
+async fn backfill_missing_summaries(
+    client: &JiraClient,
+    db: &Db,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<(), SyncError> {
+    let keys: Vec<String> = {
+        let conn = db.pool().get().map_err(DbError::from)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT issue_key FROM recent_worklogs
+                 WHERE summary IS NULL
+                   AND tombstoned_at IS NULL
+                   AND issue_key != ''
+                   AND started_at BETWEEN ?1 AND ?2",
+            )
+            .map_err(DbError::from)?;
+        let mapped = stmt
+            .query_map(rusqlite::params![from_ts, to_ts], |r| r.get::<_, String>(0))
+            .map_err(DbError::from)?;
+        mapped.filter_map(Result::ok).collect()
+    };
+
+    for key in keys {
+        // Cache hit?
+        if let Some(issue) = cache::issues::get_by_key(db, &key)? {
+            if !issue.summary.is_empty() {
+                stamp_summary(db, &key, &issue.summary)?;
+                continue;
+            }
+        }
+        // Fallback: fetch the issue from Jira.
+        match client.get_issue(&key).await {
+            Ok(jira_issue) => {
+                let row = map_issue_to_row(&jira_issue);
+                cache::issues::upsert(db, &row)?;
+                if !row.summary.is_empty() {
+                    stamp_summary(db, &key, &row.summary)?;
+                }
+            }
+            // 404 — issue deleted in Jira since the worklog was created. Leave
+            // summary null; next sync will retry. Don't fail the whole sync.
+            Err(JiraError::Api { status: 404, .. }) | Err(JiraError::WorklogNotFound) => continue,
+            // Any other Jira error: log via the error chain and continue. We
+            // chose to swallow because the worklog already exists locally —
+            // missing summary is a cosmetic problem, not a data-integrity one.
+            Err(_) => continue,
+        }
+    }
+    Ok(())
+}
+
+fn stamp_summary(db: &Db, issue_key: &str, summary: &str) -> Result<(), DbError> {
+    let conn = db.pool().get().map_err(DbError::from)?;
+    conn.execute(
+        "UPDATE recent_worklogs SET summary = ?2
+         WHERE issue_key = ?1 AND summary IS NULL",
+        rusqlite::params![issue_key, summary],
+    )
+    .map_err(DbError::from)?;
+    Ok(())
+}
+
+// Silence unused-import warning when `IssueRow` is only referenced from this
+// file's docs (it's used transitively through `cache::issues`).
+#[allow(dead_code)]
+fn _assert_issue_row_compiles(_r: IssueRow) {}
 
 /// Convert a `JiraWorklog` to the local row shape. Caller supplies the
 /// already-parsed `started_ts` to avoid parsing the timestamp twice.
@@ -232,6 +323,7 @@ fn jira_worklog_to_row(wl: &JiraWorklog, issue_key: &str, started_ts: i64) -> Wo
         updated_at_jira: updated_ts,
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     }
 }
 

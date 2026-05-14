@@ -872,6 +872,7 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
             updated_at_jira: Some(in_range_ts),
             pending_delete_at: None,
             tombstoned_at: None,
+            pending_assignment: false,
         },
     )
     .unwrap();
@@ -892,6 +893,7 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
             updated_at_jira: Some(in_range_ts + 60),
             pending_delete_at: None,
             tombstoned_at: None,
+            pending_assignment: false,
         },
     )
     .unwrap();
