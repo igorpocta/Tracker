@@ -29,7 +29,10 @@ pub use issues::{
     get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache,
 };
 pub use misc::{haptic_feedback, open_jira_issue, open_url};
-pub use prefs::{get_daily_goal, set_app_icon, set_daily_goal, set_widget_format};
+pub use prefs::{
+    get_daily_goal, get_hourly_rate, set_app_icon, set_daily_goal, set_hourly_rate,
+    set_widget_format,
+};
 pub use timer::{get_timer_state, start_timer, stop_timer_inner, update_timer_start};
 pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
 pub use worklog::get_worklog_issues;

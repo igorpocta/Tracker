@@ -61,6 +61,8 @@ pub fn run() {
             commands::prefs::set_daily_goal,
             commands::prefs::set_widget_format,
             commands::prefs::set_app_icon,
+            commands::prefs::get_hourly_rate,
+            commands::prefs::set_hourly_rate,
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,
             commands::browser::get_extension_last_heartbeat,

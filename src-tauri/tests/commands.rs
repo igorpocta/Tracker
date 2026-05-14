@@ -14,8 +14,9 @@ use tracker_lib::cache::timer::{self, ActiveTimer};
 use tracker_lib::cache::worklogs::{recent as worklog_recent, WorklogRow};
 use tracker_lib::cache::Db;
 use tracker_lib::commands::prefs::{
-    get_daily_goal_inner, set_app_icon_inner, set_daily_goal_inner, set_widget_format_inner,
-    DEFAULT_DAILY_GOAL_SECONDS,
+    get_daily_goal_inner, get_hourly_rate_inner, set_app_icon_inner, set_daily_goal_inner,
+    set_hourly_rate_inner, set_widget_format_inner, DEFAULT_DAILY_GOAL_SECONDS,
+    DEFAULT_HOURLY_RATE,
 };
 use tracker_lib::commands::config::test_jira_connection_inner;
 use tracker_lib::commands::timer::{
@@ -155,6 +156,35 @@ fn set_daily_goal_rejects_negative_values() {
     let (_dir, db) = fresh_db();
     let err = set_daily_goal_inner(&db, -1).unwrap_err();
     assert!(err.contains("non-negative"));
+}
+
+#[test]
+fn hourly_rate_defaults_to_zero_when_unset() {
+    let (_dir, db) = fresh_db();
+    let v = get_hourly_rate_inner(&db).unwrap();
+    assert_eq!(v, DEFAULT_HOURLY_RATE);
+    assert_eq!(v, 0.0);
+}
+
+#[test]
+fn set_and_get_hourly_rate_roundtrip() {
+    let (_dir, db) = fresh_db();
+    set_hourly_rate_inner(&db, 1500.0).unwrap();
+    assert_eq!(get_hourly_rate_inner(&db).unwrap(), 1500.0);
+}
+
+#[test]
+fn set_hourly_rate_rejects_negative_values() {
+    let (_dir, db) = fresh_db();
+    let err = set_hourly_rate_inner(&db, -1.0).unwrap_err();
+    assert!(err.contains("non-negative"));
+}
+
+#[test]
+fn set_hourly_rate_rejects_non_finite_values() {
+    let (_dir, db) = fresh_db();
+    let err = set_hourly_rate_inner(&db, f64::NAN).unwrap_err();
+    assert!(err.contains("finite"));
 }
 
 #[test]
