@@ -339,7 +339,7 @@ function IssuePicker({
             {iss.issue_key}
           </span>
           <span className="truncate text-[var(--text-primary)]">
-            {iss.summary || "(bez popisu)"}
+            {iss.summary || "(načítá se…)"}
           </span>
         </button>
       ))}

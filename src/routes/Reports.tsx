@@ -344,7 +344,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
               <IssuePill issueKey={a.issueKey} />
             </div>
             <div className="truncate text-[var(--text-secondary)]">
-              {a.summary || "(bez popisu)"}
+              {a.summary || "(načítá se…)"}
             </div>
             <div className="text-right font-mono tabular-nums text-[var(--text-primary)]">
               {formatDurationShort(a.totalSeconds)}

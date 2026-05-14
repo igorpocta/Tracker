@@ -1,9 +1,9 @@
 /**
  * Color palette system.
  *
- * The original Trcker reference exposes two palette modes:
+ * The original Tracker reference exposes two palette modes:
  *
- *   1. "Mono" — a single primary accent (Aurora / Trcker / Love / Halloween).
+ *   1. "Mono" — a single primary accent (Aurora / Tracker / Love / Halloween).
  *   2. "Dual" — primary + secondary accents (Czech / Aurora Boreal /
  *      Sakura Night / Cyber Lime / Nordic Fjord) so charts and pills can
  *      adopt a "second voice" without ever feeling garish.
@@ -38,7 +38,7 @@ export interface PaletteSpec {
 /** Mono palettes — single primary accent. */
 export const MONO_PALETTES: PaletteSpec[] = [
   { id: "aurora",    label: "SAB",       mode: "mono", primary: "#14B8A6", secondary: "#14B8A6" },
-  { id: "trcker",    label: "Trcker",    mode: "mono", primary: "#EAB308", secondary: "#EAB308" },
+  { id: "trcker",    label: "Tracker",   mode: "mono", primary: "#EAB308", secondary: "#EAB308" },
   { id: "love",      label: "Love",      mode: "mono", primary: "#EC4899", secondary: "#EC4899" },
   { id: "halloween", label: "Halloween", mode: "mono", primary: "#F97316", secondary: "#F97316" },
 ];

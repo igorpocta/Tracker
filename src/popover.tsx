@@ -4,7 +4,7 @@
  * Reference: `screens/SCR-20260514-rkec-2.png`.
  *
  *   ┌──────────────────────────────────────────────┐
- *   │ Trcker.                Today goal  5h 21m/9h │  ← cursive accent script
+ *   │ Tracker.               Today goal  5h 21m/9h │  ← cursive accent script
  *   │                        ▰▰▰▰▰▰▰░░░░░░░░░░░░░ │
  *   ├──────────────────────────────────────────────┤
  *   │  ⏰  No timer running                         │
@@ -247,7 +247,7 @@ function Header({
             fontFamily: "var(--font-script), serif",
           }}
         >
-          Trcker.
+          Tracker.
         </span>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
@@ -359,7 +359,7 @@ function RecentList({
                     {iss.issue_key}
                   </span>
                   <span className="text-xs text-[var(--text-primary)] truncate flex-1">
-                    {iss.summary || "(bez popisu)"}
+                    {iss.summary || "(načítá se…)"}
                   </span>
                 </button>
               </li>

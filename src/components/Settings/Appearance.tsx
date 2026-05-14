@@ -11,7 +11,7 @@
  *   │   ▆▆▆▆▆  │ │   ▆▆▆▆▆  │ │   ▆▆▆▆▆  │
  *   │   ▇▇▇    │ │   ▇▇▇    │ │   ▇▇▇    │
  *   │   ▇▇▇▇▇▇ │ │   ▇▇▇▇▇▇ │ │   ▇▇▇▇▇▇ │
- *   │ ● SAB    │ │ ● Trcker │ │ ● Love   │
+ *   │ ● SAB    │ │ ● Tracker│ │ ● Love   │
  *   └──────────┘ └──────────┘ └──────────┘
  *
  * Palette previews use 4 rows of accent-tinted bars: the top row uses the
