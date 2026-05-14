@@ -81,7 +81,7 @@ pub fn get_rounding_mode_inner(db: &Db) -> Result<String, String> {
 pub fn set_rounding_mode_inner(db: &Db, mode: &str) -> Result<(), String> {
     if !ALLOWED_ROUNDING_MODES.contains(&mode) {
         return Err(format!(
-            "invalid rounding mode {mode:?}; expected one of {ALLOWED_ROUNDING_MODES:?}"
+            "Neplatný režim zaokrouhlení {mode:?}; očekáváno {ALLOWED_ROUNDING_MODES:?}"
         ));
     }
     cache::settings::set(db, KEY_ROUNDING_MODE, mode).map_err(|e| e.to_string())
@@ -100,7 +100,7 @@ pub fn get_rounding_interval_minutes_inner(db: &Db) -> Result<i64, String> {
 pub fn set_rounding_interval_minutes_inner(db: &Db, minutes: i64) -> Result<(), String> {
     if !ALLOWED_INTERVALS.contains(&minutes) {
         return Err(format!(
-            "invalid rounding interval {minutes}; expected one of {ALLOWED_INTERVALS:?}"
+            "Neplatný interval zaokrouhlení {minutes}; očekáváno {ALLOWED_INTERVALS:?}"
         ));
     }
     cache::settings::set(db, KEY_ROUNDING_INTERVAL, &minutes.to_string())

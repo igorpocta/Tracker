@@ -122,6 +122,9 @@ fn validate_comment(s: Option<&str>) -> Result<(), String> {
                 "Komentář je příliš dlouhý (max {MAX_COMMENT_CHARS} znaků)"
             ));
         }
+        if text.contains('\0') {
+            return Err("Komentář obsahuje neplatný znak (NUL)".into());
+        }
     }
     Ok(())
 }
@@ -197,9 +200,7 @@ pub async fn create_manual_worklog(
     if duration_seconds > 24 * 3600 {
         return Err("Trvání nesmí přesáhnout 24 hodin".into());
     }
-    if issue_key.trim().is_empty() {
-        return Err("Chybí klíč úkolu".into());
-    }
+    crate::validation::validate_issue_key(&issue_key)?;
 
     // Phase 18A — Item 27: apply rounding before talking to Jira.
     let duration_seconds = rounding::apply_active_rounding(&state.db, duration_seconds);
@@ -298,6 +299,15 @@ pub async fn update_worklog(
     new_comment: Option<String>,
 ) -> Result<WorklogRow, String> {
     validate_comment(new_comment.as_deref())?;
+    crate::validation::validate_issue_key(&issue_key)?;
+    if let Some(d) = new_duration_seconds {
+        if d <= 0 {
+            return Err("Trvání musí být kladné".into());
+        }
+        if d > 24 * 3600 {
+            return Err("Trvání nesmí přesáhnout 24 hodin".into());
+        }
+    }
 
     let client = state
         .jira_client_cloned()
@@ -486,6 +496,11 @@ pub async fn move_worklog(
     if duration_seconds <= 0 {
         return Err("Trvání musí být kladné".into());
     }
+    if duration_seconds > 24 * 3600 {
+        return Err("Trvání nesmí přesáhnout 24 hodin".into());
+    }
+    crate::validation::validate_issue_key(&old_issue_key)?;
+    crate::validation::validate_issue_key(&new_issue_key)?;
 
     let client = state
         .jira_client_cloned()

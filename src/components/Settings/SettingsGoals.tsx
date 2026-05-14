@@ -8,6 +8,7 @@
  *
  *   How many hours you aim to work each working day. Used in the Goals view.
  */
+import { firstError, goalSliderHoursSchema } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
 const MIN_HOURS = 1;
@@ -44,6 +45,10 @@ export default function SettingsGoals() {
           value={hours}
           onChange={(e) => {
             const h = parseFloat(e.target.value);
+            // The slider already constrains to [1, 14] at 0.5 steps, but
+            // re-run the schema as a belt-and-braces guard against bad
+            // input from accessibility tools.
+            if (firstError(goalSliderHoursSchema, h)) return;
             void setGoal(Math.round(h * 3600));
           }}
           className="w-full h-1.5 rounded-full appearance-none cursor-pointer

@@ -8,6 +8,7 @@ pub mod server;
 pub mod state;
 pub mod tray;
 pub mod tray_ticker;
+pub mod validation;
 
 use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone};
 use tauri::{Emitter, Manager};

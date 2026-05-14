@@ -194,7 +194,9 @@ fn set_and_get_daily_goal_roundtrip() {
 fn set_daily_goal_rejects_negative_values() {
     let (_dir, db) = fresh_db();
     let err = set_daily_goal_inner(&db, -1).unwrap_err();
-    assert!(err.contains("non-negative"));
+    // Phase 18C — Item 23: error message is now Czech and references the
+    // explicit min/max bounds (not just "non-negative").
+    assert!(err.contains("Denní cíl"), "got: {err}");
 }
 
 #[test]
@@ -216,14 +218,16 @@ fn set_and_get_hourly_rate_roundtrip() {
 fn set_hourly_rate_rejects_negative_values() {
     let (_dir, db) = fresh_db();
     let err = set_hourly_rate_inner(&db, -1.0).unwrap_err();
-    assert!(err.contains("non-negative"));
+    assert!(err.contains("záporná"), "got: {err}");
 }
 
 #[test]
 fn set_hourly_rate_rejects_non_finite_values() {
     let (_dir, db) = fresh_db();
     let err = set_hourly_rate_inner(&db, f64::NAN).unwrap_err();
-    assert!(err.contains("finite"));
+    assert!(err.contains("platné číslo"), "got: {err}");
+    let err = set_hourly_rate_inner(&db, f64::INFINITY).unwrap_err();
+    assert!(err.contains("platné číslo"), "got: {err}");
 }
 
 #[test]
@@ -246,7 +250,7 @@ fn set_and_get_theme_roundtrip() {
 fn set_theme_rejects_invalid_values() {
     let (_dir, db) = fresh_db();
     let err = set_theme_inner(&db, "rainbow").unwrap_err();
-    assert!(err.contains("invalid theme"), "got: {err}");
+    assert!(err.contains("Neplatný motiv"), "got: {err}");
 }
 
 #[test]
@@ -267,7 +271,7 @@ fn set_and_get_font_size_roundtrip() {
 fn set_font_size_rejects_invalid_values() {
     let (_dir, db) = fresh_db();
     let err = set_font_size_inner(&db, "xxl").unwrap_err();
-    assert!(err.contains("invalid font_size"), "got: {err}");
+    assert!(err.contains("Neplatná velikost"), "got: {err}");
 }
 
 #[test]
@@ -288,7 +292,7 @@ fn set_and_get_density_roundtrip() {
 fn set_density_rejects_invalid_values() {
     let (_dir, db) = fresh_db();
     let err = set_density_inner(&db, "spacious").unwrap_err();
-    assert!(err.contains("invalid density"), "got: {err}");
+    assert!(err.contains("Neplatná hustota"), "got: {err}");
 }
 
 #[test]

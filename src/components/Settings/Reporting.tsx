@@ -12,6 +12,11 @@
 import { useEffect, useState } from "react";
 
 import type { Currency } from "../../api/types";
+import {
+  firstError,
+  hourlyRateSchema,
+  parseRateInput,
+} from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
 const CURRENCIES: { value: Currency; label: string }[] = [
@@ -30,18 +35,40 @@ export default function Reporting() {
   const setCurrency = usePrefsStore((s) => s.setCurrency);
 
   const [rateStr, setRateStr] = useState(`${hourlyRate || ""}`);
+  const [rateError, setRateError] = useState<string | null>(null);
 
   useEffect(() => {
     setRateStr(`${hourlyRate || ""}`);
+    setRateError(null);
   }, [hourlyRate]);
 
+  const handleRateChange = (next: string) => {
+    setRateStr(next);
+    // Live-validate: surface the error inline as the user types so they can
+    // see why the value will be rejected on blur. We don't update the store
+    // until blur to avoid spamming the backend.
+    const n = parseRateInput(next);
+    if (n === null) {
+      setRateError("musí být platné číslo (např. 1500)");
+    } else {
+      setRateError(firstError(hourlyRateSchema, n));
+    }
+  };
+
   const handleRateBlur = async () => {
-    const trimmed = rateStr.trim().replace(",", ".");
-    const n = trimmed === "" ? 0 : Number(trimmed);
-    if (!Number.isFinite(n) || n < 0) {
+    const n = parseRateInput(rateStr);
+    if (n === null) {
+      // Parse failed (scientific notation, junk chars, …) — revert.
       setRateStr(`${hourlyRate || ""}`);
+      setRateError(null);
       return;
     }
+    const err = firstError(hourlyRateSchema, n);
+    if (err) {
+      setRateError(err);
+      return;
+    }
+    setRateError(null);
     if (n !== hourlyRate) {
       await setHourlyRate(n);
     }
@@ -68,17 +95,26 @@ export default function Reporting() {
           type="text"
           inputMode="decimal"
           value={rateStr}
-          onChange={(e) => setRateStr(e.target.value)}
+          onChange={(e) => handleRateChange(e.target.value)}
           onBlur={handleRateBlur}
           placeholder="0"
+          aria-invalid={rateError != null}
+          aria-describedby={rateError ? "rate-error" : undefined}
           className="w-full h-9 px-3 rounded-[var(--radius-md)]
                      bg-transparent border border-[var(--border-subtle)] text-sm
                      text-[var(--text-primary)] focus:outline-none
-                     focus:border-[var(--border-default)] transition-colors duration-150"
+                     focus:border-[var(--border-default)] transition-colors duration-150
+                     aria-[invalid=true]:border-[var(--danger,#dc2626)]"
         />
-        <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          Ponechte prázdné a karta výdělků se úplně skryje.
-        </p>
+        {rateError ? (
+          <p id="rate-error" className="text-[11px] text-[var(--danger,#dc2626)] mt-2">
+            {rateError}
+          </p>
+        ) : (
+          <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
+            Ponechte prázdné a karta výdělků se úplně skryje.
+          </p>
+        )}
       </section>
 
       <section>

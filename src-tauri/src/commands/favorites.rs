@@ -7,6 +7,7 @@ use tauri::Emitter;
 
 use crate::cache::{self, issues::IssueRow};
 use crate::state::AppState;
+use crate::validation::validate_issue_key;
 
 /// Pure logic for `list_favorites`. Joins favorite keys against the cached
 /// `issues` table; rows that lack a cached record are returned with empty
@@ -31,18 +32,14 @@ pub fn add_favorite_inner(
     issue_key: &str,
     connection_id: Option<i64>,
 ) -> Result<(), String> {
+    validate_issue_key(issue_key)?;
     let key = issue_key.trim();
-    if key.is_empty() {
-        return Err("issue_key must not be empty".into());
-    }
     cache::favorites::add(db, key, connection_id).map_err(|e| e.to_string())
 }
 
 pub fn remove_favorite_inner(db: &cache::Db, issue_key: &str) -> Result<(), String> {
+    validate_issue_key(issue_key)?;
     let key = issue_key.trim();
-    if key.is_empty() {
-        return Err("issue_key must not be empty".into());
-    }
     cache::favorites::remove(db, key).map_err(|e| e.to_string())
 }
 
@@ -119,6 +116,14 @@ mod tests {
         let db = open_db();
         assert!(add_favorite_inner(&db, "", None).is_err());
         assert!(add_favorite_inner(&db, "  ", None).is_err());
+    }
+
+    #[test]
+    fn invalid_key_format_is_rejected() {
+        let db = open_db();
+        assert!(add_favorite_inner(&db, "acme-1", None).is_err());
+        assert!(add_favorite_inner(&db, "ACME-01", None).is_err());
+        assert!(add_favorite_inner(&db, "ACME 1", None).is_err());
     }
 
     #[test]

@@ -25,6 +25,11 @@ import {
   setRoundingMode,
   type RoundingMode,
 } from "../../api/commands";
+import {
+  activityThresholdSchema,
+  firstError,
+  roundingIntervalSchema,
+} from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
@@ -97,10 +102,15 @@ export default function General() {
     await setRoundingMode(m).catch(() => {});
   };
   const updateRndInterval = async (n: number) => {
+    // Validate before submit — silently clamp to the allowed enum.
+    if (firstError(roundingIntervalSchema, n)) return;
     setRndInterval(n);
     await setRoundingIntervalMinutes(n).catch(() => {});
   };
   const updateActThreshold = async (n: number) => {
+    // Already clamped by the input handler, but double-check the schema in
+    // case a future caller bypasses the input.
+    if (firstError(activityThresholdSchema, n)) return;
     setActThreshold(n);
     await setActivityThresholdMin(n).catch(() => {});
   };

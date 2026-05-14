@@ -88,9 +88,18 @@ pub fn get_daily_goal_inner(db: &Db) -> Result<i64, String> {
     }
 }
 
+/// Minimum daily goal: 30 minutes (1800 s).
+pub const MIN_DAILY_GOAL_SECONDS: i64 = 30 * 60;
+/// Maximum daily goal: 24 hours (86 400 s). Paranoia upper bound.
+pub const MAX_DAILY_GOAL_SECONDS: i64 = 24 * 60 * 60;
+
 pub fn set_daily_goal_inner(db: &Db, seconds: i64) -> Result<(), String> {
-    if seconds < 0 {
-        return Err("daily_goal_seconds must be non-negative".into());
+    if !(MIN_DAILY_GOAL_SECONDS..=MAX_DAILY_GOAL_SECONDS).contains(&seconds) {
+        return Err(format!(
+            "Denní cíl musí být mezi {} a {} hodinami (zadáno {seconds} s)",
+            MIN_DAILY_GOAL_SECONDS / 3600,
+            MAX_DAILY_GOAL_SECONDS / 3600
+        ));
     }
     cache::settings::set(db, KEY_DAILY_GOAL, &seconds.to_string()).map_err(|e| e.to_string())
 }
@@ -112,9 +121,21 @@ pub fn get_hourly_rate_inner(db: &Db) -> Result<f64, String> {
     }
 }
 
+/// Upper bound on the hourly rate. Past this we assume user error (typo,
+/// pasting in a yearly figure, accidentally hitting `e` in the input, etc.).
+pub const MAX_HOURLY_RATE: f64 = 100_000.0;
+
 pub fn set_hourly_rate_inner(db: &Db, rate: f64) -> Result<(), String> {
-    if rate < 0.0 || !rate.is_finite() {
-        return Err("hourly_rate must be a non-negative finite number".into());
+    if !rate.is_finite() {
+        return Err("Hodinová sazba musí být platné číslo".into());
+    }
+    if rate < 0.0 {
+        return Err("Hodinová sazba nesmí být záporná".into());
+    }
+    if rate > MAX_HOURLY_RATE {
+        return Err(format!(
+            "Hodinová sazba je příliš vysoká (max {MAX_HOURLY_RATE})"
+        ));
     }
     cache::settings::set(db, KEY_HOURLY_RATE, &rate.to_string()).map_err(|e| e.to_string())
 }
@@ -131,7 +152,7 @@ pub fn get_theme_inner(db: &Db) -> Result<String, String> {
 pub fn set_theme_inner(db: &Db, theme: &str) -> Result<(), String> {
     if !ALLOWED_THEMES.contains(&theme) {
         return Err(format!(
-            "invalid theme {theme:?}; expected one of {ALLOWED_THEMES:?}"
+            "Neplatný motiv {theme:?}; očekáváno {ALLOWED_THEMES:?}"
         ));
     }
     cache::settings::set(db, KEY_THEME, theme).map_err(|e| e.to_string())
@@ -149,7 +170,7 @@ pub fn get_font_size_inner(db: &Db) -> Result<String, String> {
 pub fn set_font_size_inner(db: &Db, size: &str) -> Result<(), String> {
     if !ALLOWED_FONT_SIZES.contains(&size) {
         return Err(format!(
-            "invalid font_size {size:?}; expected one of {ALLOWED_FONT_SIZES:?}"
+            "Neplatná velikost písma {size:?}; očekáváno {ALLOWED_FONT_SIZES:?}"
         ));
     }
     cache::settings::set(db, KEY_FONT_SIZE, size).map_err(|e| e.to_string())
@@ -167,7 +188,7 @@ pub fn get_density_inner(db: &Db) -> Result<String, String> {
 pub fn set_density_inner(db: &Db, density: &str) -> Result<(), String> {
     if !ALLOWED_DENSITIES.contains(&density) {
         return Err(format!(
-            "invalid density {density:?}; expected one of {ALLOWED_DENSITIES:?}"
+            "Neplatná hustota rozhraní {density:?}; očekáváno {ALLOWED_DENSITIES:?}"
         ));
     }
     cache::settings::set(db, KEY_DENSITY, density).map_err(|e| e.to_string())
@@ -185,7 +206,7 @@ pub fn get_accent_color_inner(db: &Db) -> Result<String, String> {
 pub fn set_accent_color_inner(db: &Db, accent: &str) -> Result<(), String> {
     if !ALLOWED_ACCENTS.contains(&accent) {
         return Err(format!(
-            "invalid accent {accent:?}; expected one of {ALLOWED_ACCENTS:?}"
+            "Neplatná barva zvýraznění {accent:?}; očekáváno {ALLOWED_ACCENTS:?}"
         ));
     }
     cache::settings::set(db, KEY_ACCENT, accent).map_err(|e| e.to_string())
@@ -203,7 +224,7 @@ pub fn get_currency_inner(db: &Db) -> Result<String, String> {
 pub fn set_currency_inner(db: &Db, currency: &str) -> Result<(), String> {
     if !ALLOWED_CURRENCIES.contains(&currency) {
         return Err(format!(
-            "invalid currency {currency:?}; expected one of {ALLOWED_CURRENCIES:?}"
+            "Neplatná měna {currency:?}; očekáváno {ALLOWED_CURRENCIES:?}"
         ));
     }
     cache::settings::set(db, KEY_CURRENCY, currency).map_err(|e| e.to_string())
@@ -221,7 +242,7 @@ pub fn get_palette_mode_inner(db: &Db) -> Result<String, String> {
 pub fn set_palette_mode_inner(db: &Db, mode: &str) -> Result<(), String> {
     if !ALLOWED_PALETTE_MODES.contains(&mode) {
         return Err(format!(
-            "invalid palette mode {mode:?}; expected one of {ALLOWED_PALETTE_MODES:?}"
+            "Neplatný režim palety {mode:?}; očekáváno {ALLOWED_PALETTE_MODES:?}"
         ));
     }
     cache::settings::set(db, KEY_PALETTE_MODE, mode).map_err(|e| e.to_string())
@@ -491,5 +512,87 @@ mod tests {
         assert!(!get_day_timeline_visible_inner(&db).unwrap());
         set_day_timeline_visible_inner(&db, true).unwrap();
         assert!(get_day_timeline_visible_inner(&db).unwrap());
+    }
+
+    // ------- Item 23: validation rejection tests -------
+
+    #[test]
+    fn set_hourly_rate_rejects_non_finite() {
+        let db = open_db();
+        assert!(set_hourly_rate_inner(&db, f64::INFINITY).is_err());
+        assert!(set_hourly_rate_inner(&db, f64::NEG_INFINITY).is_err());
+        assert!(set_hourly_rate_inner(&db, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn set_hourly_rate_rejects_negative() {
+        let db = open_db();
+        assert!(set_hourly_rate_inner(&db, -1.0).is_err());
+        assert!(set_hourly_rate_inner(&db, -0.0001).is_err());
+    }
+
+    #[test]
+    fn set_hourly_rate_rejects_too_large() {
+        let db = open_db();
+        assert!(set_hourly_rate_inner(&db, MAX_HOURLY_RATE + 0.01).is_err());
+        assert!(set_hourly_rate_inner(&db, 1e10).is_err());
+    }
+
+    #[test]
+    fn set_hourly_rate_accepts_valid_range() {
+        let db = open_db();
+        assert!(set_hourly_rate_inner(&db, 0.0).is_ok());
+        assert!(set_hourly_rate_inner(&db, 1500.0).is_ok());
+        assert!(set_hourly_rate_inner(&db, MAX_HOURLY_RATE).is_ok());
+    }
+
+    #[test]
+    fn set_daily_goal_rejects_out_of_range() {
+        let db = open_db();
+        // Below min (30 min)
+        assert!(set_daily_goal_inner(&db, 0).is_err());
+        assert!(set_daily_goal_inner(&db, 60).is_err());
+        // Above max (24 h)
+        assert!(set_daily_goal_inner(&db, 25 * 3600).is_err());
+        // Negative
+        assert!(set_daily_goal_inner(&db, -1).is_err());
+    }
+
+    #[test]
+    fn set_daily_goal_accepts_valid_range() {
+        let db = open_db();
+        assert!(set_daily_goal_inner(&db, MIN_DAILY_GOAL_SECONDS).is_ok());
+        assert!(set_daily_goal_inner(&db, 8 * 3600).is_ok());
+        assert!(set_daily_goal_inner(&db, MAX_DAILY_GOAL_SECONDS).is_ok());
+    }
+
+    #[test]
+    fn set_currency_rejects_invalid() {
+        let db = open_db();
+        assert!(set_currency_inner(&db, "XYZ").is_err());
+        assert!(set_currency_inner(&db, "").is_err());
+        assert!(set_currency_inner(&db, "czk").is_err()); // case sensitive
+    }
+
+    #[test]
+    fn set_currency_accepts_allowed() {
+        let db = open_db();
+        for c in ALLOWED_CURRENCIES {
+            assert!(set_currency_inner(&db, c).is_ok(), "{c} should be ok");
+        }
+    }
+
+    #[test]
+    fn set_theme_rejects_invalid() {
+        let db = open_db();
+        assert!(set_theme_inner(&db, "midnight").is_err());
+        assert!(set_theme_inner(&db, "").is_err());
+    }
+
+    #[test]
+    fn set_accent_rejects_unknown_palette() {
+        let db = open_db();
+        assert!(set_accent_color_inner(&db, "puce").is_err());
+        assert!(set_accent_color_inner(&db, "").is_err());
     }
 }

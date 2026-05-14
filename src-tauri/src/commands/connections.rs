@@ -54,6 +54,23 @@ pub struct ConnectionDto {
     pub has_token: bool,
 }
 
+/// Validate the optional JQL fields on a `JiraConnectionConfig`. Empty
+/// values are normalised away by the typed deserializer; non-empty values
+/// must pass the [`crate::validation::validate_jql`] checks (length, NUL).
+fn validate_jira_config(cfg: &JiraConnectionConfig) -> Result<(), String> {
+    if let Some(j) = &cfg.sync_jql {
+        if !j.trim().is_empty() {
+            crate::validation::validate_jql(j)?;
+        }
+    }
+    if let Some(j) = &cfg.my_issues_jql {
+        if !j.trim().is_empty() {
+            crate::validation::validate_jql(j)?;
+        }
+    }
+    Ok(())
+}
+
 impl ConnectionDto {
     pub fn from_row(row: ConnectionRow, has_token: bool) -> Self {
         let config: serde_json::Value =
@@ -118,6 +135,12 @@ pub async fn add_connection(
     if args.token.trim().is_empty() {
         return Err("Token nesmí být prázdný".into());
     }
+    // Best-effort: validate JQL fields if the config deserialises as Jira.
+    if args.provider == "jira" {
+        if let Ok(cfg) = serde_json::from_value::<JiraConnectionConfig>(args.config.clone()) {
+            validate_jira_config(&cfg)?;
+        }
+    }
     let config_json = serde_json::to_string(&args.config)
         .map_err(|e| format!("invalid config JSON: {e}"))?;
 
@@ -171,7 +194,12 @@ pub async fn update_connection(
     args: UpdateConnectionArgs,
 ) -> Result<ConnectionDto, String> {
     let cfg_str = match args.config {
-        Some(v) => Some(serde_json::to_string(&v).map_err(|e| e.to_string())?),
+        Some(v) => {
+            if let Ok(cfg) = serde_json::from_value::<JiraConnectionConfig>(v.clone()) {
+                validate_jira_config(&cfg)?;
+            }
+            Some(serde_json::to_string(&v).map_err(|e| e.to_string())?)
+        }
         None => None,
     };
     cache::connections::update_fields(

@@ -69,6 +69,9 @@ pub fn start_timer_inner(
 ) -> Result<ActiveTimerState, String> {
     // Normalise: trim whitespace; truly empty key is allowed (unassigned).
     let issue_key = issue_key.trim();
+    if !issue_key.is_empty() {
+        crate::validation::validate_issue_key(issue_key)?;
+    }
     let started_at_s = started_at_ms / 1000;
     let comment_norm = comment
         .map(|c| c.trim())
@@ -91,10 +94,8 @@ pub fn assign_active_timer_inner(
     issue_key: &str,
     now_ms: i64,
 ) -> Result<ActiveTimerState, String> {
+    crate::validation::validate_issue_key(issue_key)?;
     let issue_key = issue_key.trim();
-    if issue_key.is_empty() {
-        return Err("Klíč úkolu nesmí být prázdný".into());
-    }
     let current = cache::timer::get(db)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no active timer".to_string())?;

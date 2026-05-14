@@ -28,7 +28,9 @@ pub async fn set_working_week_mask(
     mask: i32,
 ) -> Result<(), String> {
     if !(0..=127).contains(&mask) {
-        return Err(format!("working_week_mask must be 0..=127, got {mask}"));
+        return Err(format!(
+            "Maska pracovních dnů musí být 0 až 127 (zadáno {mask})"
+        ));
     }
     cache::calendar::set_working_week_mask(&state.db, mask).map_err(|e| e.to_string())?;
     let _ = app.emit("prefs-changed", "working_week_mask");
@@ -59,7 +61,7 @@ pub async fn add_non_working_day(
 ) -> Result<(), String> {
     if !ALLOWED_REASONS.contains(&reason.as_str()) {
         return Err(format!(
-            "invalid reason {reason:?}; expected one of {ALLOWED_REASONS:?}"
+            "Neplatný důvod {reason:?}; očekáváno {ALLOWED_REASONS:?}"
         ));
     }
     let d = parse_date(&date)?;

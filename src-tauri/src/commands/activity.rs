@@ -68,7 +68,9 @@ pub async fn set_activity_threshold_min(
     min: i32,
 ) -> Result<(), String> {
     if !(1..=120).contains(&min) {
-        return Err(format!("threshold must be 1..=120, got {min}"));
+        return Err(format!(
+            "Práh nečinnosti musí být 1 až 120 minut (zadáno {min})"
+        ));
     }
     cache::activity::set_threshold_min(&state.db, min).map_err(|e| e.to_string())?;
     let _ = app.emit("prefs-changed", "activity_threshold_min");
