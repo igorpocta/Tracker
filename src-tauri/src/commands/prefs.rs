@@ -50,6 +50,8 @@ pub const DEFAULT_CURRENCY: &str = "CZK";
 /// Allowed ISO-4217 currency codes.
 pub const ALLOWED_CURRENCIES: &[&str] =
     &["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
+/// Default day timeline visibility — visible.
+pub const DEFAULT_DAY_TIMELINE_VISIBLE: bool = true;
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -61,6 +63,7 @@ const KEY_DENSITY: &str = "density";
 const KEY_ACCENT: &str = "accent_color";
 const KEY_CURRENCY: &str = "currency";
 const KEY_PALETTE_MODE: &str = "palette_mode";
+const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
 
 // -----------------------------------------------------------------------------
 // Inner (Tauri-free) helpers.
@@ -212,6 +215,24 @@ pub fn set_palette_mode_inner(db: &Db, mode: &str) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_PALETTE_MODE, mode).map_err(|e| e.to_string())
+}
+
+// ----- Day timeline visibility (Phase 14) -----
+
+pub fn get_day_timeline_visible_inner(db: &Db) -> Result<bool, String> {
+    match cache::settings::get(db, KEY_DAY_TIMELINE_VISIBLE).map_err(|e| e.to_string())? {
+        Some(v) => match v.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Ok(DEFAULT_DAY_TIMELINE_VISIBLE),
+        },
+        None => Ok(DEFAULT_DAY_TIMELINE_VISIBLE),
+    }
+}
+
+pub fn set_day_timeline_visible_inner(db: &Db, visible: bool) -> Result<(), String> {
+    let v = if visible { "true" } else { "false" };
+    cache::settings::set(db, KEY_DAY_TIMELINE_VISIBLE, v).map_err(|e| e.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -374,4 +395,53 @@ pub async fn set_palette_mode(
     set_palette_mode_inner(&state.db, &mode)?;
     let _ = app.emit("prefs-changed", "palette_mode");
     Ok(())
+}
+
+// ----- Day timeline visibility (Phase 14) -----
+
+#[tauri::command]
+pub async fn get_day_timeline_visible(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    get_day_timeline_visible_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_day_timeline_visible(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    visible: bool,
+) -> Result<(), String> {
+    set_day_timeline_visible_inner(&state.db, visible)?;
+    let _ = app.emit("prefs-changed", "day_timeline_visible");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn open_db() -> Db {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        // Leak the tempdir so the file outlives this helper; tests are short.
+        std::mem::forget(dir);
+        Db::open(&path).unwrap()
+    }
+
+    #[test]
+    fn day_timeline_visible_defaults_true() {
+        let db = open_db();
+        assert!(get_day_timeline_visible_inner(&db).unwrap());
+    }
+
+    #[test]
+    fn day_timeline_visible_round_trips() {
+        let db = open_db();
+        set_day_timeline_visible_inner(&db, false).unwrap();
+        assert!(!get_day_timeline_visible_inner(&db).unwrap());
+        set_day_timeline_visible_inner(&db, true).unwrap();
+        assert!(get_day_timeline_visible_inner(&db).unwrap());
+    }
 }
