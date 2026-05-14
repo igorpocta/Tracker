@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod db;
 pub mod migrations;
 pub mod issues;
