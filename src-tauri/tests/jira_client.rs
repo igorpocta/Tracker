@@ -3,12 +3,12 @@ use serde_json::{json, Value};
 use tempfile::TempDir;
 use tracker_lib::cache::Db;
 use tracker_lib::jira::{
-    adf::make_adf_comment,
+    adf::{extract_adf_text, make_adf_comment},
     jql::{escape_quoted, DEFAULT_JQL},
     models::{map_issue_to_row, JiraIssue},
     sync_issues_from_jira, JiraClient, JiraError,
 };
-use wiremock::matchers::{basic_auth, body_partial_json, header, method, path};
+use wiremock::matchers::{basic_auth, body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const EMAIL: &str = "alice@example.com";
@@ -413,4 +413,289 @@ async fn sync_issues_from_jira_walks_two_pages_into_sqlite() {
         .unwrap()
         .unwrap();
     assert_eq!(got.summary, "Page2 first");
+}
+
+// ---------- Phase 11A: ADF text extraction ----------
+
+#[test]
+fn extract_adf_text_handles_realistic_worklog_comment() {
+    let comment = json!({
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    { "type": "text", "text": "Fixed the " },
+                    { "type": "text", "text": "login", "marks": [{ "type": "strong" }] },
+                    { "type": "text", "text": " bug" }
+                ]
+            },
+            {
+                "type": "paragraph",
+                "content": [
+                    { "type": "text", "text": "Also added tests." }
+                ]
+            }
+        ]
+    });
+    let text = extract_adf_text(&comment);
+    // Should contain the words from both paragraphs.
+    assert!(text.contains("login"));
+    assert!(text.contains("bug"));
+    assert!(text.contains("Also added tests."));
+    // Paragraph break -> newline somewhere in the middle.
+    assert!(text.contains('\n'));
+}
+
+// ---------- Phase 11A: worklog endpoints ----------
+
+#[tokio::test]
+async fn worklog_updated_since_parses_page() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/worklog/updated"))
+        .and(basic_auth(EMAIL, TOKEN))
+        .and(query_param("since", "1700000000000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "values": [
+                { "worklogId": 1001, "updatedTime": 1700000001000_i64 },
+                { "worklogId": 1002, "updatedTime": 1700000002000_i64 }
+            ],
+            "lastPage": false,
+            "nextPage": "https://example.atlassian.net/rest/api/3/worklog/updated?since=1700000002000",
+            "since": 1700000000000_i64,
+            "until": 1700000002000_i64
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = client.worklog_updated_since(1_700_000_000_000).await.unwrap();
+    assert_eq!(page.values.len(), 2);
+    assert_eq!(page.values[0].worklog_id, 1001);
+    assert_eq!(page.values[1].worklog_id, 1002);
+    assert!(!page.last_page);
+    assert!(page.next_page.is_some());
+}
+
+#[tokio::test]
+async fn worklog_list_returns_details() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/worklog/list"))
+        .and(basic_auth(EMAIL, TOKEN))
+        .and(body_partial_json(json!({ "ids": [1001, 1002] })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": "1001",
+                "issueId": "20001",
+                "author": {
+                    "accountId": "user-a",
+                    "displayName": "Alice",
+                    "emailAddress": "alice@example.com"
+                },
+                "started": "2026-05-14T09:30:00.000+0000",
+                "timeSpentSeconds": 1800,
+                "comment": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        { "type": "paragraph", "content": [
+                            { "type": "text", "text": "Worked on it" }
+                        ]}
+                    ]
+                },
+                "updated": "2026-05-14T09:35:00.000+0000",
+                "created": "2026-05-14T09:35:00.000+0000"
+            },
+            {
+                "id": "1002",
+                "issueId": "20002",
+                "author": { "accountId": "user-b" },
+                "started": "2026-05-14T10:00:00.000+0000",
+                "timeSpentSeconds": 600,
+                "updated": "2026-05-14T10:05:00.000+0000",
+                "created": "2026-05-14T10:05:00.000+0000"
+            }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let worklogs = client.worklog_list(&[1001, 1002]).await.unwrap();
+    assert_eq!(worklogs.len(), 2);
+    assert_eq!(worklogs[0].id, "1001");
+    assert_eq!(worklogs[0].issue_id.as_deref(), Some("20001"));
+    assert_eq!(worklogs[0].author.account_id, "user-a");
+    assert_eq!(worklogs[0].time_spent_seconds, 1800);
+    assert!(worklogs[0].comment.is_some());
+    assert_eq!(worklogs[1].id, "1002");
+    assert!(worklogs[1].comment.is_none());
+}
+
+#[tokio::test]
+async fn issue_worklogs_paginates() {
+    let (server, client) = server_and_client().await;
+
+    // Page 2: startAt=2
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog"))
+        .and(query_param("startAt", "2"))
+        .and(query_param("maxResults", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "worklogs": [
+                {
+                    "id": "3",
+                    "author": { "accountId": "user-a" },
+                    "started": "2026-05-15T10:00:00.000+0000",
+                    "timeSpentSeconds": 300,
+                    "updated": "2026-05-15T10:05:00.000+0000",
+                    "created": "2026-05-15T10:05:00.000+0000"
+                }
+            ],
+            "total": 3,
+            "startAt": 2,
+            "maxResults": 2
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Page 1: startAt=0
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog"))
+        .and(query_param("startAt", "0"))
+        .and(query_param("maxResults", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "worklogs": [
+                {
+                    "id": "1",
+                    "author": { "accountId": "user-a" },
+                    "started": "2026-05-14T09:00:00.000+0000",
+                    "timeSpentSeconds": 1800,
+                    "updated": "2026-05-14T09:05:00.000+0000",
+                    "created": "2026-05-14T09:05:00.000+0000"
+                },
+                {
+                    "id": "2",
+                    "author": { "accountId": "user-b" },
+                    "started": "2026-05-14T10:00:00.000+0000",
+                    "timeSpentSeconds": 600,
+                    "updated": "2026-05-14T10:05:00.000+0000",
+                    "created": "2026-05-14T10:05:00.000+0000"
+                }
+            ],
+            "total": 3,
+            "startAt": 0,
+            "maxResults": 2
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page1 = client.issue_worklogs("ABC-1", 0, 2).await.unwrap();
+    assert_eq!(page1.total, 3);
+    assert_eq!(page1.worklogs.len(), 2);
+    assert_eq!(page1.start_at, 0);
+    assert_eq!(page1.max_results, 2);
+
+    let page2 = client.issue_worklogs("ABC-1", 2, 2).await.unwrap();
+    assert_eq!(page2.worklogs.len(), 1);
+    assert_eq!(page2.worklogs[0].id, "3");
+}
+
+// ---------- Phase 11A: worklog sync ----------
+
+#[tokio::test]
+async fn sync_worklogs_for_range_filters_by_user_and_range() {
+    use chrono::NaiveDate;
+    use tracker_lib::jira::worklog_sync::sync_worklogs_for_range;
+
+    let (server, client) = server_and_client().await;
+
+    // JQL search returns one issue.
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/search/jql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "ACME-1",
+                    "fields": {
+                        "summary": "Fix bug",
+                        "updated": "2026-05-14T09:00:00.000+0000"
+                    }
+                }
+            ],
+            "isLast": true
+        })))
+        .mount(&server)
+        .await;
+
+    // Per-issue worklog endpoint returns three worklogs:
+    //   - in range, by me -> KEEP
+    //   - in range, by someone else -> FILTER OUT
+    //   - by me but outside the range -> FILTER OUT
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/ACME-1/worklog"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "worklogs": [
+                {
+                    "id": "5001",
+                    "author": { "accountId": "me-acc" },
+                    "started": "2026-05-14T09:00:00.000+0000",
+                    "timeSpentSeconds": 1800,
+                    "comment": {
+                        "type": "doc", "version": 1,
+                        "content": [{ "type": "paragraph", "content": [
+                            { "type": "text", "text": "real work" }
+                        ]}]
+                    },
+                    "updated": "2026-05-14T09:30:00.000+0000",
+                    "created": "2026-05-14T09:30:00.000+0000"
+                },
+                {
+                    "id": "5002",
+                    "author": { "accountId": "other-acc" },
+                    "started": "2026-05-14T10:00:00.000+0000",
+                    "timeSpentSeconds": 900,
+                    "updated": "2026-05-14T10:30:00.000+0000",
+                    "created": "2026-05-14T10:30:00.000+0000"
+                },
+                {
+                    "id": "5003",
+                    "author": { "accountId": "me-acc" },
+                    "started": "2025-01-01T08:00:00.000+0000",
+                    "timeSpentSeconds": 600,
+                    "updated": "2025-01-01T08:30:00.000+0000",
+                    "created": "2025-01-01T08:30:00.000+0000"
+                }
+            ],
+            "total": 3,
+            "startAt": 0,
+            "maxResults": 1000
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(&dir.path().join("sync.db")).unwrap();
+
+    let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    let count = sync_worklogs_for_range(&client, &db, "me-acc", from, to)
+        .await
+        .expect("sync ok");
+    assert_eq!(count, 1, "exactly one entry should match");
+
+    // Verify the surviving worklog landed in the DB with the right shape.
+    let rows = tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc"))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.jira_worklog_id.as_deref(), Some("5001"));
+    assert_eq!(row.duration_s, 1800);
+    assert_eq!(row.source, "jira");
+    assert_eq!(row.comment.as_deref(), Some("real work"));
 }

@@ -6,7 +6,9 @@ use thiserror::Error;
 use url::Url;
 
 use super::adf::make_adf_comment;
-use super::models::{JiraUser, SearchPage, WorklogResponse};
+use super::models::{
+    IssueWorklogsPage, JiraUser, JiraWorklog, SearchPage, WorklogResponse, WorklogUpdatedPage,
+};
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -156,5 +158,73 @@ impl JiraClient {
             .await?;
         let resp = Self::check_status(resp).await?;
         Ok(resp.json::<WorklogResponse>().await?)
+    }
+
+    /// `GET /rest/api/3/worklog/updated?since={ms_epoch}` — list worklog ids
+    /// that have been created or modified since `since_ms` (Unix epoch in
+    /// milliseconds).
+    ///
+    /// Returns one page of `{ worklogId, updatedTime }`; the caller is
+    /// responsible for following `nextPage` if `lastPage == false`.
+    pub async fn worklog_updated_since(
+        &self,
+        since_ms: i64,
+    ) -> Result<WorklogUpdatedPage, JiraError> {
+        let mut url = self.url("/rest/api/3/worklog/updated")?;
+        url.query_pairs_mut()
+            .append_pair("since", &since_ms.to_string());
+
+        let resp = self
+            .http
+            .get(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<WorklogUpdatedPage>().await?)
+    }
+
+    /// `POST /rest/api/3/worklog/list` — fetch full worklog details for the
+    /// given ids. Jira's documented per-call max is 1000; callers should batch.
+    pub async fn worklog_list(&self, ids: &[i64]) -> Result<Vec<JiraWorklog>, JiraError> {
+        let url = self.url("/rest/api/3/worklog/list")?;
+        let body = json!({ "ids": ids });
+
+        let resp = self
+            .http
+            .post(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .json(&body)
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<Vec<JiraWorklog>>().await?)
+    }
+
+    /// `GET /rest/api/3/issue/{key}/worklog?startAt=N&maxResults=M` —
+    /// paginate over the full worklog list for a single issue.
+    ///
+    /// Note: the worklogs returned by this endpoint do **not** populate the
+    /// `issueId` field on each entry (it's known from the URL). Callers that
+    /// need `issueId` should set it from the corresponding issue.
+    pub async fn issue_worklogs(
+        &self,
+        issue_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<IssueWorklogsPage, JiraError> {
+        let mut url = self.url(&format!("/rest/api/3/issue/{issue_key}/worklog"))?;
+        url.query_pairs_mut()
+            .append_pair("startAt", &start_at.to_string())
+            .append_pair("maxResults", &max_results.to_string());
+
+        let resp = self
+            .http
+            .get(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<IssueWorklogsPage>().await?)
     }
 }

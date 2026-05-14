@@ -11,13 +11,15 @@ pub mod adf;
 pub mod client;
 pub mod jql;
 pub mod models;
+pub mod worklog_sync;
 
-pub use adf::make_adf_comment;
+pub use adf::{extract_adf_text, make_adf_comment};
 pub use client::{JiraClient, JiraError};
 pub use jql::DEFAULT_JQL;
 pub use models::{
-    map_issue_to_row, JiraIssue, JiraIssueFields, JiraUser, SearchPage, WorklogRequest,
-    WorklogResponse,
+    map_issue_to_row, IssueWorklogsPage, JiraIssue, JiraIssueFields, JiraUser, JiraWorklog,
+    JiraWorklogAuthor, SearchPage, WorklogRequest, WorklogResponse, WorklogUpdatedEntry,
+    WorklogUpdatedPage,
 };
 
 use crate::cache::{self, Db};

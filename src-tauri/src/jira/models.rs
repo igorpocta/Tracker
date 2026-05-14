@@ -149,6 +149,85 @@ pub struct WorklogResponse {
     pub started: Option<String>,
 }
 
+/// Author block on a `JiraWorklog`. We tolerate missing `displayName` /
+/// `emailAddress` because Jira can elide them for restricted accounts.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JiraWorklogAuthor {
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    #[serde(default, rename = "displayName")]
+    pub display_name: Option<String>,
+    #[serde(default, rename = "emailAddress")]
+    pub email_address: Option<String>,
+}
+
+/// A worklog entry as returned by `/rest/api/3/worklog/list` or
+/// `/rest/api/3/issue/{key}/worklog`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JiraWorklog {
+    pub id: String,
+    /// Numeric issue id; populated by `/worklog/list`, **not** by
+    /// `/issue/{key}/worklog`.
+    #[serde(default, rename = "issueId")]
+    pub issue_id: Option<String>,
+    pub author: JiraWorklogAuthor,
+    /// ISO 8601 with milliseconds and offset, e.g. `2026-05-14T09:30:00.000+0000`.
+    pub started: String,
+    #[serde(rename = "timeSpentSeconds")]
+    pub time_spent_seconds: i64,
+    /// ADF document; use [`crate::jira::adf::extract_adf_text`] to flatten.
+    #[serde(default)]
+    pub comment: Option<Value>,
+    #[serde(default)]
+    pub updated: String,
+    #[serde(default)]
+    pub created: String,
+}
+
+/// One entry in the `values` array of `GET /rest/api/3/worklog/updated`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorklogUpdatedEntry {
+    #[serde(rename = "worklogId")]
+    pub worklog_id: i64,
+    #[serde(default, rename = "updatedTime")]
+    pub updated_time: Option<i64>,
+}
+
+/// `GET /rest/api/3/worklog/updated` response.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorklogUpdatedPage {
+    #[serde(default)]
+    pub values: Vec<WorklogUpdatedEntry>,
+    #[serde(default, rename = "lastPage")]
+    pub last_page: bool,
+    #[serde(default, rename = "nextPage")]
+    pub next_page: Option<String>,
+    #[serde(default)]
+    pub since: i64,
+    #[serde(default)]
+    pub until: i64,
+}
+
+/// `GET /rest/api/3/issue/{key}/worklog` response.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IssueWorklogsPage {
+    #[serde(default)]
+    pub worklogs: Vec<JiraWorklog>,
+    #[serde(default)]
+    pub total: u32,
+    #[serde(default, rename = "startAt")]
+    pub start_at: u32,
+    #[serde(default, rename = "maxResults")]
+    pub max_results: u32,
+}
+
+/// Parse a Jira `started` / `updated` / `created` timestamp into a Unix
+/// second. Re-exported here as a public helper because `parse_jira_timestamp`
+/// is otherwise module-private.
+pub fn parse_jira_timestamp_public(s: &str) -> Option<i64> {
+    parse_jira_timestamp(s)
+}
+
 /// Parse Jira's timestamp formats into a Unix second.
 ///
 /// Jira emits times like `"2026-05-14T09:30:00.000+0000"` (no colon in the
