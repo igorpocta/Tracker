@@ -37,10 +37,10 @@ export function WeekSparkline({ rows, selected, onSelect }: WeekSparklineProps) 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
           This week
         </h3>
-        <span className="text-xs text-neutral-300 font-mono tabular-nums">
+        <span className="text-xs text-[var(--text-primary)] font-mono tabular-nums">
           {formatDurationShort(weekTotal)}
         </span>
       </div>
@@ -59,12 +59,12 @@ export function WeekSparkline({ rows, selected, onSelect }: WeekSparklineProps) 
               <div className="w-full h-12 flex items-end">
                 <div
                   className={clsx(
-                    "w-full rounded-t transition-colors",
+                    "w-full rounded-t transition-colors duration-150",
                     totals[i] === 0
-                      ? "bg-neutral-800"
+                      ? "bg-[var(--bg-active)]"
                       : isSel
-                        ? "bg-sky-400"
-                        : "bg-sky-600/70 group-hover:bg-sky-500",
+                        ? "bg-[var(--accent)]"
+                        : "bg-[var(--accent)]/55 group-hover:bg-[var(--accent)]/80",
                   )}
                   style={{
                     height: `${Math.max(3, Math.floor(ratio * 100))}%`,
@@ -74,7 +74,7 @@ export function WeekSparkline({ rows, selected, onSelect }: WeekSparklineProps) 
               <span
                 className={clsx(
                   "text-[10px] uppercase tracking-tight",
-                  isSel ? "text-sky-300" : "text-neutral-500",
+                  isSel ? "text-[var(--accent)]" : "text-[var(--text-tertiary)]",
                 )}
               >
                 {weekdayShort(d)}

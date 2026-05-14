@@ -67,31 +67,31 @@ export function DayPicker({
               data-from={dayStartUnixS(d)}
               data-to={dayEndUnixS(d)}
               className={clsx(
-                "w-full text-left rounded-md px-2.5 py-1.5 transition-colors flex items-center gap-2",
+                "w-full text-left rounded-[var(--radius-sm)] px-2.5 py-1.5 transition-colors duration-150 flex items-center gap-2",
                 isSelected
-                  ? "bg-sky-600/15 ring-1 ring-sky-500/30 text-white"
-                  : "hover:bg-neutral-800/60 text-neutral-200",
+                  ? "bg-[var(--accent-soft)] text-[var(--text-primary)]"
+                  : "hover:bg-[var(--bg-hover)] text-[var(--text-primary)]",
               )}
             >
               <div className="flex-1 min-w-0">
                 <div className="text-xs">
                   {isToday ? (
-                    <span className="text-sky-300 font-medium">Today</span>
+                    <span className="text-[var(--accent)] font-medium">Today</span>
                   ) : idx === 1 ? (
-                    "Yesterday"
+                    <span className="text-[var(--text-primary)]">Yesterday</span>
                   ) : (
-                    formatShortDayLabel(d)
+                    <span className="text-[var(--text-primary)]">{formatShortDayLabel(d)}</span>
                   )}
                 </div>
-                <div className="text-[10px] text-neutral-500 font-mono tabular-nums">
+                <div className="text-[10px] text-[var(--text-tertiary)] font-mono tabular-nums">
                   {total > 0 ? formatDurationShort(total) : "—"}
                 </div>
               </div>
-              <div className="w-12 h-1.5 rounded-full bg-neutral-800 overflow-hidden shrink-0">
+              <div className="w-12 h-1 rounded-full bg-[var(--bg-active)] overflow-hidden shrink-0">
                 <div
                   className={clsx(
-                    "h-full transition-all",
-                    isSelected ? "bg-sky-400" : "bg-neutral-600",
+                    "h-full transition-all duration-200",
+                    isSelected ? "bg-[var(--accent)]" : "bg-[var(--text-disabled)]",
                   )}
                   style={{ width: `${(ratio * 100).toFixed(1)}%` }}
                 />

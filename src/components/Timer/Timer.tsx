@@ -2,6 +2,9 @@
  * Big live-ticking timer display. Reads `elapsed_seconds` from the timer
  * store and recomputes against `useNow()` every second so the display
  * never drifts more than ~16ms from the wall clock.
+ *
+ * When running, the digits are accent-tinted. When idle, they're a quiet
+ * gray with an em-dash placeholder.
  */
 import { clsx } from "clsx";
 
@@ -23,8 +26,8 @@ export function Timer({ className }: TimerProps) {
   return (
     <div
       className={clsx(
-        "font-mono tabular-nums leading-none",
-        running ? "text-white" : "text-neutral-600",
+        "font-mono tabular-nums leading-none tracking-tight font-light",
+        running ? "text-[var(--accent)]" : "text-[var(--text-disabled)]",
         className,
       )}
       aria-live="polite"

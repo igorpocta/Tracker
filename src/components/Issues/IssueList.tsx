@@ -39,22 +39,22 @@ export function IssueList({
   return (
     <section className={clsx("flex flex-col gap-1", className)}>
       <header className="flex items-center gap-1.5 px-2 mb-1">
-        {icon && <span className="text-neutral-500">{icon}</span>}
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+        {icon && <span className="text-[var(--text-tertiary)]">{icon}</span>}
+        <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
           {title}
         </h2>
         {!loading && issues.length > 0 && (
-          <span className="text-[10px] text-neutral-500 ml-auto">
+          <span className="text-[10px] text-[var(--text-tertiary)] ml-auto font-mono tabular-nums">
             {issues.length}
           </span>
         )}
-        {loading && <Spinner className="w-3 h-3 ml-auto text-neutral-500" />}
+        {loading && <Spinner className="w-3 h-3 ml-auto text-[var(--text-tertiary)]" />}
       </header>
 
       {loading && issues.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-neutral-500">Loading…</div>
+        <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">Loading…</div>
       ) : issues.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-neutral-500">{emptyMessage}</div>
+        <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">{emptyMessage}</div>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {issues.map((i) => (

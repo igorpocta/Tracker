@@ -22,7 +22,7 @@ export function CommentInput({
 }: CommentInputProps) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-xs font-medium text-neutral-300">
+      <label htmlFor={id} className="text-xs font-medium text-[var(--text-secondary)]">
         Comment
       </label>
       <textarea
@@ -34,7 +34,11 @@ export function CommentInput({
         placeholder={placeholder}
         disabled={disabled}
         rows={3}
-        className="px-3 py-2 rounded-md bg-neutral-950 border border-neutral-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm resize-y min-h-[72px] max-h-[200px] disabled:opacity-50"
+        className="px-3 py-2 rounded-[var(--radius-md)]
+                   bg-transparent border border-[var(--border-default)]
+                   focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]
+                   text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]
+                   resize-y min-h-[72px] max-h-[200px] disabled:opacity-50 transition-colors duration-150"
       />
     </div>
   );

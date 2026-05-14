@@ -25,7 +25,7 @@ export function WorklogHistory({ limit = 50 }: WorklogHistoryProps) {
 
   if (query.isLoading) {
     return (
-      <div className="flex items-center justify-center py-6 text-neutral-500">
+      <div className="flex items-center justify-center py-6 text-[var(--text-tertiary)]">
         <Spinner className="w-4 h-4 mr-2" />
         Loading worklog history…
       </div>
@@ -35,7 +35,7 @@ export function WorklogHistory({ limit = 50 }: WorklogHistoryProps) {
   const rows = query.data ?? [];
   if (rows.length === 0) {
     return (
-      <div className="text-sm text-neutral-500 py-8 text-center">
+      <div className="text-sm text-[var(--text-tertiary)] py-8 text-center">
         No worklogs yet. Start a timer to log your first one.
       </div>
     );

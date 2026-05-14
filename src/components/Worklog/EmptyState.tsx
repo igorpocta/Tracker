@@ -1,7 +1,7 @@
 /**
  * Friendly empty-state placeholder used across worklog lists.
  *
- * Uses an inline SVG illustration so we don't have to ship a separate asset.
+ * Restrained: a small clock-face glyph, a single line of text, optional CTA.
  */
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
@@ -23,38 +23,37 @@ export function EmptyState({
   return (
     <div
       className={clsx(
-        "flex flex-col items-center justify-center text-center py-10 px-6 text-neutral-400 gap-3",
+        "flex flex-col items-center justify-center text-center py-10 px-6 gap-3",
         className,
       )}
     >
       <svg
         aria-hidden
         viewBox="0 0 64 64"
-        width="56"
-        height="56"
-        className="text-neutral-700"
+        width="40"
+        height="40"
+        className="text-[var(--text-disabled)]"
       >
-        <circle cx="32" cy="32" r="28" fill="currentColor" opacity="0.25" />
         <circle
           cx="32"
           cy="32"
           r="20"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.5"
         />
         <path
-          d="M32 18v14l10 6"
+          d="M32 20v12l8 5"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="1.5"
           strokeLinecap="round"
           fill="none"
         />
       </svg>
       <div>
-        <h3 className="text-sm font-medium text-neutral-200">{title}</h3>
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">{title}</h3>
         {description && (
-          <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+          <p className="text-xs text-[var(--text-tertiary)] mt-1 max-w-sm mx-auto">
             {description}
           </p>
         )}

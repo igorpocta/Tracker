@@ -66,25 +66,25 @@ export function StopDialog({
       role="dialog"
       aria-modal="true"
       aria-label="Stop timer"
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+      className="fixed inset-0 z-50 bg-[var(--bg-overlay)] backdrop-blur-sm flex items-center justify-center p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl w-full max-w-md p-5 flex flex-col gap-4">
+      <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-md p-5 flex flex-col gap-4">
         <header>
-          <h2 className="text-base font-semibold">Stop & save worklog</h2>
-          <p className="text-xs text-neutral-400 mt-0.5">
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Stop & save worklog</h2>
+          <p className="text-xs text-[var(--text-secondary)] mt-0.5">
             <span className="font-mono">{active.issue_key}</span>
           </p>
         </header>
 
         <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-mono tabular-nums">
+          <span className="text-3xl font-mono tabular-nums text-[var(--text-primary)]">
             {formatDuration(stagedElapsed)}
           </span>
           {startChanged && (
-            <span className="text-[10px] uppercase tracking-wide text-amber-400">
+            <span className="text-[10px] uppercase tracking-wide text-[var(--warning)]">
               edited
             </span>
           )}
@@ -100,7 +100,7 @@ export function StopDialog({
           <button
             type="button"
             onClick={() => setShowStartEditor(true)}
-            className="self-start text-xs text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
+            className="self-start text-xs text-[var(--accent)] hover:underline underline-offset-2"
           >
             Edit start time
           </button>

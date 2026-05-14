@@ -1,12 +1,11 @@
 /**
- * Compact worklog row showing the clock-time range, issue key + summary,
- * comment snippet, duration, and a "synced to Jira" badge.
+ * Compact worklog row: clock-time range, issue key + summary, comment snippet,
+ * duration, and a small sync dot.
  *
- * Used by Today, History, and (subset of) Reports. The `density` body class
- * adjusts vertical padding so the same component reads well in both modes.
+ * No bright statuses — the sync dot is a subtle neutral mark; an accent-tinted
+ * dot only flags rows that are pending local sync (no jira_worklog_id).
  */
 import { clsx } from "clsx";
-import { CheckCircle2, CircleSlash } from "lucide-react";
 
 import type { WorklogRow as Worklog } from "../../api/types";
 import {
@@ -16,7 +15,7 @@ import {
 
 export interface WorklogRowProps {
   row: Worklog;
-  /** Highlight rows where the timer was still running when the row was logged. */
+  /** Highlight rows where the timer is still running for this issue. */
   highlight?: boolean;
 }
 
@@ -28,53 +27,50 @@ export function WorklogRow({ row, highlight = false }: WorklogRowProps) {
   return (
     <li
       className={clsx(
-        "worklog-row group rounded-md px-3 border border-transparent flex items-start gap-3",
+        "worklog-row group rounded-[var(--radius-sm)] px-3 border border-transparent flex items-start gap-3 transition-colors duration-150",
         highlight
-          ? "bg-emerald-600/5 border-emerald-700/30"
-          : "hover:bg-neutral-800/50 hover:border-neutral-800",
+          ? "bg-[var(--accent-soft)]"
+          : "hover:bg-[var(--bg-hover)]",
       )}
     >
       <div
-        className="mt-1 shrink-0"
+        className="mt-2 shrink-0"
         title={synced ? "Synced to Jira" : "Saved locally, not synced"}
+        aria-label={synced ? "Synced to Jira" : "Local only"}
       >
-        {synced ? (
-          <CheckCircle2
-            className="w-3.5 h-3.5 text-emerald-400"
-            aria-label="Synced to Jira"
-          />
-        ) : (
-          <CircleSlash
-            className="w-3.5 h-3.5 text-amber-400"
-            aria-label="Local only"
-          />
-        )}
+        <span
+          aria-hidden
+          className={clsx(
+            "block w-1.5 h-1.5 rounded-full",
+            synced ? "bg-[var(--text-disabled)]" : "bg-[var(--accent)]",
+          )}
+        />
       </div>
 
-      <div className="shrink-0 font-mono tabular-nums text-[11px] text-neutral-400 w-[88px] mt-0.5">
+      <div className="shrink-0 font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] w-[88px] mt-0.5">
         {formatClockTime(startedMs)}–{formatClockTime(endedMs)}
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-[11px] text-neutral-400 shrink-0">
+          <span className="font-mono text-[11px] uppercase text-[var(--text-secondary)] shrink-0">
             {row.issue_key}
           </span>
           {row.summary && (
-            <span className="text-xs text-neutral-200 truncate">
+            <span className="text-xs text-[var(--text-primary)] truncate">
               {row.summary}
             </span>
           )}
         </div>
         {row.comment && (
-          <p className="text-xs text-neutral-400 mt-0.5 line-clamp-2">
+          <p className="text-xs text-[var(--text-tertiary)] mt-0.5 line-clamp-2">
             {row.comment}
           </p>
         )}
       </div>
 
       <div className="text-right shrink-0">
-        <div className="font-mono text-xs text-neutral-100">
+        <div className="font-mono tabular-nums text-xs text-[var(--text-primary)]">
           {formatDurationShort(row.duration_s)}
         </div>
       </div>

@@ -53,7 +53,7 @@ export function StartTimeEditor({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="text-xs font-medium text-neutral-300">Started at</div>
+      <div className="text-xs font-medium text-[var(--text-secondary)]">Started at</div>
       <div className="flex items-center gap-2 flex-wrap">
         <IconButton
           aria-label="Subtract 5 minutes"
@@ -79,9 +79,11 @@ export function StartTimeEditor({
           aria-label="Start time"
           value={timeValue}
           onChange={(e) => onTimeInput(e.target.value)}
-          className="px-2 py-1 rounded-md bg-neutral-950 border border-neutral-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm font-mono"
+          className="px-2 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)]
+                     focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]
+                     text-sm font-mono text-[var(--text-primary)] transition-colors duration-150"
         />
-        <span className="text-xs text-neutral-500">
+        <span className="text-xs text-[var(--text-tertiary)]">
           ({formatClockTime(startedAtMs)})
         </span>
 

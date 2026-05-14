@@ -1,10 +1,8 @@
 /**
  * Daily progress bar: how much of today's goal the user has logged.
  *
- * The "logged" value is computed by the parent (typically by summing
- * today's worklogs + current running timer's elapsed). The bar fills
- * proportionally; once we exceed the goal the bar caps at 100% but the
- * label keeps growing ("9h 15m / 8h").
+ * Bar fills proportionally — the accent color until the goal is reached, then
+ * the success color. The label keeps growing ("9h 15m / 8h") past goal.
  */
 import { clsx } from "clsx";
 
@@ -29,18 +27,18 @@ export function DailyGoalBar({
   const reached = ratio >= 1;
 
   return (
-    <div className={clsx("flex flex-col gap-1", className)}>
+    <div className={clsx("flex flex-col gap-1.5", className)}>
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-neutral-400">Today</span>
-        <span className="font-mono tabular-nums text-neutral-200">
+        <span className="text-[var(--text-tertiary)]">Today</span>
+        <span className="font-mono tabular-nums text-[var(--text-primary)]">
           {formatDurationShort(loggedSeconds)}{" "}
-          <span className="text-neutral-500">
+          <span className="text-[var(--text-tertiary)]">
             / {formatDurationShort(goalSeconds)}
           </span>
         </span>
       </div>
       <div
-        className="h-2 rounded-full bg-neutral-800 overflow-hidden"
+        className="h-1.5 rounded-full bg-[var(--bg-active)] overflow-hidden"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={goalSeconds}
@@ -49,8 +47,8 @@ export function DailyGoalBar({
       >
         <div
           className={clsx(
-            "h-full transition-all",
-            reached ? "bg-emerald-500" : "bg-sky-500",
+            "h-full transition-all duration-200 ease-out",
+            reached ? "bg-[var(--success)]" : "bg-[var(--accent)]",
           )}
           style={{ width: `${(clamped * 100).toFixed(1)}%` }}
         />

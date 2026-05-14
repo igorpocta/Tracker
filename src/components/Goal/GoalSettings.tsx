@@ -68,12 +68,12 @@ export function GoalSettings({ open, onClose }: GoalSettingsProps) {
 
   return (
     <div
-      className="border border-neutral-800 bg-neutral-900/95 rounded-lg p-3 flex flex-col gap-3"
+      className="border border-[var(--border-subtle)] bg-[var(--bg-elevated)] rounded-[var(--radius-md)] p-3 flex flex-col gap-3"
       role="dialog"
       aria-label="Daily goal settings"
     >
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="goal-hours" className="text-xs font-medium text-neutral-300">
+        <label htmlFor="goal-hours" className="text-xs font-medium text-[var(--text-secondary)]">
           Daily goal (hours)
         </label>
         <input
@@ -83,14 +83,16 @@ export function GoalSettings({ open, onClose }: GoalSettingsProps) {
           value={hours}
           onChange={(e) => setHours(e.target.value)}
           autoFocus
-          className="px-2.5 py-1.5 rounded-md bg-neutral-950 border border-neutral-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm w-24"
+          className="px-2.5 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)]
+                     focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]
+                     text-sm text-[var(--text-primary)] w-24 transition-colors duration-150"
         />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="goal-rate" className="text-xs font-medium text-neutral-300">
+        <label htmlFor="goal-rate" className="text-xs font-medium text-[var(--text-secondary)]">
           Hourly rate
-          <span className="text-neutral-500 font-normal ml-1.5">
+          <span className="text-[var(--text-tertiary)] font-normal ml-1.5">
             (0 to hide)
           </span>
         </label>
@@ -100,12 +102,14 @@ export function GoalSettings({ open, onClose }: GoalSettingsProps) {
           inputMode="decimal"
           value={rate}
           onChange={(e) => setRate(e.target.value)}
-          className="px-2.5 py-1.5 rounded-md bg-neutral-950 border border-neutral-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm w-32"
+          className="px-2.5 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)]
+                     focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]
+                     text-sm text-[var(--text-primary)] w-32 transition-colors duration-150"
         />
       </div>
 
       {error && (
-        <p role="alert" className="text-xs text-red-400">
+        <p role="alert" className="text-xs text-[var(--danger)]">
           {error}
         </p>
       )}

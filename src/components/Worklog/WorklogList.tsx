@@ -28,7 +28,7 @@ export function WorklogList({
 }: WorklogListProps) {
   if (loading && (!rows || rows.length === 0)) {
     return (
-      <div className="flex items-center justify-center py-8 text-neutral-500 gap-2">
+      <div className="flex items-center justify-center py-8 text-[var(--text-tertiary)] gap-2">
         <Spinner className="w-4 h-4" />
         <span className="text-xs">Loading worklogs…</span>
       </div>
