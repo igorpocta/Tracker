@@ -38,7 +38,7 @@ export default function Connection() {
     <div className="flex flex-col gap-4 max-w-xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Connections Setup
+          Připojení
         </h2>
       </header>
 
@@ -72,7 +72,7 @@ export default function Connection() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              aria-label="Edit connection"
+              aria-label="Upravit připojení"
               className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                          transition-colors duration-150"
             >
@@ -81,7 +81,7 @@ export default function Connection() {
             <button
               type="button"
               onClick={() => cfgQ.refetch()}
-              aria-label="Refresh connection"
+              aria-label="Obnovit připojení"
               className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                          transition-colors duration-150"
             >
@@ -107,7 +107,7 @@ export default function Connection() {
                      text-[var(--text-tertiary)] opacity-70 cursor-not-allowed"
         >
           <Lock className="w-4 h-4" aria-hidden />
-          <span className="text-sm">Add new connection</span>
+          <span className="text-sm">Přidat nové připojení</span>
         </div>
       </div>
 
@@ -123,7 +123,7 @@ export default function Connection() {
         className="self-start text-[11px] text-[var(--text-tertiary)] hover:text-[var(--danger)]
                    transition-colors duration-150"
       >
-        Sign out and disconnect
+        Odhlásit a odpojit
       </button>
     </div>
   );
@@ -184,7 +184,7 @@ function EditCard({
                      hover:bg-[var(--accent-hover)] transition-colors duration-150
                      disabled:opacity-60"
         >
-          Save changes
+          Uložit změny
         </button>
         <button
           type="button"
@@ -193,7 +193,7 @@ function EditCard({
                      border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]
                      hover:bg-[var(--bg-hover)] transition-colors duration-150"
         >
-          Cancel
+          Zrušit
         </button>
       </div>
     </div>
@@ -207,7 +207,7 @@ const inputCls =
   "transition-colors duration-150";
 
 function displayNameFromEmail(email: string): string {
-  if (!email) return "Not signed in";
+  if (!email) return "Nepřipojeno";
   const [local] = email.split("@");
   if (!local) return email;
   return local

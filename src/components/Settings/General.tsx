@@ -1,44 +1,42 @@
 /**
- * Settings → General.
+ * Settings → Obecné (General).
  *
- * Reference: `screens/SCR-20260514-rjhq-2.png`.
+ *   Časová osa dne     [ Viditelná ●● ] [ Skrytá ── ]
+ *   Styl zadávání času ( ) Koncový čas  ( ) Trvání
+ *   Interval automatické re-indexace [ Každou hodinu ▾ ]
  *
- *   Day timeline   [ Visible ●● ] [ Hidden ── ]
- *   Time input style   ( ) End time  ( ) Duration
- *   Auto re-index interval   [ Every hour ▾ ]
- *
- * The day-timeline toggle and time-input style are local UI prefs persisted
- * via `localStorage` (no backend roundtrip required for personal opinions
- * that don't need to sync across windows). The re-index interval is the
- * standard pref.
+ * Day-timeline visibility is now backend-backed (Phase 14) and read through
+ * the prefs store; this directly drives whether `<DayTimeline>` renders on
+ * the Time Log route. The other two opinions remain local-only in
+ * `localStorage` until we have a real need to sync them across windows.
  */
 import { useEffect, useState } from "react";
 
-const LS_TIMELINE_KEY = "tracker.dayTimeline";
+import { usePrefsStore } from "../../stores/prefsStore";
+
 const LS_TIME_INPUT_KEY = "tracker.timeInput";
 const LS_REINDEX_KEY = "tracker.reindexInterval";
 
-export type TimelineVisibility = "visible" | "hidden";
 export type TimeInputStyle = "end" | "duration";
 export type ReindexInterval = "manual" | "15m" | "1h" | "4h" | "daily";
 
 const REINDEX_LABEL: Record<ReindexInterval, string> = {
-  manual: "Manual only",
-  "15m": "Every 15 minutes",
-  "1h": "Every hour",
-  "4h": "Every 4 hours",
-  daily: "Once a day",
+  manual: "Pouze ručně",
+  "15m": "Každých 15 minut",
+  "1h": "Každou hodinu",
+  "4h": "Každé 4 hodiny",
+  daily: "Jednou denně",
 };
 
 export default function General() {
-  const [timeline, setTimeline] = useState<TimelineVisibility>("visible");
+  const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
+  const setDayTimelineVisible = usePrefsStore((s) => s.setDayTimelineVisible);
+
   const [timeInput, setTimeInput] = useState<TimeInputStyle>("end");
   const [reindex, setReindex] = useState<ReindexInterval>("1h");
 
   useEffect(() => {
     try {
-      const tl = window.localStorage.getItem(LS_TIMELINE_KEY);
-      if (tl === "visible" || tl === "hidden") setTimeline(tl);
       const ti = window.localStorage.getItem(LS_TIME_INPUT_KEY);
       if (ti === "end" || ti === "duration") setTimeInput(ti);
       const r = window.localStorage.getItem(LS_REINDEX_KEY);
@@ -50,14 +48,6 @@ export default function General() {
     }
   }, []);
 
-  const updateTimeline = (v: TimelineVisibility) => {
-    setTimeline(v);
-    try {
-      window.localStorage.setItem(LS_TIMELINE_KEY, v);
-    } catch {
-      /* ignore */
-    }
-  };
   const updateTimeInput = (v: TimeInputStyle) => {
     setTimeInput(v);
     try {
@@ -79,26 +69,26 @@ export default function General() {
     <div className="flex flex-col gap-8 max-w-xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          General
+          Obecné
         </h2>
       </header>
 
       <Section
-        title="Day timeline"
-        description="Show or hide the visual day timeline above the entry rows."
+        title="Časová osa dne"
+        description="Zobrazit nebo skrýt vizuální časovou osu nad záznamy."
       >
         <div className="grid grid-cols-2 gap-3">
           <ToggleCard
-            label="Visible"
-            active={timeline === "visible"}
-            onClick={() => updateTimeline("visible")}
+            label="Viditelná"
+            active={dayTimelineVisible}
+            onClick={() => void setDayTimelineVisible(true)}
           >
             <TimelinePreview filled />
           </ToggleCard>
           <ToggleCard
-            label="Hidden"
-            active={timeline === "hidden"}
-            onClick={() => updateTimeline("hidden")}
+            label="Skrytá"
+            active={!dayTimelineVisible}
+            onClick={() => void setDayTimelineVisible(false)}
           >
             <TimelinePreview filled={false} />
           </ToggleCard>
@@ -106,17 +96,17 @@ export default function General() {
       </Section>
 
       <Section
-        title="Time input style"
-        description="When adding an entry, choose whether you prefer to set an end time or a duration."
+        title="Styl zadávání času"
+        description="Při přidávání záznamu zvolte, jestli preferujete nastavit koncový čas nebo trvání."
       >
         <div className="flex flex-col gap-2">
           <RadioRow
-            label="End time — pick when the work ended"
+            label="Koncový čas — vyberte, kdy práce skončila"
             checked={timeInput === "end"}
             onChange={() => updateTimeInput("end")}
           />
           <RadioRow
-            label="Duration — enter the number of minutes"
+            label="Trvání — zadejte počet minut"
             checked={timeInput === "duration"}
             onChange={() => updateTimeInput("duration")}
           />
@@ -124,8 +114,8 @@ export default function General() {
       </Section>
 
       <Section
-        title="Auto re-index interval"
-        description="How often Jira issues are automatically re-indexed in the background."
+        title="Interval automatické re-indexace"
+        description="Jak často se na pozadí automaticky reindexují úkoly z Jiry."
       >
         <select
           value={reindex}
@@ -142,8 +132,8 @@ export default function General() {
           ))}
         </select>
         <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          You can also re-index anytime by clicking the index icon in the sidebar
-          or pressing{" "}
+          Reindexovat můžete také kdykoli ručně kliknutím na ikonu v liště nebo
+          stisknutím{" "}
           <kbd className="font-mono px-1 rounded bg-[var(--bg-hover)]">⌘I</kbd>.
         </p>
       </Section>

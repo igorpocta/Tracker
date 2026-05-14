@@ -12,7 +12,7 @@ export default function Extensions() {
     <div className="flex flex-col gap-6 max-w-xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Extensions
+          Rozšíření
         </h2>
       </header>
 
@@ -25,10 +25,10 @@ export default function Extensions() {
           aria-hidden
         />
         <h3 className="mt-3 text-sm font-medium text-[var(--text-primary)]">
-          No extensions installed
+          Žádná rozšíření nejsou nainstalována
         </h3>
         <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-          When you install browser or editor companions, they'll appear here.
+          Až nainstalujete rozšíření do prohlížeče nebo editoru, objeví se zde.
         </p>
       </div>
     </div>

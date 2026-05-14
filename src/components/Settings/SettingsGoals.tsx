@@ -23,14 +23,14 @@ export default function SettingsGoals() {
     <div className="flex flex-col gap-6 max-w-xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Goals
+          Cíle
         </h2>
       </header>
 
       <section>
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-[var(--text-primary)]">
-            Daily hours goal
+            Denní cíl hodin
           </span>
           <span className="text-lg font-semibold text-[var(--accent)] tabular-nums">
             {hours}h
@@ -59,7 +59,7 @@ export default function SettingsGoals() {
           <span>{MAX_HOURS}h</span>
         </div>
         <p className="text-[11px] text-[var(--text-tertiary)] mt-3">
-          How many hours you aim to work each working day. Used in the Goals view.
+          Kolik hodin chcete denně odpracovat. Používá se v sekci Cíle.
         </p>
       </section>
     </div>

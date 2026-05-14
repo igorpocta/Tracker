@@ -15,12 +15,12 @@ import type { Currency } from "../../api/types";
 import { usePrefsStore } from "../../stores/prefsStore";
 
 const CURRENCIES: { value: Currency; label: string }[] = [
-  { value: "CZK", label: "CZK — Czech koruna" },
+  { value: "CZK", label: "CZK — Česká koruna" },
   { value: "EUR", label: "EUR — Euro" },
-  { value: "USD", label: "USD — US dollar" },
-  { value: "GBP", label: "GBP — British pound" },
-  { value: "PLN", label: "PLN — Polish złoty" },
-  { value: "CHF", label: "CHF — Swiss franc" },
+  { value: "USD", label: "USD — Americký dolar" },
+  { value: "GBP", label: "GBP — Britská libra" },
+  { value: "PLN", label: "PLN — Polský zlotý" },
+  { value: "CHF", label: "CHF — Švýcarský frank" },
 ];
 
 export default function Reporting() {
@@ -54,15 +54,15 @@ export default function Reporting() {
           Reporting
         </h2>
         <p className="text-xs text-[var(--text-tertiary)] mt-1 max-w-md">
-          Set your hourly rate to see total earnings on the Reports tab.
-          Earnings stay hidden behind a click-to-reveal eye icon — useful when
-          working in openspaces.
+          Nastavte hodinovou sazbu a uvidíte celkový výdělek v sekci Reporty.
+          Výdělek zůstává skrytý za kliknutím na ikonu oka — vhodné při práci
+          v open space.
         </p>
       </header>
 
       <section>
         <label className="block text-sm font-semibold text-[var(--text-primary)] mb-2">
-          Hourly rate
+          Hodinová sazba
         </label>
         <input
           type="text"
@@ -77,13 +77,13 @@ export default function Reporting() {
                      focus:border-[var(--border-default)] transition-colors duration-150"
         />
         <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          Leave empty to disable the earnings card entirely.
+          Ponechte prázdné a karta výdělků se úplně skryje.
         </p>
       </section>
 
       <section>
         <label className="block text-sm font-semibold text-[var(--text-primary)] mb-2">
-          Currency
+          Měna
         </label>
         <select
           value={currency}

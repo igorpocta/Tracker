@@ -31,9 +31,9 @@ import {
 import { usePrefsStore } from "../../stores/prefsStore";
 
 const THEME_OPTIONS: { value: ThemePref; label: string; icon: React.ReactNode }[] = [
-  { value: "light", label: "Light", icon: <Sun className="w-4 h-4" aria-hidden /> },
-  { value: "dark", label: "Dark", icon: <Moon className="w-4 h-4" aria-hidden /> },
-  { value: "auto", label: "System", icon: <Monitor className="w-4 h-4" aria-hidden /> },
+  { value: "light", label: "Světlý", icon: <Sun className="w-4 h-4" aria-hidden /> },
+  { value: "dark", label: "Tmavý", icon: <Moon className="w-4 h-4" aria-hidden /> },
+  { value: "auto", label: "Systémový", icon: <Monitor className="w-4 h-4" aria-hidden /> },
 ];
 
 export default function Appearance() {
@@ -50,14 +50,14 @@ export default function Appearance() {
     <div className="flex flex-col gap-8 max-w-2xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Appearance
+          Vzhled
         </h2>
       </header>
 
       {/* Theme picker --------------------------------------------------- */}
       <section>
         <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-          Theme
+          Motiv
         </h3>
         <div className="grid grid-cols-3 gap-3">
           {THEME_OPTIONS.map((opt) => (
@@ -76,7 +76,7 @@ export default function Appearance() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-            Color palette
+            Barevná paleta
           </h3>
           <PaletteModeToggle value={paletteMode} onChange={(m) => void setPaletteMode(m)} />
         </div>
@@ -126,6 +126,11 @@ function ThemeCard({
   );
 }
 
+const PALETTE_MODE_LABEL: Record<PaletteMode, string> = {
+  mono: "Mono",
+  dual: "Duální",
+};
+
 function PaletteModeToggle({
   value,
   onChange,
@@ -141,7 +146,7 @@ function PaletteModeToggle({
           key={m}
           type="button"
           onClick={() => onChange(m)}
-          className="px-3 h-6 rounded-full capitalize transition-colors duration-150"
+          className="px-3 h-6 rounded-full transition-colors duration-150"
           style={
             value === m
               ? {
@@ -151,7 +156,7 @@ function PaletteModeToggle({
               : { color: "var(--text-tertiary)" }
           }
         >
-          {m}
+          {PALETTE_MODE_LABEL[m]}
         </button>
       ))}
     </div>

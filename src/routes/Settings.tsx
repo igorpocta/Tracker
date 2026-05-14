@@ -1,18 +1,16 @@
 /**
  * Settings route — internal sidebar + content pane.
  *
- * Reference: every `screens/SCR-20260514-rj{gv|hq|iy|jq|ks|mh}-2.png`.
+ * Internal nav (left), in order:
+ *   • Connection (URL, email, replace token, sign out)
+ *   • General (day timeline toggle, time input style, auto re-index interval)
+ *   • Reporting (hourly rate, currency)
+ *   • Goals (daily hours goal slider)
+ *   • Appearance (theme + palette)
+ *   • Extensions (placeholder)
  *
- * Internal nav (left):
- *   • Profile
- *   • General
- *   • Reporting
- *   • Goals
- *   • Appearance
- *   • Extensions
- *   • Connection Setup
- *
- * Active tab is stored in the URL as `?tab=` so deep-links and back/forward
+ * No Profile, no Subscription — this is a local-only internal app. The
+ * active tab is stored in the URL as `?tab=` so deep-links and back/forward
  * navigation behave correctly.
  */
 import { clsx } from "clsx";
@@ -22,35 +20,32 @@ import Appearance from "../components/Settings/Appearance";
 import Connection from "../components/Settings/Connection";
 import Extensions from "../components/Settings/Extensions";
 import General from "../components/Settings/General";
-import Profile from "../components/Settings/Profile";
 import Reporting from "../components/Settings/Reporting";
 import SettingsGoals from "../components/Settings/SettingsGoals";
 
 type TabId =
-  | "profile"
+  | "connection"
   | "general"
   | "reporting"
   | "goals"
   | "appearance"
-  | "extensions"
-  | "connection";
+  | "extensions";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "profile", label: "Profile" },
-  { id: "general", label: "General" },
+  { id: "connection", label: "Připojení" },
+  { id: "general", label: "Obecné" },
   { id: "reporting", label: "Reporting" },
-  { id: "goals", label: "Goals" },
-  { id: "appearance", label: "Appearance" },
-  { id: "extensions", label: "Extensions" },
-  { id: "connection", label: "Connection Setup" },
+  { id: "goals", label: "Cíle" },
+  { id: "appearance", label: "Vzhled" },
+  { id: "extensions", label: "Rozšíření" },
 ];
 
 const TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
-  const raw = params.get("tab") ?? "profile";
-  const active: TabId = TAB_IDS.has(raw as TabId) ? (raw as TabId) : "profile";
+  const raw = params.get("tab") ?? "connection";
+  const active: TabId = TAB_IDS.has(raw as TabId) ? (raw as TabId) : "connection";
 
   const setActive = (id: TabId) => {
     const next = new URLSearchParams(params);
@@ -62,12 +57,12 @@ export default function Settings() {
     <div className="flex w-full h-full">
       {/* Internal sidebar ------------------------------------------------ */}
       <nav
-        aria-label="Settings sections"
+        aria-label="Sekce nastavení"
         className="w-[220px] shrink-0 px-3 py-5 border-r border-[var(--border-subtle)]
                    flex flex-col gap-0.5"
       >
         <h2 className="text-sm font-semibold text-[var(--text-primary)] px-2 mb-2">
-          Settings
+          Nastavení
         </h2>
         {TABS.map((t) => (
           <button
@@ -89,13 +84,12 @@ export default function Settings() {
 
       {/* Content pane ---------------------------------------------------- */}
       <main className="flex-1 min-w-0 overflow-y-auto px-8 py-5">
-        {active === "profile" && <Profile />}
+        {active === "connection" && <Connection />}
         {active === "general" && <General />}
         {active === "reporting" && <Reporting />}
         {active === "goals" && <SettingsGoals />}
         {active === "appearance" && <Appearance />}
         {active === "extensions" && <Extensions />}
-        {active === "connection" && <Connection />}
       </main>
     </div>
   );
