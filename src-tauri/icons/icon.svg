@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tracker — iPhone-style app icon (1024×1024).
+
+  Visual concept:
+    • iOS "squircle" — a continuous-curvature rounded square. The classic iOS
+      bezel corner radius is ≈22.37% of the side length. Rather than approximate
+      with `rx`/`ry` (which produces simple quarter-circles), we draw the path
+      explicitly with cubic Béziers so the curvature transitions smoothly into
+      the straight sides — this is what gives Apple icons their distinctive
+      "pillow" silhouette.
+    • Brand gradient — Aurora teal vertical gradient (#14B8A6 → #0F766E).
+    • Subtle top highlight (white @ 8%) to imply ambient light from above.
+    • Foreground — minimalist stopwatch: a thin white circle, a clock hand at
+      11 o'clock, and a small accent dot at the top (the "winding stem").
+    • Inner shadow on the bottom edge for depth.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Brand vertical gradient. Aurora teal palette. -->
+    <linearGradient id="brand" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+
+    <!-- Top highlight — radial soft glow @ 8% white. -->
+    <radialGradient id="topGlow" cx="512" cy="180" r="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Bottom inner-shadow — vertical fade from transparent to slight black. -->
+    <linearGradient id="bottomShade" x1="0" y1="640" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+
+    <!--
+      Squircle clip path — 1024×1024 with the iOS-style continuous curve.
+      The path uses cubic Béziers between the straight edges so the curvature
+      eases smoothly. Corner radius proxy ≈229 (22.37% of 1024).
+    -->
+    <clipPath id="squircle">
+      <path d="
+        M 229 0
+        L 795 0
+        C 911 0  1024 113  1024 229
+        L 1024 795
+        C 1024 911  911 1024  795 1024
+        L 229 1024
+        C 113 1024  0 911  0 795
+        L 0 229
+        C 0 113  113 0  229 0
+        Z"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Brand fill -->
+    <rect width="1024" height="1024" fill="url(#brand)"/>
+    <!-- Top highlight -->
+    <rect width="1024" height="1024" fill="url(#topGlow)"/>
+    <!-- Bottom inner shadow -->
+    <rect width="1024" height="1024" fill="url(#bottomShade)"/>
+
+    <!-- Foreground stopwatch. Centered at (512, 540), radius 230. -->
+    <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Stopwatch ring -->
+      <circle cx="512" cy="540" r="230" stroke-width="34"/>
+
+      <!--
+        Clock hand at 11 o'clock. 11 o'clock = -60° from 12. From centre (512,
+        540) we draw to ~ (512 + r*sin(-60°), 540 - r*cos(-60°))
+        = (512 - 0.866*r, 540 - 0.5*r). With r=150: (382, 465).
+      -->
+      <line x1="512" y1="540" x2="382" y2="465" stroke-width="34"/>
+
+      <!-- Centre dot — a small filled cap on the hand pivot. -->
+      <circle cx="512" cy="540" r="14" fill="#FFFFFF" stroke="none"/>
+    </g>
+
+    <!-- Winding stem — small accent dot above the ring at 12 o'clock. -->
+    <g fill="#FFFFFF">
+      <rect x="488" y="260" width="48" height="26" rx="10"/>
+    </g>
+  </g>
+</svg>

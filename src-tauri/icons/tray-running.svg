@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tracker macOS tray template — 22×22 logical, "running" variant.
+  Same silhouette as tray.svg but with a filled centre dot to indicate an
+  active timer. macOS still treats this as a template (pure white).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88" width="88" height="88">
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="44" cy="48" r="26" stroke-width="6"/>
+    <line x1="44" y1="48" x2="29" y2="40" stroke-width="6"/>
+  </g>
+  <g fill="#FFFFFF">
+    <!-- Larger filled centre dot — the "running" indicator. -->
+    <circle cx="44" cy="48" r="7"/>
+    <!-- Winding stem above the ring. -->
+    <rect x="40" y="14" width="8" height="6" rx="2"/>
+  </g>
+</svg>

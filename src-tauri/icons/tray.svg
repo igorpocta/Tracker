@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tracker macOS tray template — 22×22 logical, drawn at 88×88 for 4× scale.
+  Monochrome white silhouette of the stopwatch motif. The macOS tray treats
+  this as a template image when `iconAsTemplate = true` is set in
+  tauri.conf.json — so we deliver pure white-on-transparent.
+
+  Idle (this file): outline-only stopwatch. The "running" variant fills the
+  accent dot at top.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88" width="88" height="88">
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Stopwatch ring — centred at (44, 48), radius 26. -->
+    <circle cx="44" cy="48" r="26" stroke-width="6"/>
+    <!-- Hand at 11 o'clock. -->
+    <line x1="44" y1="48" x2="29" y2="40" stroke-width="6"/>
+  </g>
+  <g fill="#FFFFFF">
+    <!-- Pivot dot. -->
+    <circle cx="44" cy="48" r="3.5"/>
+    <!-- Winding stem above the ring at 12 o'clock. -->
+    <rect x="40" y="14" width="8" height="6" rx="2"/>
+  </g>
+</svg>
