@@ -1,20 +1,20 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300..900&family=JetBrains+Mono:wght@400..700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300..900&family=JetBrains+Mono:wght@400..700&family=Caveat:wght@400..700&display=swap");
 @import "tailwindcss";
 
 /* =============================================================================
- * Design Token System
+ * Design Token System (Phase 13 — Trcker redesign)
  *
- * Single source of truth for every color, radius, shadow, and typographic
- * scale in the app. Components reference these via CSS custom properties
- * (or the Tailwind `@theme` shortcuts below).
+ * Two parallel token tracks live on `<html>`:
  *
- * Theme is encoded as a `data-theme` attribute on `<html>`:
- *   (none)        → follow `prefers-color-scheme` (the `auto` mode)
- *   "dark"        → force dark
- *   "light"       → force light
+ *  • App tokens  — `--bg-app`, `--text-primary`, `--border-subtle`, ...
+ *    These swap between light and dark with the active theme.
  *
- * Accent color is driven by `--accent-h` (HSL hue) so swapping the accent
- * is a single-number change applied to <html> from React.
+ *  • Sidebar tokens — `--sidebar-bg`, `--sidebar-text`, `--sidebar-border`, …
+ *    These STAY DARK in both light and dark modes. The sidebar is the
+ *    visual constant of the app — it never flips.
+ *
+ * Accent colors come from `src/lib/accent.ts::applyPalette`, which writes
+ * `--accent`, `--accent-soft`, `--accent-2`, `--accent-2-soft` directly.
  * ============================================================================= */
 
 :root {
@@ -23,20 +23,24 @@
     sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-script: "Caveat", "Inter", cursive;
   color-scheme: dark;
   --base-font-size: 14px;
   font-size: var(--base-font-size);
 
-  /* ---- accent (Apple blue, default) ---- */
-  --accent-h: 211;
-  --accent-s: 100%;
-  --accent-l: 50%;
-  --accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-  --accent-hover: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 6%));
+  /* ---- accent (default: Aurora teal) — overwritten by applyPalette() ---- */
+  --accent: #14B8A6;
+  --accent-hover: #2dd4bf;
   --accent-text: #ffffff;
-  --accent-soft: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.14);
-  --accent-strong: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.28);
-  --accent-ring: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.35);
+  --accent-soft: rgba(20, 184, 166, 0.15);
+  --accent-strong: rgba(20, 184, 166, 0.28);
+  --accent-ring: rgba(20, 184, 166, 0.35);
+  --accent-2: #14B8A6;
+  --accent-2-soft: rgba(20, 184, 166, 0.15);
+  /* Legacy HSL components, kept for backwards compatibility. */
+  --accent-h: 173;
+  --accent-s: 80%;
+  --accent-l: 40%;
 
   /* ---- radii ---- */
   --radius-sm: 6px;
@@ -44,10 +48,12 @@
   --radius-lg: 14px;
   --radius-xl: 18px;
 
-  /* ---- dark theme (default) ---- */
-  --bg-app: #0b0b0d;
-  --bg-surface: #15151a;
-  --bg-elevated: #1c1c22;
+  /* =============================================================================
+   * App tokens (DARK theme — default).
+   * ============================================================================= */
+  --bg-app: #16161c;
+  --bg-surface: #1d1d24;
+  --bg-elevated: #232330;
   --bg-hover: rgba(255, 255, 255, 0.04);
   --bg-active: rgba(255, 255, 255, 0.07);
   --bg-overlay: rgba(0, 0, 0, 0.55);
@@ -70,9 +76,20 @@
   --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.45);
   --shadow-popover: 0 12px 40px rgba(0, 0, 0, 0.5),
     0 1px 2px rgba(0, 0, 0, 0.4);
+
+  /* =============================================================================
+   * Sidebar tokens — ALWAYS DARK, regardless of theme.
+   * The dark icon rail is the signature visual constant of the app.
+   * ============================================================================= */
+  --sidebar-bg: #0c0c10;
+  --sidebar-surface: #15151c;
+  --sidebar-text: #f5f5f7;
+  --sidebar-text-muted: #71717a;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-hover: rgba(255, 255, 255, 0.04);
 }
 
-/* ---- explicit dark (default values are already dark) -------------------- */
+/* ---- explicit dark (matches default values) ----------------------------- */
 html[data-theme="dark"] {
   color-scheme: dark;
 }
@@ -102,6 +119,7 @@ html[data-theme="light"] {
   --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.12);
   --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.16),
     0 1px 2px rgba(0, 0, 0, 0.06);
+  /* Sidebar tokens are NOT overridden here — stay dark in light mode. */
 }
 
 /* ---- auto / system ------------------------------------------------------ */
@@ -135,9 +153,6 @@ html[data-theme="light"] {
 
 /* =============================================================================
  * Tailwind 4 theme bridge
- *
- * Map token CSS variables to Tailwind colors so components can use the
- * canonical `bg-surface`, `text-primary`, `border-subtle` shortcuts.
  * ============================================================================= */
 @theme {
   --color-app: var(--bg-app);
@@ -184,13 +199,11 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Selection follows accent. */
 ::selection {
   background: var(--accent-soft);
   color: var(--text-primary);
 }
 
-/* Subtle scrollbars to match the macOS feel. */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -222,7 +235,7 @@ body.density-comfortable .worklog-row {
 }
 
 /* =============================================================================
- * Motion — used sparingly. State changes get 150ms ease-out.
+ * Motion
  * ============================================================================= */
 @media (prefers-reduced-motion: reduce) {
   * {
