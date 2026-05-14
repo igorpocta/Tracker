@@ -1,8 +1,8 @@
 /**
  * Inline SVG bar chart: one bar per day in the supplied range.
  *
- * Renders fully responsively using a `viewBox` on the `<svg>`; bar width is
- * computed so the chart always uses the full horizontal space available.
+ * Uses the accent color for non-zero bars and a subtle muted bar for empty
+ * days. Renders fully responsively using a `viewBox` on the `<svg>`.
  */
 import { useMemo } from "react";
 
@@ -37,7 +37,6 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
   }, [from, to, rows]);
 
   const max = Math.max(1, ...data.totals);
-  // Dynamic chart sizing.
   const width = Math.max(360, data.days.length * 28);
   const height = 200;
   const marginTop = 12;
@@ -49,7 +48,6 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
   const barGap = 4;
   const barW = Math.max(2, innerW / data.days.length - barGap);
 
-  // Y-axis ticks: 0, 25%, 50%, 75%, 100% of max.
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((p) => p * max);
 
   return (
@@ -60,7 +58,6 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-[200px] min-w-[360px]"
       >
-        {/* Gridlines + Y labels. */}
         {ticks.map((t, i) => {
           const y = marginTop + innerH - (t / max) * innerH;
           return (
@@ -70,13 +67,13 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
                 x2={width - marginRight}
                 y1={y}
                 y2={y}
-                stroke="rgba(255,255,255,0.08)"
+                stroke="var(--border-subtle)"
                 strokeWidth={1}
               />
               <text
                 x={marginLeft - 4}
                 y={y + 3}
-                fill="rgba(255,255,255,0.4)"
+                fill="var(--text-tertiary)"
                 fontSize={9}
                 textAnchor="end"
                 fontFamily="monospace"
@@ -86,12 +83,12 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
             </g>
           );
         })}
-        {/* Bars. */}
         {data.days.map((d, i) => {
           const total = data.totals[i];
           const h = (total / max) * innerH;
           const x = marginLeft + i * (barW + barGap);
           const y = marginTop + innerH - h;
+          const empty = total === 0;
           return (
             <g key={i}>
               {onSelectDay ? (
@@ -114,18 +111,17 @@ export function DailyBarChart({ from, to, rows, onSelectDay }: DailyBarChartProp
                 width={barW}
                 height={Math.max(1, h)}
                 rx={2}
-                fill={total === 0 ? "rgba(255,255,255,0.06)" : "rgb(56 189 248)"}
-                opacity={total === 0 ? 0.8 : 0.85}
+                fill={empty ? "var(--bg-active)" : "var(--accent)"}
+                opacity={empty ? 0.6 : 0.9}
                 className="transition-opacity"
               >
                 <title>{`${d.toDateString()} — ${formatDurationShort(total)}`}</title>
               </rect>
-              {/* Optional X label — every Nth bar to avoid overlap. */}
               {labelFor(i, data.days.length) && (
                 <text
                   x={x + barW / 2}
                   y={height - 6}
-                  fill="rgba(255,255,255,0.4)"
+                  fill="var(--text-tertiary)"
                   fontSize={9}
                   textAnchor="middle"
                   fontFamily="monospace"

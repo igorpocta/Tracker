@@ -46,7 +46,7 @@ export function RangePicker({
       />
       {preset === "custom" && (
         <div className="inline-flex items-center gap-2">
-          <label htmlFor={fromId} className="text-xs text-neutral-400">
+          <label htmlFor={fromId} className="text-xs text-[var(--text-tertiary)]">
             From
           </label>
           <input
@@ -59,9 +59,10 @@ export function RangePicker({
               const [y, m, d] = v.split("-").map(Number);
               onFromChange(new Date(y, m - 1, d));
             }}
-            className="bg-neutral-950 border border-neutral-800 rounded-md px-2 py-1 text-xs"
+            className="bg-transparent border border-[var(--border-default)] rounded-[var(--radius-md)] h-8 px-2 text-xs text-[var(--text-primary)]
+                       focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]"
           />
-          <label htmlFor={toId} className="text-xs text-neutral-400">
+          <label htmlFor={toId} className="text-xs text-[var(--text-tertiary)]">
             To
           </label>
           <input
@@ -74,7 +75,8 @@ export function RangePicker({
               const [y, m, d] = v.split("-").map(Number);
               onToChange(new Date(y, m - 1, d));
             }}
-            className="bg-neutral-950 border border-neutral-800 rounded-md px-2 py-1 text-xs"
+            className="bg-transparent border border-[var(--border-default)] rounded-[var(--radius-md)] h-8 px-2 text-xs text-[var(--text-primary)]
+                       focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]"
           />
         </div>
       )}

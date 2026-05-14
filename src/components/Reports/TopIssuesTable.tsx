@@ -44,7 +44,7 @@ export function TopIssuesTable({ rows, limit = 10 }: TopIssuesTableProps) {
 
   if (top.length === 0) {
     return (
-      <p className="text-xs text-neutral-500 py-6 text-center">
+      <p className="text-xs text-[var(--text-tertiary)] py-6 text-center">
         No issues logged in this range.
       </p>
     );
@@ -54,36 +54,36 @@ export function TopIssuesTable({ rows, limit = 10 }: TopIssuesTableProps) {
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr className="text-left text-[10px] uppercase tracking-wider text-neutral-500 border-b border-neutral-800">
-            <th className="px-2 py-1.5 font-medium w-8">#</th>
-            <th className="px-2 py-1.5 font-medium">Issue</th>
-            <th className="px-2 py-1.5 font-medium text-right w-20">Entries</th>
-            <th className="px-2 py-1.5 font-medium text-right w-24">Total</th>
+          <tr className="text-left text-[10px] uppercase tracking-[0.1em] text-[var(--text-tertiary)] border-b border-[var(--border-subtle)]">
+            <th className="px-2 py-2 font-medium w-8">#</th>
+            <th className="px-2 py-2 font-medium">Issue</th>
+            <th className="px-2 py-2 font-medium text-right w-20">Entries</th>
+            <th className="px-2 py-2 font-medium text-right w-24">Total</th>
           </tr>
         </thead>
         <tbody>
           {top.map((row, i) => (
             <tr
               key={row.issueKey}
-              className="border-b border-neutral-800/60 last:border-0 hover:bg-neutral-800/30"
+              className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)]"
             >
-              <td className="px-2 py-1.5 text-neutral-500 font-mono">{i + 1}</td>
-              <td className="px-2 py-1.5">
+              <td className="px-2 py-2 text-[var(--text-tertiary)] font-mono tabular-nums">{i + 1}</td>
+              <td className="px-2 py-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-[11px] text-neutral-400 shrink-0">
+                  <span className="font-mono text-[11px] uppercase text-[var(--text-secondary)] shrink-0">
                     {row.issueKey}
                   </span>
                   {row.summary && (
-                    <span className="text-neutral-200 truncate">
+                    <span className="text-[var(--text-primary)] truncate">
                       {row.summary}
                     </span>
                   )}
                 </div>
               </td>
-              <td className="px-2 py-1.5 text-right text-neutral-400 font-mono tabular-nums">
+              <td className="px-2 py-2 text-right text-[var(--text-tertiary)] font-mono tabular-nums">
                 {row.entries}
               </td>
-              <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-100">
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-[var(--text-primary)]">
                 {formatDurationShort(row.totalSeconds)}
               </td>
             </tr>

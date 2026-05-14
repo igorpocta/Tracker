@@ -2,6 +2,10 @@
  * Inline SVG donut chart breaking down logged time by "project" — the
  * prefix of the issue key before the first hyphen (e.g. "ACME" from
  * "ACME-123").
+ *
+ * Slices use analogous tints of the accent color: lightness varies from
+ * 60% to 35% so consecutive segments stay distinct without introducing
+ * unrelated hues. The result reads as a single graphic, not a rainbow.
  */
 import { useMemo } from "react";
 
@@ -20,19 +24,9 @@ interface Slice {
   ratio: number;
   startAngle: number;
   endAngle: number;
-  color: string;
+  /** Lightness % to apply to the accent hue. */
+  lightness: number;
 }
-
-const PALETTE = [
-  "rgb(56 189 248)", // sky-400
-  "rgb(34 197 94)", // green-500
-  "rgb(168 85 247)", // purple-500
-  "rgb(245 158 11)", // amber-500
-  "rgb(239 68 68)", // red-500
-  "rgb(20 184 166)", // teal-500
-  "rgb(236 72 153)", // pink-500
-  "rgb(99 102 241)", // indigo-500
-];
 
 export function ProjectDonutChart({
   rows,
@@ -55,18 +49,22 @@ export function ProjectDonutChart({
     }
     const total = trimmed.reduce((acc, [, s]) => acc + s, 0) || 1;
     let cursor = 0;
+    const n = trimmed.length;
     return trimmed.map(([project, seconds], i) => {
       const ratio = seconds / total;
       const startAngle = cursor;
       const endAngle = cursor + ratio * Math.PI * 2;
       cursor = endAngle;
+      // Lightness curve: biggest slice 60%, smallest ~35%.
+      const t = n <= 1 ? 0 : i / (n - 1);
+      const lightness = 60 - t * 25;
       return {
         project,
         seconds,
         ratio,
         startAngle,
         endAngle,
-        color: i < PALETTE.length ? PALETTE[i] : "rgb(82 82 91)",
+        lightness,
       };
     });
   }, [rows, maxSlices]);
@@ -75,7 +73,10 @@ export function ProjectDonutChart({
 
   if (slices.length === 0 || total === 0) {
     return (
-      <div className="text-xs text-neutral-500 py-6 text-center" data-testid="project-donut-empty">
+      <div
+        className="text-xs text-[var(--text-tertiary)] py-6 text-center"
+        data-testid="project-donut-empty"
+      >
         No project data in range.
       </div>
     );
@@ -85,7 +86,7 @@ export function ProjectDonutChart({
   const cx = size / 2;
   const cy = size / 2;
   const radius = 70;
-  const inner = 42;
+  const inner = 44;
 
   return (
     <div className="flex items-center gap-4 flex-wrap" data-testid="project-donut-chart">
@@ -101,8 +102,7 @@ export function ProjectDonutChart({
           <path
             key={i}
             d={donutSlicePath(cx, cy, radius, inner, s.startAngle, s.endAngle)}
-            fill={s.color}
-            opacity={0.92}
+            fill={`hsl(var(--accent-h) var(--accent-s) ${s.lightness}%)`}
           >
             <title>{`${s.project} — ${formatDurationShort(s.seconds)}`}</title>
           </path>
@@ -111,7 +111,7 @@ export function ProjectDonutChart({
           x={cx}
           y={cy - 2}
           textAnchor="middle"
-          fill="rgba(255,255,255,0.85)"
+          fill="var(--text-primary)"
           fontSize={14}
           fontFamily="monospace"
         >
@@ -121,7 +121,7 @@ export function ProjectDonutChart({
           x={cx}
           y={cy + 12}
           textAnchor="middle"
-          fill="rgba(255,255,255,0.4)"
+          fill="var(--text-tertiary)"
           fontSize={9}
         >
           total
@@ -133,16 +133,18 @@ export function ProjectDonutChart({
           <li key={i} className="flex items-center gap-2 text-xs">
             <span
               aria-hidden
-              className="w-2.5 h-2.5 rounded-sm shrink-0"
-              style={{ background: s.color }}
+              className="w-2 h-2 rounded-sm shrink-0"
+              style={{
+                background: `hsl(var(--accent-h) var(--accent-s) ${s.lightness}%)`,
+              }}
             />
-            <span className="font-mono text-[11px] text-neutral-300 w-16 shrink-0">
+            <span className="font-mono text-[11px] text-[var(--text-secondary)] w-16 shrink-0 uppercase">
               {s.project}
             </span>
-            <span className="text-neutral-400 flex-1 text-right font-mono tabular-nums">
+            <span className="text-[var(--text-tertiary)] flex-1 text-right font-mono tabular-nums">
               {formatDurationShort(s.seconds)}
             </span>
-            <span className="text-neutral-500 w-10 text-right text-[10px] font-mono">
+            <span className="text-[var(--text-tertiary)] w-10 text-right text-[10px] font-mono">
               {Math.round(s.ratio * 100)}%
             </span>
           </li>
@@ -152,11 +154,6 @@ export function ProjectDonutChart({
   );
 }
 
-/**
- * Build a donut-slice SVG path. Handles full-circle slices (rare but
- * possible when a single project consumes 100% of the range) by drawing
- * two half-circles.
- */
 function donutSlicePath(
   cx: number,
   cy: number,
@@ -166,7 +163,6 @@ function donutSlicePath(
   endAngle: number,
 ): string {
   const span = endAngle - startAngle;
-  // For (nearly) full circles, fall back to two arcs to avoid SVG ambiguity.
   if (span >= Math.PI * 2 - 0.001) {
     return [
       `M ${cx + outer} ${cy}`,
@@ -181,8 +177,6 @@ function donutSlicePath(
   }
 
   const largeArc = span > Math.PI ? 1 : 0;
-  // SVG angles: 0 at +X axis, sweeping clockwise — but we use math
-  // convention (0 at +X, sweeping CCW). We flip by negating Y components.
   const outerStart = polar(cx, cy, outer, startAngle);
   const outerEnd = polar(cx, cy, outer, endAngle);
   const innerEnd = polar(cx, cy, inner, endAngle);
