@@ -1,13 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-window="popover">
   <head>
     <meta charset="UTF-8" />
     <title>Tracker — Popover</title>
     <style>
-      /* Inline override — the popover window is transparent so we don't want
-         the global `body { background: #0f0f0f }` from index.css to fill the
-         whole webview. The inner card supplies its own opaque background. */
-      html, body, #root { background: transparent !important; }
+      /* The popover window is `transparent: true` + `decorations: false`.
+         Make the document layer fully transparent so the inner card (which
+         carries its own opaque background + 12px corners + shadow) appears
+         to float as a native macOS menu / tooltip. No outer padding here —
+         the card fills the window edge-to-edge. */
+      html, body, #root {
+        background: transparent !important;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
     </style>
   </head>
   <body>

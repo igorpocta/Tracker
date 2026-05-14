@@ -27,14 +27,15 @@
         "label": "popover",
         "title": "Tracker",
         "url": "popover.html",
-        "width": 360,
-        "height": 480,
+        "width": 324,
+        "height": 440,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
         "resizable": false,
-        "transparent": true
+        "transparent": true,
+        "shadow": false
       }
     ],
     "trayIcon": {

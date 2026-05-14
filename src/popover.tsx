@@ -2,22 +2,20 @@
  * Compact popover renderer.
  *
  * The popover lives in its own webview (`popover.html` / label `"popover"`)
- * with `transparent: true` + `decorations: false`, so we wrap our content in a
- * rounded dark card with a soft shadow. The window itself is otherwise
- * see-through.
+ * with `transparent: true` + `decorations: false`. We fill the window
+ * edge-to-edge with a single rounded card (12px corners, soft shadow) — no
+ * outer padding lets desktop bleed through, no harsh boundary.
  *
  * Layout:
  *   ┌──────────────────────────────────────────┐
- *   │ Tracker                                  │
- *   │ 01:23:45                                 │
- *   │ ACME-1 · fix the bug                     │
- *   │ ────────────────                         │
- *   │ Recent                                   │
- *   │   [ACME-1] fix the bug                   │
- *   │   [ACME-2] another thing                 │
- *   │   …                                      │
- *   │ ────────────────                         │
- *   │ [Open main app]  [Stop timer]            │
+ *   │  Tracking · ACME-1                       │
+ *   │  01:23:45                                 │
+ *   │  ────────────────                         │
+ *   │  Recent                                   │
+ *   │    ACME-1   fix the bug                   │
+ *   │    ACME-2   another thing                 │
+ *   │  ────────────────                         │
+ *   │  [Open main]    [Stop]                    │
  *   └──────────────────────────────────────────┘
  */
 import { listen } from "@tauri-apps/api/event";
@@ -33,6 +31,7 @@ import {
 } from "./api/commands";
 import type { ActiveTimerState, IssueRow } from "./api/types";
 import { useNow } from "./hooks/useNow";
+import { applyAccent } from "./lib/accent";
 import { formatDuration } from "./lib/format";
 import { elapsedSeconds } from "./stores/timerStore";
 
@@ -61,21 +60,33 @@ export function Popover() {
     }
   }, []);
 
+  // Best-effort accent hydration. We try the backend command; if it isn't
+  // available (e.g. running standalone test renders) we silently fall back
+  // to the default Apple blue baked into the CSS tokens.
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getAccentColor } = await import("./api/commands");
+        const accent = await getAccentColor();
+        applyAccent(accent);
+      } catch {
+        /* ignore — defaults are fine */
+      }
+    })();
+  }, []);
+
   // Initial load.
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Re-fetch when:
-  //   - the backend reports the popover opened (so it always shows fresh data)
-  //   - a worklog is saved (timer just stopped from somewhere else)
-  //   - a timer is started/stopped from another surface
   useEffect(() => {
     const events = [
       "popover:opened",
       "timer-started",
       "timer-stopped",
       "worklog-saved",
+      "prefs-changed",
     ];
     const unlisteners: Array<() => void> = [];
     events.forEach((ev) => {
@@ -132,56 +143,67 @@ export function Popover() {
   }, []);
 
   return (
-    <div className="h-full w-full p-2">
-      <div className="h-full w-full rounded-xl bg-neutral-900/95 shadow-2xl ring-1 ring-white/5 flex flex-col overflow-hidden">
-        <PopoverTimer active={active} />
+    <div
+      className="h-full w-full flex flex-col overflow-hidden bg-[var(--bg-surface)] text-[var(--text-primary)]"
+      style={{
+        borderRadius: 12,
+        boxShadow: "var(--shadow-popover)",
+        // Subtle hairline to crisp the edge in light mode where the shadow alone
+        // doesn't carry enough contrast against the desktop wallpaper.
+        outline: "0.5px solid var(--border-default)",
+        outlineOffset: "-0.5px",
+      }}
+    >
+      <PopoverTimer active={active} />
 
-        <div className="px-3 pb-2 flex-1 min-h-0 flex flex-col">
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">
-            Recent
-          </div>
-          <div className="flex-1 overflow-y-auto -mr-1 pr-1">
-            {recent.length === 0 ? (
-              <div className="text-xs text-neutral-500 py-2">
-                No recent issues yet.
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {recent.map((iss) => (
-                  <li key={iss.issue_key}>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => startForIssue(iss.issue_key)}
-                      className="w-full text-left rounded-md px-2 py-1.5 hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <div className="font-mono text-[11px] text-neutral-400">
-                        {iss.issue_key}
-                      </div>
-                      <div className="text-xs text-neutral-100 truncate">
-                        {iss.summary || "(no summary)"}
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {error && (
-            <div className="text-[11px] text-red-400 py-1" role="alert">
-              {error}
+      <div className="px-3 flex-1 min-h-0 flex flex-col">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-1.5">
+          Recent
+        </div>
+        <div className="flex-1 overflow-y-auto -mr-1 pr-1">
+          {recent.length === 0 ? (
+            <div className="text-xs text-[var(--text-tertiary)] py-2">
+              No recent issues yet.
             </div>
+          ) : (
+            <ul className="flex flex-col gap-0.5">
+              {recent.map((iss) => (
+                <li key={iss.issue_key}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => startForIssue(iss.issue_key)}
+                    className="w-full text-left rounded-[var(--radius-sm)] px-2 py-1.5
+                               hover:bg-[var(--bg-hover)]
+                               disabled:opacity-50 disabled:cursor-not-allowed
+                               transition-colors duration-150"
+                  >
+                    <div className="font-mono text-[10px] uppercase text-[var(--text-secondary)]">
+                      {iss.issue_key}
+                    </div>
+                    <div className="text-xs text-[var(--text-primary)] truncate">
+                      {iss.summary || "(no summary)"}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 
-        <PopoverActions
-          hasActive={active !== null}
-          busy={busy}
-          onOpenMain={openMain}
-          onStop={stop}
-        />
+        {error && (
+          <div className="text-[11px] text-[var(--danger)] py-1" role="alert">
+            {error}
+          </div>
+        )}
       </div>
+
+      <PopoverActions
+        hasActive={active !== null}
+        busy={busy}
+        onOpenMain={openMain}
+        onStop={stop}
+      />
     </div>
   );
 }
@@ -196,14 +218,14 @@ function PopoverTimer({ active }: PopoverTimerProps) {
 
   return (
     <div className="px-3 pt-3 pb-2">
-      <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-        Tracker
+      <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+        {active ? "Tracking" : "Tracker"}
       </div>
       <div
         className={
           active
-            ? "font-mono tabular-nums text-3xl text-white leading-tight"
-            : "font-mono tabular-nums text-3xl text-neutral-600 leading-tight"
+            ? "font-mono tabular-nums text-3xl text-[var(--accent)] leading-tight font-light"
+            : "font-mono tabular-nums text-3xl text-[var(--text-disabled)] leading-tight font-light"
         }
         aria-live="polite"
         aria-label={
@@ -212,7 +234,7 @@ function PopoverTimer({ active }: PopoverTimerProps) {
       >
         {active ? formatDuration(elapsed) : "--:--:--"}
       </div>
-      <div className="text-xs text-neutral-400 mt-0.5 truncate">
+      <div className="font-mono text-[10px] uppercase text-[var(--text-secondary)] mt-1 truncate">
         {active ? active.issue_key : "Idle"}
       </div>
     </div>
@@ -233,11 +255,13 @@ function PopoverActions({
   onStop,
 }: PopoverActionsProps) {
   return (
-    <div className="px-3 py-2 border-t border-white/5 flex items-center gap-2">
+    <div className="px-3 py-2.5 border-t border-[var(--border-subtle)] flex items-center gap-2">
       <button
         type="button"
         onClick={onOpenMain}
-        className="flex-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-100 text-xs py-1.5"
+        className="flex-1 h-7 rounded-[var(--radius-md)] border border-[var(--border-default)]
+                   hover:bg-[var(--bg-hover)] text-[var(--text-primary)] text-xs
+                   transition-colors duration-150"
       >
         Open main app
       </button>
@@ -245,7 +269,9 @@ function PopoverActions({
         type="button"
         onClick={onStop}
         disabled={!hasActive || busy}
-        className="flex-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-xs py-1.5 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed"
+        className="flex-1 h-7 rounded-[var(--radius-md)] bg-[var(--danger)] hover:brightness-110
+                   text-white text-xs disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)]
+                   disabled:hover:brightness-100 disabled:cursor-not-allowed transition-colors duration-150"
       >
         Stop timer
       </button>
