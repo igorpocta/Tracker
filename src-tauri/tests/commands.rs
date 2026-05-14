@@ -14,9 +14,11 @@ use tracker_lib::cache::timer::{self, ActiveTimer};
 use tracker_lib::cache::worklogs::{recent as worklog_recent, WorklogRow};
 use tracker_lib::cache::Db;
 use tracker_lib::commands::prefs::{
-    get_daily_goal_inner, get_hourly_rate_inner, set_app_icon_inner, set_daily_goal_inner,
-    set_hourly_rate_inner, set_widget_format_inner, DEFAULT_DAILY_GOAL_SECONDS,
-    DEFAULT_HOURLY_RATE,
+    get_daily_goal_inner, get_density_inner, get_font_size_inner, get_hourly_rate_inner,
+    get_theme_inner, set_app_icon_inner, set_daily_goal_inner, set_density_inner,
+    set_font_size_inner, set_hourly_rate_inner, set_theme_inner, set_widget_format_inner,
+    DEFAULT_DAILY_GOAL_SECONDS, DEFAULT_DENSITY, DEFAULT_FONT_SIZE, DEFAULT_HOURLY_RATE,
+    DEFAULT_THEME,
 };
 use tracker_lib::commands::config::{
     sign_out_inner, test_jira_connection_inner, update_config_inner,
@@ -189,6 +191,71 @@ fn set_hourly_rate_rejects_non_finite_values() {
     let (_dir, db) = fresh_db();
     let err = set_hourly_rate_inner(&db, f64::NAN).unwrap_err();
     assert!(err.contains("finite"));
+}
+
+#[test]
+fn theme_defaults_to_auto_when_unset() {
+    let (_dir, db) = fresh_db();
+    assert_eq!(get_theme_inner(&db).unwrap(), DEFAULT_THEME);
+    assert_eq!(get_theme_inner(&db).unwrap(), "auto");
+}
+
+#[test]
+fn set_and_get_theme_roundtrip() {
+    let (_dir, db) = fresh_db();
+    set_theme_inner(&db, "dark").unwrap();
+    assert_eq!(get_theme_inner(&db).unwrap(), "dark");
+    set_theme_inner(&db, "light").unwrap();
+    assert_eq!(get_theme_inner(&db).unwrap(), "light");
+}
+
+#[test]
+fn set_theme_rejects_invalid_values() {
+    let (_dir, db) = fresh_db();
+    let err = set_theme_inner(&db, "rainbow").unwrap_err();
+    assert!(err.contains("invalid theme"), "got: {err}");
+}
+
+#[test]
+fn font_size_defaults_to_md() {
+    let (_dir, db) = fresh_db();
+    assert_eq!(get_font_size_inner(&db).unwrap(), DEFAULT_FONT_SIZE);
+    assert_eq!(get_font_size_inner(&db).unwrap(), "md");
+}
+
+#[test]
+fn set_and_get_font_size_roundtrip() {
+    let (_dir, db) = fresh_db();
+    set_font_size_inner(&db, "lg").unwrap();
+    assert_eq!(get_font_size_inner(&db).unwrap(), "lg");
+}
+
+#[test]
+fn set_font_size_rejects_invalid_values() {
+    let (_dir, db) = fresh_db();
+    let err = set_font_size_inner(&db, "xxl").unwrap_err();
+    assert!(err.contains("invalid font_size"), "got: {err}");
+}
+
+#[test]
+fn density_defaults_to_comfortable() {
+    let (_dir, db) = fresh_db();
+    assert_eq!(get_density_inner(&db).unwrap(), DEFAULT_DENSITY);
+    assert_eq!(get_density_inner(&db).unwrap(), "comfortable");
+}
+
+#[test]
+fn set_and_get_density_roundtrip() {
+    let (_dir, db) = fresh_db();
+    set_density_inner(&db, "compact").unwrap();
+    assert_eq!(get_density_inner(&db).unwrap(), "compact");
+}
+
+#[test]
+fn set_density_rejects_invalid_values() {
+    let (_dir, db) = fresh_db();
+    let err = set_density_inner(&db, "spacious").unwrap_err();
+    assert!(err.contains("invalid density"), "got: {err}");
 }
 
 #[test]
