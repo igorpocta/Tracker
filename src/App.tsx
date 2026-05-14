@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import {
@@ -12,6 +13,22 @@ import { hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
 import Home from "./routes/Home";
 import Setup from "./routes/Setup";
+
+/**
+ * Shared QueryClient instance. Sensible defaults for a desktop app:
+ *   - No automatic refocus refetches (we drive invalidation via Tauri
+ *     events instead).
+ *   - `staleTime: 30s` so navigating between routes doesn't refetch.
+ */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+});
 
 /**
  * Top-level app shell.
@@ -49,14 +66,16 @@ export default function App() {
   }
 
   return (
-    <MemoryRouter initialEntries={[initialRoute]}>
-      <NavigationBridge />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/setup" element={<Setup />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialRoute]}>
+        <NavigationBridge />
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/setup" element={<Setup />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
