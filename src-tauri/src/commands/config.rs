@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 use crate::config::{self, JiraConfig};
+use crate::jira::{JiraClient, JiraError, JiraUser};
 use crate::state::AppState;
 
 /// Returns `true` if we have everything required to talk to Jira: an in-memory
@@ -80,4 +81,31 @@ pub async fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
         let _ = win.unminimize();
     }
     Ok(())
+}
+
+/// Test-only inner helper for [`test_jira_connection`]: builds a one-shot
+/// [`JiraClient`] with the supplied credentials, calls `myself()`, and returns
+/// the parsed user. The client is **not** stored anywhere — this is purely a
+/// "are these credentials valid?" probe.
+pub async fn test_jira_connection_inner(
+    base_url: &str,
+    email: &str,
+    token: &str,
+) -> Result<JiraUser, JiraError> {
+    let client = JiraClient::new(base_url.to_string(), email.to_string(), token.to_string())?;
+    client.myself().await
+}
+
+/// `test_jira_connection` — verify the supplied Jira credentials by hitting
+/// `/rest/api/3/myself`. Does NOT persist anything; this is used by the setup
+/// wizard to validate inputs before the user clicks "Finish".
+#[tauri::command]
+pub async fn test_jira_connection(
+    base_url: String,
+    email: String,
+    token: String,
+) -> Result<JiraUser, String> {
+    test_jira_connection_inner(&base_url, &email, &token)
+        .await
+        .map_err(|e| e.to_string())
 }

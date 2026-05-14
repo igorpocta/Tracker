@@ -45,6 +45,7 @@ pub fn run() {
             commands::config::enter_setup,
             commands::config::enter_main_app,
             commands::config::open_main_window,
+            commands::config::test_jira_connection,
             commands::timer::get_timer_state,
             commands::timer::start_timer,
             commands::timer::stop_timer_inner,

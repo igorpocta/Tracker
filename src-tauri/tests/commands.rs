@@ -17,9 +17,11 @@ use tracker_lib::commands::prefs::{
     get_daily_goal_inner, set_app_icon_inner, set_daily_goal_inner, set_widget_format_inner,
     DEFAULT_DAILY_GOAL_SECONDS,
 };
+use tracker_lib::commands::config::test_jira_connection_inner;
 use tracker_lib::commands::timer::{
     get_timer_state_inner, record_local_stop, start_timer_inner, update_timer_start_inner,
 };
+use tracker_lib::jira::JiraError;
 
 fn fresh_db() -> (TempDir, Db) {
     let dir = TempDir::new().unwrap();
@@ -202,4 +204,63 @@ fn suggested_issues_returns_only_issues_with_worklogs() {
     let rows = issues_suggested(&db, 10).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].issue_key, "A-1");
+}
+
+// -----------------------------------------------------------------------------
+// Config — test_jira_connection inner helper (uses wiremock).
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_jira_connection_inner_returns_user_on_success() {
+    use serde_json::json;
+    use wiremock::matchers::{basic_auth, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .and(basic_auth("alice@example.com", "secret-token"))
+        .and(header("accept", "application/json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "accountId": "abc123",
+            "displayName": "Alice Example",
+            "emailAddress": "alice@example.com",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let user = test_jira_connection_inner(&server.uri(), "alice@example.com", "secret-token")
+        .await
+        .expect("ok");
+
+    assert_eq!(user.account_id, "abc123");
+    assert_eq!(user.display_name, "Alice Example");
+    assert_eq!(user.email_address.as_deref(), Some("alice@example.com"));
+}
+
+#[tokio::test]
+async fn test_jira_connection_inner_returns_error_on_401() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
+        .mount(&server)
+        .await;
+
+    let err = test_jira_connection_inner(&server.uri(), "alice@example.com", "bad-token")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JiraError::Unauthorized), "got {err:?}");
+}
+
+#[tokio::test]
+async fn test_jira_connection_inner_rejects_bogus_url() {
+    let err = test_jira_connection_inner("not a url", "a@b.c", "t")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JiraError::InvalidUrl(_)), "got {err:?}");
 }

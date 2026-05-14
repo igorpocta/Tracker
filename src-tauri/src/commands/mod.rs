@@ -22,7 +22,9 @@ pub mod worklog;
 pub use browser::{
     get_browser_context, get_current_visible_ticket, get_extension_last_heartbeat,
 };
-pub use config::{enter_main_app, enter_setup, has_config, open_main_window, save_config};
+pub use config::{
+    enter_main_app, enter_setup, has_config, open_main_window, save_config, test_jira_connection,
+};
 pub use issues::{
     get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache,
 };
