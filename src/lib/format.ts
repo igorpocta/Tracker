@@ -50,8 +50,8 @@ export function formatHours(hours: number): string {
 }
 
 /**
- * Relative time-ago. Operates on either a Date or a unix-epoch number (we
- * try to detect seconds vs. milliseconds automatically: anything < 1e12 is
+ * Czech relative time-ago. Operates on either a Date or a unix-epoch number
+ * (we try to detect seconds vs. milliseconds automatically: anything < 1e12 is
  * treated as seconds). Always rounds to the nearest unit.
  */
 export function formatRelativeTime(
@@ -63,21 +63,34 @@ export function formatRelativeTime(
       ? value
       : new Date(value < 1e12 ? value * 1000 : value);
   const diffMs = now.getTime() - past.getTime();
-  if (diffMs < 0) return "just now";
+  if (diffMs < 0) return "právě teď";
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 45) return "just now";
+  if (seconds < 45) return "právě teď";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return `před ${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `před ${hours} h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
+  if (days < 7) return `před ${days} dny`;
   const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
+  if (weeks < 5) return `před ${weeks} týd`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
+  if (months < 12) return `před ${months} měs`;
   const years = Math.floor(days / 365);
-  return `${years}y ago`;
+  return `před ${years} r`;
+}
+
+/**
+ * Czech-locale short date: `14. 5. 2026`. Stable output: never falls back to
+ * a different locale (the previous `dd/mm/yyyy` shape is gone).
+ */
+export function formatDateCs(d: Date): string {
+  return `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
+}
+
+/** Czech-locale month + day without year: `14. 5.` */
+export function formatDateCsShort(d: Date): string {
+  return `${d.getDate()}. ${d.getMonth() + 1}.`;
 }
 
 /** Format a timestamp as a `HH:MM` clock time in the user's local timezone. */

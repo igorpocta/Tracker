@@ -65,22 +65,22 @@ describe("formatHours", () => {
 });
 
 describe("formatRelativeTime", () => {
-  it("reports just now for very small diffs", () => {
+  it("reports 'právě teď' for very small diffs", () => {
     const now = new Date(2024, 0, 1, 12, 0, 0);
-    expect(formatRelativeTime(now.getTime() - 5_000, now)).toBe("just now");
+    expect(formatRelativeTime(now.getTime() - 5_000, now)).toBe("právě teď");
   });
 
-  it("reports minutes, hours, days", () => {
+  it("reports minutes, hours, days in Czech", () => {
     const now = new Date(2024, 0, 10, 12, 0, 0);
-    expect(formatRelativeTime(now.getTime() - 5 * 60_000, now)).toBe("5m ago");
-    expect(formatRelativeTime(now.getTime() - 3 * 3_600_000, now)).toBe("3h ago");
-    expect(formatRelativeTime(now.getTime() - 2 * 86_400_000, now)).toBe("2d ago");
+    expect(formatRelativeTime(now.getTime() - 5 * 60_000, now)).toBe("před 5 min");
+    expect(formatRelativeTime(now.getTime() - 3 * 3_600_000, now)).toBe("před 3 h");
+    expect(formatRelativeTime(now.getTime() - 2 * 86_400_000, now)).toBe("před 2 dny");
   });
 
   it("accepts unix seconds", () => {
     const now = new Date(2024, 0, 10, 12, 0, 0);
     const secs = Math.floor((now.getTime() - 10 * 60_000) / 1000);
-    expect(formatRelativeTime(secs, now)).toBe("10m ago");
+    expect(formatRelativeTime(secs, now)).toBe("před 10 min");
   });
 });
 

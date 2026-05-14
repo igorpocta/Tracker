@@ -1,25 +1,19 @@
 /**
- * Time Log route — the home screen.
+ * Časový záznam (Time Log) — home screen.
  *
- * Reference: `screens/SCR-20260514-rjbm-2.png`.
+ *   Časový záznam  [Dnes ▾]  14. 5. 2026 → 14. 5. 2026                5h 21m
+ *                                                                       Celkem
  *
- *   Time Log  [Today ▾]  14/05/2026 → 14/05/2026                     5h 21m
- *                                                              Total duration
- *
- *   ┌─ Day timeline ───────────────────────────────────────────────────────┐
+ *   ┌─ Časová osa dne ────────────────────────────────────────────────────┐
  *   │  06  07  08  09  ██  ██  12  ██  ██  15  16  ██  17  ██  19  20  21 │
  *   └────────────────────────────────────────────────────────────────────────┘
  *
- *   ┌─ DEV-792  Portál – Synchronizace…   14/05/2026  15:46 – 16:01   15m  🗑 ┐
- *   ├─ DEV-792  Portál – Synchronizace…   14/05/2026  13:00 – 15:08   2h 8m  ┤
- *   ├─ DEV-304  Úpravy ZZJ v OKO          14/05/2026  09:56 – 12:39   2h 43m ┤
- *   └─ DEV-926  Portal – (servis)…        14/05/2026  09:29 – 09:44   15m  🗑 ┘
+ *   ┌─ DEV-792  Portál – Synchronizace…   14. 5. 2026  15:46 – 16:01  15m ┐
+ *   …
  *
- *                                                              [ + New entry ]
- *
- * Period dropdown supports Today / Yesterday / This week. Date range is
- * read-only — picks the period's bounds. Rows are sorted descending so the
- * latest log floats to the top (reference behavior).
+ * The DayTimeline is rendered only when the user keeps it visible
+ * (Nastavení → Obecné → Časová osa dne). The pref is now backend-backed
+ * and read from the prefs store.
  */
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
@@ -37,19 +31,21 @@ import {
   startOfDay,
   startOfWeek,
 } from "../lib/dates";
-import { formatDurationShort } from "../lib/format";
+import { formatDateCs, formatDurationShort } from "../lib/format";
+import { usePrefsStore } from "../stores/prefsStore";
 
 type Period = "today" | "yesterday" | "this-week";
 
 const PERIOD_LABEL: Record<Period, string> = {
-  today: "Today",
-  yesterday: "Yesterday",
-  "this-week": "This week",
+  today: "Dnes",
+  yesterday: "Včera",
+  "this-week": "Tento týden",
 };
 
 export default function TimeLog() {
   const ctx = useOutletContext<ShellOutletContext>();
   const [period, setPeriod] = useState<Period>("today");
+  const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
 
   const [from, to] = useMemo(() => periodRange(period), [period]);
 
@@ -70,11 +66,11 @@ export default function TimeLog() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Time Log
+            Časový záznam
           </h1>
           <PeriodSelector value={period} onChange={setPeriod} />
           <span className="text-xs font-mono text-[var(--text-tertiary)]">
-            {formatDateShort(from)} → {formatDateShort(to)}
+            {formatDateCs(from)} → {formatDateCs(to)}
           </span>
         </div>
         <div className="text-right">
@@ -82,25 +78,25 @@ export default function TimeLog() {
             {totalSeconds > 0 ? formatDurationShort(totalSeconds) : "0m"}
           </div>
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Total duration
+            Celkem
           </div>
         </div>
       </div>
 
-      {/* Day timeline ---------------------------------------------------- */}
-      <DayTimeline rows={rows} day={from} />
+      {/* Day timeline (optional, user pref) ----------------------------- */}
+      {dayTimelineVisible && <DayTimeline rows={rows} day={from} />}
 
       {/* Worklog rows ---------------------------------------------------- */}
       <div className="flex flex-col gap-1">
         {worklogsQ.isLoading && (
-          <div className="text-xs text-[var(--text-tertiary)] py-2">Loading…</div>
+          <div className="text-xs text-[var(--text-tertiary)] py-2">Načítání…</div>
         )}
         {!worklogsQ.isLoading && rows.length === 0 && (
           <div className="text-xs text-[var(--text-tertiary)] py-6 text-center
                           rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)]">
-            No worklogs for this period. Press{" "}
+            Pro toto období nejsou žádné záznamy. Stiskněte{" "}
             <kbd className="font-mono px-1 rounded bg-[var(--bg-hover)]">⌘N</kbd>{" "}
-            to add one.
+            pro přidání.
           </div>
         )}
         {[...rows]
@@ -121,7 +117,7 @@ export default function TimeLog() {
                      transition-colors duration-150"
         >
           <Plus className="w-3.5 h-3.5" aria-hidden />
-          New entry
+          Nový záznam
         </button>
       </div>
     </div>
@@ -142,7 +138,7 @@ function PeriodSelector({
         onChange={(e) => onChange(e.target.value as Period)}
         className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                    cursor-pointer focus:outline-none pr-4"
-        aria-label="Period"
+        aria-label="Období"
       >
         {(["today", "yesterday", "this-week"] as Period[]).map((p) => (
           <option key={p} value={p}>
@@ -174,12 +170,12 @@ function WorklogRow({
     >
       <IssuePill issueKey={row.issue_key} />
       <span className="flex-1 min-w-0 truncate text-xs text-[var(--text-primary)]">
-        {row.summary || "(no summary)"}
+        {row.summary || "(bez popisu)"}
       </span>
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
                        px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
                        inline-flex items-center">
-        {formatDateShort(started)}
+        {formatDateCs(started)}
       </span>
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
                        px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
@@ -197,8 +193,8 @@ function WorklogRow({
       </span>
       <button
         type="button"
-        aria-label={`Delete worklog ${row.issue_key}`}
-        title="Delete"
+        aria-label={`Smazat záznam ${row.issue_key}`}
+        title="Smazat"
         className="text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
       >
         <Trash2 className="w-3.5 h-3.5" aria-hidden />
@@ -217,13 +213,6 @@ function periodRange(p: Period): [Date, Date] {
   // This week
   const monday = startOfWeek(today);
   return [monday, today];
-}
-
-function formatDateShort(d: Date): string {
-  const dd = `${d.getDate()}`.padStart(2, "0");
-  const mm = `${d.getMonth() + 1}`.padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
 }
 
 function formatHHMM(d: Date): string {

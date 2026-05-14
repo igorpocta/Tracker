@@ -44,10 +44,10 @@ export function DayTimeline({ rows, day }: DayTimelineProps) {
     <div
       className="rounded-[var(--radius-md)] border border-[var(--border-subtle)]
                  bg-[var(--bg-surface)] p-3"
-      aria-label="Day timeline"
+      aria-label="Časová osa dne"
     >
       <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-3">
-        Day timeline
+        Časová osa dne
       </h3>
       <div className="grid grid-cols-17 gap-1" style={{
         gridTemplateColumns: `repeat(${END_HOUR - START_HOUR}, minmax(0, 1fr))`,
@@ -72,11 +72,11 @@ export function DayTimeline({ rows, day }: DayTimelineProps) {
         ))}
       </div>
       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
-        Hold{" "}
+        Podržením{" "}
         <kbd className="inline-block font-mono px-1 rounded bg-[var(--bg-hover)]">
           Shift
         </kbd>{" "}
-        for more functions
+        dostupné další funkce
       </div>
     </div>
   );
