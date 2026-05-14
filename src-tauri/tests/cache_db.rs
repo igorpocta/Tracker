@@ -1,6 +1,7 @@
 use tempfile::TempDir;
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
+use tracker_lib::cache::worklogs::{recent as worklog_recent, record as worklog_record, WorklogRow};
 use tracker_lib::cache::Db;
 
 fn fresh_db() -> (TempDir, Db) {
@@ -152,4 +153,60 @@ fn timer_stop_clears_state() {
 fn timer_get_returns_none_when_no_timer() {
     let (_d, db) = fresh_db();
     assert!(timer_get(&db).unwrap().is_none());
+}
+
+#[test]
+fn record_and_list_worklogs_ordered_by_logged_at_desc() {
+    let (_d, db) = fresh_db();
+    let id1 = worklog_record(
+        &db,
+        &WorklogRow {
+            issue_key: "A-1".into(),
+            duration_s: 600,
+            started_at: 1,
+            logged_at: 100,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let id2 = worklog_record(
+        &db,
+        &WorklogRow {
+            issue_key: "A-2".into(),
+            duration_s: 300,
+            started_at: 1,
+            logged_at: 200,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_ne!(id1, id2, "ids must be auto-assigned and unique");
+
+    let rows = worklog_recent(&db, 10).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].issue_key, "A-2");
+    assert_eq!(rows[1].issue_key, "A-1");
+    assert_eq!(rows[0].id, Some(id2));
+    assert_eq!(rows[1].id, Some(id1));
+}
+
+#[test]
+fn recent_respects_limit() {
+    let (_d, db) = fresh_db();
+    for i in 0..5 {
+        worklog_record(
+            &db,
+            &WorklogRow {
+                issue_key: format!("X-{i}"),
+                duration_s: 60,
+                started_at: 0,
+                logged_at: i,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    let rows = worklog_recent(&db, 3).unwrap();
+    assert_eq!(rows.len(), 3);
 }
