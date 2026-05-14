@@ -23,16 +23,17 @@ pub use browser::{
     get_browser_context, get_current_visible_ticket, get_extension_last_heartbeat,
 };
 pub use config::{
-    enter_main_app, enter_setup, has_config, open_main_window, save_config, test_jira_connection,
+    enter_main_app, enter_setup, get_current_config, has_config, open_main_window, save_config,
+    sign_out, test_jira_connection, update_config,
 };
 pub use issues::{
     get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache,
 };
 pub use misc::{haptic_feedback, open_jira_issue, open_url};
 pub use prefs::{
-    get_daily_goal, get_hourly_rate, set_app_icon, set_daily_goal, set_hourly_rate,
-    set_widget_format,
+    get_daily_goal, get_density, get_font_size, get_hourly_rate, get_theme, set_app_icon,
+    set_daily_goal, set_density, set_font_size, set_hourly_rate, set_theme, set_widget_format,
 };
 pub use timer::{get_timer_state, start_timer, stop_timer_inner, update_timer_start};
 pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
-pub use worklog::get_worklog_issues;
+pub use worklog::{get_worklog_issues, get_worklogs_for_range, refresh_all, RefreshAllResult};
