@@ -124,6 +124,8 @@ export interface ActiveTimerState {
   started_at: number;
   /** Elapsed seconds at the moment the snapshot was taken. */
   elapsed_seconds: number;
+  /** Phase 18B — Item 6: in-flight comment attached to the running timer. */
+  comment?: string | null;
 }
 
 /** Visible Jira ticket reported by the browser extension. */
@@ -172,6 +174,12 @@ export type AccentColor =
   | "trcker"
   | "love"
   | "halloween"
+  // Mono palettes (Phase 18B — Item 16)
+  | "mocha"
+  | "electric"
+  | "forest"
+  | "plum"
+  | "rust"
   // Dual palettes (Phase 13)
   | "czech"
   | "aurora-boreal"

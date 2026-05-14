@@ -19,6 +19,7 @@ import {
   getTimerState,
   startTimer as invokeStart,
   stopTimer as invokeStop,
+  updateTimerComment as invokeUpdateComment,
   updateTimerStart as invokeUpdateStart,
 } from "../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../api/types";
@@ -35,8 +36,14 @@ export interface TimerStoreState {
 export interface TimerStoreActions {
   /** Pull current state from the backend; safe to call repeatedly. */
   hydrate: () => Promise<void>;
-  /** Start (or restart) the timer for the given issue. */
-  start: (issueKey: string) => Promise<void>;
+  /**
+   * Start (or restart) the timer for the given issue. Optionally attaches an
+   * in-flight comment that will be used by the eventual worklog (unless the
+   * StopDialog overrides it).
+   */
+  start: (issueKey: string, comment?: string | null) => Promise<void>;
+  /** Update the in-flight comment on the running timer. */
+  setComment: (comment: string | null) => Promise<void>;
   /** Stop the active timer with an optional comment. */
   stop: (comment?: string) => Promise<WorklogRow | null>;
   /** Adjust the start time of the running timer (ms since epoch). */
@@ -63,14 +70,24 @@ export const useTimerStore = create<TimerStore>((set, get) => ({
     }
   },
 
-  start: async (issueKey) => {
+  start: async (issueKey, comment) => {
     set({ busy: true, error: null });
     try {
-      const next = await invokeStart(issueKey);
+      const next = await invokeStart(issueKey, undefined, comment ?? null);
       set({ active: next, busy: false });
     } catch (e) {
       set({ busy: false, error: errMessage(e) });
       throw e;
+    }
+  },
+
+  setComment: async (comment) => {
+    if (!get().active) return;
+    try {
+      const next = await invokeUpdateComment(comment);
+      set({ active: next });
+    } catch (e) {
+      set({ error: errMessage(e) });
     }
   },
 

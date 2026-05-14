@@ -38,6 +38,8 @@ pub const ALLOWED_ACCENTS: &[&str] = &[
     "teal", "graphite",
     // Mono palettes
     "aurora", "trcker", "love", "halloween",
+    // Phase 18B — Item 16: new MONO palettes
+    "mocha", "electric", "forest", "plum", "rust",
     // Dual palettes
     "czech", "aurora-boreal", "sakura-night", "cyber-lime", "nordic-fjord",
 ];

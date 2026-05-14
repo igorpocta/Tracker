@@ -81,20 +81,37 @@ export function getTimerState(): Promise<ActiveTimerState | null> {
 }
 
 /**
- * `start_timer(issue_key?, started_at_ms?): ActiveTimerState`
+ * `start_timer(issue_key?, started_at_ms?, comment?): ActiveTimerState`
  *
  * Phase 18A — Item 4: `issueKey` is optional. Passing `undefined` (or an
  * empty string) starts an "unassigned" timer — the UI surfaces a red ⚠ until
  * the user assigns an issue via `assignActiveTimer` (or stops, in which case
  * the resulting worklog has `pending_assignment = true`).
+ *
+ * Phase 18B — Item 6: optional `comment` attaches an in-flight note that is
+ * carried into the eventual worklog (unless the StopDialog provides one).
  */
 export function startTimer(
   issueKey?: string | null,
   startedAtMs?: number,
+  comment?: string | null,
 ): Promise<ActiveTimerState> {
   return invoke<ActiveTimerState>("start_timer", {
     issueKey: issueKey ?? null,
     startedAtMs: startedAtMs ?? null,
+    comment: comment ?? null,
+  });
+}
+
+/**
+ * `update_timer_comment(comment?): ActiveTimerState` — change the in-flight
+ * comment on the running timer. Pass `null` (or an empty string) to clear it.
+ */
+export function updateTimerComment(
+  comment: string | null,
+): Promise<ActiveTimerState> {
+  return invoke<ActiveTimerState>("update_timer_comment", {
+    comment: comment ?? null,
   });
 }
 
@@ -473,6 +490,44 @@ export function getDayTimelineVisible(): Promise<boolean> {
 
 export function setDayTimelineVisible(visible: boolean): Promise<void> {
   return invoke<void>("set_day_timeline_visible", { visible });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18B — Item 22: earnings visibility
+// -----------------------------------------------------------------------------
+
+export function getEarningsVisible(): Promise<boolean> {
+  return invoke<boolean>("get_earnings_visible");
+}
+
+export function setEarningsVisible(visible: boolean): Promise<void> {
+  return invoke<void>("set_earnings_visible", { visible });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18B — Item 26: favorite issues
+// -----------------------------------------------------------------------------
+
+export function listFavorites(): Promise<IssueRow[]> {
+  return invoke<IssueRow[]>("list_favorites");
+}
+
+export function addFavorite(
+  issueKey: string,
+  connectionId?: number | null,
+): Promise<void> {
+  return invoke<void>("add_favorite", {
+    issueKey,
+    connectionId: connectionId ?? null,
+  });
+}
+
+export function removeFavorite(issueKey: string): Promise<void> {
+  return invoke<void>("remove_favorite", { issueKey });
+}
+
+export function isFavorite(issueKey: string): Promise<boolean> {
+  return invoke<boolean>("is_favorite", { issueKey });
 }
 
 // -----------------------------------------------------------------------------

@@ -114,11 +114,19 @@ export function Popover() {
   }, [refresh]);
 
   useEffect(() => {
+    // Phase 18B — Item 17: keep the popover face in lockstep with the main
+    // window. Every relevant event triggers a state refetch so the running
+    // timer / today totals / recent issues stay consistent.
     const events = [
       "popover:opened",
       "timer-started",
       "timer-stopped",
+      "timer-updated",
       "worklog-saved",
+      "worklog-created",
+      "worklog-updated",
+      "worklog-deleted",
+      "worklog-moved",
     ];
     const unlisteners: Array<() => void> = [];
     events.forEach((ev) => {

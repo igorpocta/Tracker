@@ -27,12 +27,15 @@
  * card shows a dash.
  */
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Download, Eye, EyeOff } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { getWorklogsForRange } from "../api/commands";
 import type { WorklogRow } from "../api/types";
 import { IssuePill } from "../components/common/IssuePill";
+import { DailyBarChart } from "../components/Reports/DailyBarChart";
+import { ExportButton } from "../components/Reports/ExportButton";
+import { SummaryCards } from "../components/Reports/SummaryCards";
 import {
   addDays,
   dayEndUnixS,
@@ -44,7 +47,7 @@ import {
   startOfPreviousMonth,
   startOfWeek,
 } from "../lib/dates";
-import { formatDateCs, formatDateCsShort, formatDurationShort, formatMoney } from "../lib/format";
+import { formatDateCs, formatDurationShort } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
 type Period = "this-week" | "last-week" | "this-month" | "last-month" | "last-30";
@@ -62,6 +65,8 @@ export default function Reports() {
   const [from, to] = useMemo(() => periodRange(period), [period]);
   const hourlyRate = usePrefsStore((s) => s.hourlyRate);
   const currency = usePrefsStore((s) => s.currency);
+  const dailyGoalSeconds = usePrefsStore((s) => s.dailyGoalSeconds);
+  const dailyGoalHours = dailyGoalSeconds / 3600;
 
   const fromUnix = dayStartUnixS(from);
   const toUnix = dayEndUnixS(to);
@@ -92,43 +97,33 @@ export default function Reports() {
             {formatDateCs(from)} → {formatDateCs(to)}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => exportXlsx(rows, from, to)}
-          className="inline-flex items-center gap-1.5 px-3 h-8
-                     rounded-[var(--radius-md)] text-xs text-[var(--accent)]
-                     border border-[var(--accent-soft)]
-                     bg-transparent hover:bg-[var(--accent-soft)]
-                     transition-colors duration-150"
-        >
-          <Download className="w-3.5 h-3.5" aria-hidden />
-          Exportovat XLSX
-        </button>
+        <ExportButton rows={rows} from={from} to={to} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <BigStatCard
-          label="Celkový čas"
-          value={
-            totalSeconds > 0 ? (
-              <span className="text-[var(--accent)]">
-                {formatDurationShort(totalSeconds)}
-              </span>
-            ) : (
-              <span className="text-[var(--text-tertiary)]">0m</span>
-            )
-          }
-        />
-        <BigStatCard label="Odpracovaných dní" value={`${daysWorked}`} />
-        <BigStatCard label="Dotčených úkolů" value={`${issuesTouched}`} />
-        <EarningsCard
-          earnings={earnings}
-          currency={currency}
-          enabled={hourlyRate > 0}
-        />
-      </div>
+      <SummaryCards
+        totalSeconds={totalSeconds}
+        daysWorked={daysWorked}
+        issuesTouched={issuesTouched}
+        earnings={earnings}
+        currency={currency}
+        hourlyRateConfigured={hourlyRate > 0}
+        durationLabel={
+          totalSeconds > 0 ? (
+            <span className="text-[var(--accent)]">
+              {formatDurationShort(totalSeconds)}
+            </span>
+          ) : (
+            <span className="text-[var(--text-tertiary)]">0m</span>
+          )
+        }
+      />
 
-      <DailyHoursChart rows={rows} from={from} to={to} />
+      <DailyBarChart
+        rows={rows}
+        from={from}
+        to={to}
+        dailyGoalHours={dailyGoalHours}
+      />
 
       <IssuesBreakdown rows={rows} />
     </div>
@@ -166,148 +161,6 @@ function PeriodSelector({
         aria-hidden
       />
     </label>
-  );
-}
-
-function BigStatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
-                    bg-[var(--bg-surface)] p-4">
-      <div className="text-[11px] text-[var(--text-tertiary)]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function EarningsCard({
-  earnings,
-  currency,
-  enabled,
-}: {
-  earnings: number;
-  currency: string;
-  enabled: boolean;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
-                    bg-[var(--bg-surface)] p-4 relative">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] text-[var(--text-tertiary)]">Výdělek</div>
-        {enabled && (
-          <button
-            type="button"
-            onClick={() => setRevealed((v) => !v)}
-            aria-label={revealed ? "Skrýt výdělek" : "Zobrazit výdělek"}
-            className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]
-                       transition-colors duration-150"
-          >
-            {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-        )}
-      </div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--accent-2)]">
-        {!enabled ? (
-          <span className="text-[var(--text-tertiary)]">—</span>
-        ) : revealed ? (
-          formatMoney(earnings, currency)
-        ) : (
-          <span aria-hidden className="tracking-wider">
-            ••••
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DailyHoursChart({
-  rows,
-  from,
-  to,
-}: {
-  rows: WorklogRow[];
-  from: Date;
-  to: Date;
-}) {
-  const days = useMemo(() => buildDayList(from, to), [from, to]);
-  const totals = useMemo(() => totalsByDay(rows), [rows]);
-
-  const max = useMemo(() => {
-    let m = 0;
-    for (const d of days) {
-      const v = (totals.get(formatKey(d)) ?? 0) / 3600;
-      if (v > m) m = v;
-    }
-    return Math.max(3, Math.ceil(m / 3) * 3);
-  }, [days, totals]);
-
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
-                    bg-[var(--bg-surface)] p-5">
-      <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Hodiny za den
-      </h3>
-      <div className="flex gap-4 h-[260px]">
-        <div className="flex flex-col justify-between text-[10px] text-[var(--text-tertiary)] tabular-nums py-1">
-          {[max, Math.round((max * 2) / 3), Math.round(max / 3), 0].map((v) => (
-            <div key={`y-${v}`}>{v}</div>
-          ))}
-        </div>
-        <div className="flex-1 relative">
-          <div className="absolute inset-0 flex flex-col justify-between py-1 pointer-events-none">
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={`grid-${i}`}
-                className="border-t border-[var(--border-subtle)]"
-              />
-            ))}
-          </div>
-          <div className="absolute inset-0 flex items-end gap-[2px] pt-1 pb-5">
-            {days.map((d) => {
-              const seconds = totals.get(formatKey(d)) ?? 0;
-              const hours = seconds / 3600;
-              const heightPct = max > 0 ? (hours / max) * 100 : 0;
-              return (
-                <div
-                  key={d.toISOString()}
-                  className="flex-1 relative"
-                  title={`${formatDateCs(d)} · ${formatDurationShort(seconds)}`}
-                >
-                  <div
-                    className="absolute left-0 right-0 bottom-0 rounded-t-[2px]"
-                    style={{
-                      height: `${heightPct}%`,
-                      minHeight: heightPct > 0 ? "2px" : 0,
-                      background:
-                        heightPct > 0
-                          ? "var(--accent)"
-                          : "var(--bg-active)",
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="absolute left-0 right-0 bottom-0 flex gap-[2px]">
-            {days.map((d, idx) => (
-              <div
-                key={`label-${d.toISOString()}`}
-                className="flex-1 text-[9px] text-[var(--text-tertiary)] text-center tabular-nums"
-              >
-                {idx % 2 === 0 ? formatDateCsShort(d) : ""}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -372,27 +225,6 @@ function uniqueDays(rows: WorklogRow[]): number {
   return s.size;
 }
 
-function totalsByDay(rows: WorklogRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    const k = formatKey(d);
-    map.set(k, (map.get(k) ?? 0) + r.duration_s);
-  }
-  return map;
-}
-
-function buildDayList(from: Date, to: Date): Date[] {
-  const out: Date[] = [];
-  const d = startOfDay(from);
-  const end = startOfDay(to);
-  while (d <= end) {
-    out.push(new Date(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
 interface Aggregated {
   issueKey: string;
   summary: string | null | undefined;
@@ -443,51 +275,4 @@ function periodRange(p: Period): [Date, Date] {
 
 function formatKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-
-/**
- * Export the supplied worklog rows as a CSV download. Despite the button
- * label ("Export XLSX") we ship CSV today — Excel opens CSV happily, and
- * adding a real XLSX writer dependency for one button is poor leverage.
- */
-function exportXlsx(rows: WorklogRow[], from: Date, to: Date): void {
-  const headers = ["Úkol", "Popis", "Datum", "Začátek", "Konec", "Trvání (min)", "Komentář"];
-  const body = rows.map((r) => {
-    const start = new Date(r.started_at * 1000);
-    const end = new Date((r.started_at + r.duration_s) * 1000);
-    return [
-      r.issue_key,
-      r.summary ?? "",
-      formatDateCs(start),
-      `${`${start.getHours()}`.padStart(2, "0")}:${`${start.getMinutes()}`.padStart(2, "0")}`,
-      `${`${end.getHours()}`.padStart(2, "0")}:${`${end.getMinutes()}`.padStart(2, "0")}`,
-      `${Math.round(r.duration_s / 60)}`,
-      r.comment ?? "",
-    ];
-  });
-  const csv = [headers, ...body]
-    .map((row) =>
-      row
-        .map((cell) => {
-          const s = `${cell ?? ""}`;
-          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-        })
-        .join(","),
-    )
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `tracker-${formatIso(from)}-${formatIso(to)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function formatIso(d: Date): string {
-  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
 }

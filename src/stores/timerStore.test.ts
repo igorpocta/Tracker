@@ -9,17 +9,19 @@ vi.mock("../api/commands", () => ({
   startTimer: vi.fn(),
   stopTimer: vi.fn(),
   updateTimerStart: vi.fn(),
+  updateTimerComment: vi.fn(),
 }));
 
 import * as commands from "../api/commands";
 import { elapsedSeconds, useTimerStore } from "./timerStore";
 
-const { getTimerState, startTimer, stopTimer, updateTimerStart } =
+const { getTimerState, startTimer, stopTimer, updateTimerStart, updateTimerComment } =
   commands as unknown as {
     getTimerState: ReturnType<typeof vi.fn>;
     startTimer: ReturnType<typeof vi.fn>;
     stopTimer: ReturnType<typeof vi.fn>;
     updateTimerStart: ReturnType<typeof vi.fn>;
+    updateTimerComment: ReturnType<typeof vi.fn>;
   };
 
 function resetStore() {
@@ -33,6 +35,7 @@ describe("timerStore", () => {
     startTimer.mockReset();
     stopTimer.mockReset();
     updateTimerStart.mockReset();
+    updateTimerComment.mockReset();
   });
 
   it("hydrate writes the backend snapshot into the store", async () => {
@@ -58,7 +61,7 @@ describe("timerStore", () => {
       elapsed_seconds: 0,
     });
     await useTimerStore.getState().start("A-1");
-    expect(startTimer).toHaveBeenCalledWith("A-1");
+    expect(startTimer).toHaveBeenCalledWith("A-1", undefined, null);
     expect(useTimerStore.getState().active?.issue_key).toBe("A-1");
     expect(useTimerStore.getState().busy).toBe(false);
   });
@@ -103,6 +106,26 @@ describe("timerStore", () => {
     await useTimerStore.getState().updateStart(500);
     expect(updateTimerStart).toHaveBeenCalledWith(500);
     expect(useTimerStore.getState().active?.started_at).toBe(500);
+  });
+
+  it("setComment forwards to the backend when active", async () => {
+    useTimerStore.setState({
+      active: { issue_key: "A-1", started_at: 0, elapsed_seconds: 10 },
+    });
+    updateTimerComment.mockResolvedValueOnce({
+      issue_key: "A-1",
+      started_at: 0,
+      elapsed_seconds: 10,
+      comment: "hello",
+    });
+    await useTimerStore.getState().setComment("hello");
+    expect(updateTimerComment).toHaveBeenCalledWith("hello");
+    expect(useTimerStore.getState().active?.comment).toBe("hello");
+  });
+
+  it("setComment no-ops when no timer is running", async () => {
+    await useTimerStore.getState().setComment("hello");
+    expect(updateTimerComment).not.toHaveBeenCalled();
   });
 });
 

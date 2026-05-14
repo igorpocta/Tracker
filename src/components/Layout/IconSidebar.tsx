@@ -191,8 +191,9 @@ function SidebarTooltip({ label }: { label: string }) {
 
 /**
  * Bottom ring chip. Either shows running-timer minutes (when a timer is
- * active) or the number of cached Jira issues. Caps at `500+` so the chip
- * stays compact; `–` when the cache is empty.
+ * active) or the number of cached Jira issues. Phase 18B — Item 5: formats
+ * large counts as `Nk+` (1k+, 2k+, … 10k+) so the chip stays compact across
+ * very different cache sizes.
  */
 function CacheRing({
   elapsedSeconds,
@@ -207,12 +208,8 @@ function CacheRing({
   if (running) {
     const mins = Math.floor(elapsedSeconds / 60);
     label = mins < 60 ? `${mins}` : `${Math.floor(mins / 60)}h`;
-  } else if (cachedIssues <= 0) {
-    label = "–";
-  } else if (cachedIssues > 500) {
-    label = "500+";
   } else {
-    label = `${cachedIssues}`;
+    label = formatCacheCount(cachedIssues);
   }
   return (
     <div
@@ -236,4 +233,20 @@ function CacheRing({
       <span className="text-[10px] font-mono tabular-nums">{label}</span>
     </div>
   );
+}
+
+/**
+ * Phase 18B — Item 5: compact cache-count formatting.
+ *
+ *   0           → "–"
+ *   1 – 999     → exact (e.g. "42", "999")
+ *   1000–1999   → "1k+"
+ *   2000–9999   → "2k+", "3k+", …, "9k+"
+ *   10000+      → "10k+"
+ */
+export function formatCacheCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "–";
+  if (n < 1000) return `${Math.floor(n)}`;
+  if (n >= 10000) return "10k+";
+  return `${Math.floor(n / 1000)}k+`;
 }

@@ -191,6 +191,12 @@ const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
   "trcker",
   "love",
   "halloween",
+  // Phase 18B — Item 16: new MONO palettes
+  "mocha",
+  "electric",
+  "forest",
+  "plum",
+  "rust",
   // Dual palettes
   "czech",
   "aurora-boreal",

@@ -17,7 +17,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { Play, Square } from "lucide-react";
+import { MessageSquare, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { searchIssuesCache } from "../../api/commands";
@@ -27,13 +27,17 @@ import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
 export interface StartTrackingBarProps {
-  onPickIssue: (issueKey: string) => void;
+  /**
+   * Called when the user clicks Start. `comment` is the optional in-flight
+   * note from the comment input (empty string when blank).
+   */
+  onPickIssue: (issueKey: string, comment: string) => void;
   onStop?: () => void;
   /**
    * Phase 18A — Item 4: callback to start an unassigned timer (empty issue
    * key). When omitted, the "Bez úkolu" button is hidden.
    */
-  onStartUnassigned?: () => void;
+  onStartUnassigned?: (comment: string) => void;
 }
 
 const LIMIT = 20;
@@ -63,11 +67,12 @@ function IdleBar({
   onPickIssue,
   onStartUnassigned,
 }: {
-  onPickIssue: (issueKey: string) => void;
-  onStartUnassigned?: () => void;
+  onPickIssue: (issueKey: string, comment: string) => void;
+  onStartUnassigned?: (comment: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [comment, setComment] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +111,9 @@ function IdleBar({
     setQuery("");
     setDebounced("");
     setOpen(false);
-    onPickIssue(issueKey);
+    const c = comment.trim();
+    setComment("");
+    onPickIssue(issueKey, c);
   };
 
   const onSubmit = () => {
@@ -115,11 +122,18 @@ function IdleBar({
     }
   };
 
+  const onStartBlank = () => {
+    if (!onStartUnassigned) return;
+    const c = comment.trim();
+    setComment("");
+    onStartUnassigned(c);
+  };
+
   const clock = formatClock(now);
 
   return (
-    <div className="flex items-stretch gap-2" ref={containerRef}>
-      <div className="relative flex-1 min-w-0">
+    <div className="flex items-stretch gap-2 flex-wrap" ref={containerRef}>
+      <div className="relative flex-1 min-w-[260px]">
         <input
           type="text"
           value={query}
@@ -169,6 +183,37 @@ function IdleBar({
         )}
       </div>
 
+      {/* Phase 18B — Item 6: comment input between search and clock. */}
+      <div className="relative w-44 shrink-0">
+        <MessageSquare
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)]"
+          aria-hidden
+        />
+        <input
+          type="text"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (results.length > 0) {
+                onSubmit();
+              } else if (onStartUnassigned) {
+                onStartBlank();
+              }
+            }
+          }}
+          placeholder="Poznámka (volitelné)"
+          aria-label="Poznámka k zapnuté časomíře"
+          className="w-full h-11 pl-8 pr-3 rounded-[var(--radius-md)]
+                     bg-[var(--bg-surface)] border border-[var(--border-subtle)]
+                     text-xs text-[var(--text-primary)]
+                     placeholder:text-[var(--text-tertiary)]
+                     focus:outline-none focus:border-[var(--border-default)]
+                     transition-colors duration-150"
+        />
+      </div>
+
       <button
         type="button"
         onClick={onSubmit}
@@ -189,7 +234,7 @@ function IdleBar({
       {onStartUnassigned && (
         <button
           type="button"
-          onClick={onStartUnassigned}
+          onClick={onStartBlank}
           className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3 h-11
                      rounded-[var(--radius-md)] border border-[var(--border-subtle)]
                      text-xs text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]
@@ -285,6 +330,25 @@ function RunningBar({
   // Phase 18A — Item 4: unassigned timer surfaces ⚠ + red ring.
   const unassigned = !active.issue_key;
 
+  // Phase 18B — Item 6: live editable comment chip.
+  const [editingComment, setEditingComment] = useState(false);
+  const [draftComment, setDraftComment] = useState(active.comment ?? "");
+  const setComment = useTimerStore((s) => s.setComment);
+
+  useEffect(() => {
+    if (!editingComment) {
+      setDraftComment(active.comment ?? "");
+    }
+  }, [active.comment, editingComment]);
+
+  const commitComment = async () => {
+    setEditingComment(false);
+    const next = draftComment.trim();
+    const cur = (active.comment ?? "").trim();
+    if (next === cur) return;
+    await setComment(next.length > 0 ? next : null);
+  };
+
   return (
     <div className="flex items-stretch gap-2">
       <div
@@ -311,9 +375,46 @@ function RunningBar({
         >
           {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
         </span>
-        <span className="text-xs text-[var(--text-tertiary)] truncate">
-          {unassigned ? "Přiřaďte úkol před uložením" : "Sledování…"}
-        </span>
+        {editingComment ? (
+          <input
+            type="text"
+            autoFocus
+            value={draftComment}
+            onChange={(e) => setDraftComment(e.target.value)}
+            onBlur={commitComment}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") {
+                setDraftComment(active.comment ?? "");
+                setEditingComment(false);
+              }
+            }}
+            placeholder="Poznámka"
+            aria-label="Upravit poznámku"
+            className="flex-1 min-w-0 h-7 px-2 text-xs rounded-[var(--radius-sm)]
+                       bg-transparent border border-[var(--border-subtle)]
+                       focus:outline-none focus:border-[var(--border-default)]"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditingComment(true)}
+            className="flex-1 min-w-0 text-left text-xs text-[var(--text-tertiary)] truncate
+                       hover:text-[var(--text-secondary)] transition-colors duration-150"
+            title="Upravit poznámku"
+          >
+            {active.comment && active.comment.trim().length > 0 ? (
+              <span className="inline-flex items-center gap-1.5">
+                <MessageSquare className="w-3 h-3 shrink-0" aria-hidden />
+                <span className="truncate">{active.comment}</span>
+              </span>
+            ) : unassigned ? (
+              "Přiřaďte úkol před uložením"
+            ) : (
+              <span className="text-[var(--text-tertiary)]">+ poznámka</span>
+            )}
+          </button>
+        )}
         <span
           className={clsx(
             "ml-auto font-mono tabular-nums text-sm",

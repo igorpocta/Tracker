@@ -41,6 +41,13 @@ export const MONO_PALETTES: PaletteSpec[] = [
   { id: "trcker",    label: "Tracker",   mode: "mono", primary: "#EAB308", secondary: "#EAB308" },
   { id: "love",      label: "Love",      mode: "mono", primary: "#EC4899", secondary: "#EC4899" },
   { id: "halloween", label: "Halloween", mode: "mono", primary: "#F97316", secondary: "#F97316" },
+  // Phase 18B — Item 16: six new MONO palettes.
+  { id: "graphite",  label: "Graphite",  mode: "mono", primary: "#71717A", secondary: "#71717A" },
+  { id: "mocha",     label: "Mocha",     mode: "mono", primary: "#A87C5F", secondary: "#A87C5F" },
+  { id: "electric",  label: "Electric",  mode: "mono", primary: "#3B82F6", secondary: "#3B82F6" },
+  { id: "forest",    label: "Forest",    mode: "mono", primary: "#22C55E", secondary: "#22C55E" },
+  { id: "plum",      label: "Plum",      mode: "mono", primary: "#A855F7", secondary: "#A855F7" },
+  { id: "rust",      label: "Rust",      mode: "mono", primary: "#DC2626", secondary: "#DC2626" },
 ];
 
 /** Dual palettes — primary + secondary, both UNLOCKED (no premium gate). */

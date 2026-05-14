@@ -33,8 +33,8 @@ afterEach(() => {
 });
 
 describe("palette specs", () => {
-  it("has 4 mono palettes and 5 dual palettes", () => {
-    expect(MONO_PALETTES).toHaveLength(4);
+  it("has 10 mono palettes and 5 dual palettes", () => {
+    expect(MONO_PALETTES).toHaveLength(10);
     expect(DUAL_PALETTES).toHaveLength(5);
   });
 

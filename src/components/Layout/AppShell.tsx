@@ -239,9 +239,14 @@ export function AppShell() {
 
   // ---- Start tracking handler ---------------------------------------------
   const handlePickIssue = useCallback(
-    async (issueKey: string) => {
+    async (issueKey: string, comment: string) => {
       try {
-        await startTimer(issueKey);
+        // Phase 18B — Item 6: in-flight comment threaded into start_timer.
+        await startTimer(
+          issueKey,
+          undefined,
+          comment.length > 0 ? comment : null,
+        );
         navigate("/");
       } catch (e) {
         pushToast("error", typeof e === "string" ? e : "Nepodařilo se spustit časomíru");
@@ -251,21 +256,24 @@ export function AppShell() {
   );
 
   // Phase 18A — Item 4: start an unassigned timer.
-  const handleStartUnassigned = useCallback(async () => {
-    try {
-      await startTimer(null);
-      navigate("/");
-      pushToast(
-        "info",
-        "Časomíra běží bez přiřazeného úkolu — nezapomeňte ho přiřadit před uložením.",
-      );
-    } catch (e) {
-      pushToast(
-        "error",
-        typeof e === "string" ? e : "Nepodařilo se spustit časomíru",
-      );
-    }
-  }, [navigate, pushToast]);
+  const handleStartUnassigned = useCallback(
+    async (comment: string) => {
+      try {
+        await startTimer(null, undefined, comment.length > 0 ? comment : null);
+        navigate("/");
+        pushToast(
+          "info",
+          "Časomíra běží bez přiřazeného úkolu — nezapomeňte ho přiřadit před uložením.",
+        );
+      } catch (e) {
+        pushToast(
+          "error",
+          typeof e === "string" ? e : "Nepodařilo se spustit časomíru",
+        );
+      }
+    },
+    [navigate, pushToast],
+  );
 
   // ---- Add entry panel -----------------------------------------------------
   const [addEntryOpen, setAddEntryOpen] = useState(false);
