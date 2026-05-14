@@ -26,7 +26,8 @@ use tracker_lib::commands::config::{
 use tracker_lib::config::JiraConfig;
 use tracker_lib::state::AppState;
 use tracker_lib::commands::timer::{
-    get_timer_state_inner, record_local_stop, start_timer_inner, update_timer_start_inner,
+    get_timer_state_inner, record_local_stop, start_timer_inner, update_timer_comment_inner,
+    update_timer_start_inner,
 };
 use tracker_lib::jira::JiraError;
 
@@ -80,6 +81,36 @@ fn start_timer_replaces_previous_row() {
     let t = timer::get(&db).unwrap().unwrap();
     assert_eq!(t.issue_key, "ACME-2");
     assert_eq!(t.started_at, 5);
+}
+
+#[test]
+fn start_timer_persists_initial_comment() {
+    let (_dir, db) = fresh_db();
+    let state = start_timer_inner(&db, "ACME-1", 1_000, Some("draft note")).unwrap();
+    assert_eq!(state.comment.as_deref(), Some("draft note"));
+    let snap = get_timer_state_inner(&db, 2_000).unwrap().unwrap();
+    assert_eq!(snap.comment.as_deref(), Some("draft note"));
+}
+
+#[test]
+fn update_timer_comment_changes_only_the_comment() {
+    let (_dir, db) = fresh_db();
+    start_timer_inner(&db, "ACME-1", 1_000, Some("first")).unwrap();
+    let snap = update_timer_comment_inner(&db, Some("second"), 2_000).unwrap();
+    assert_eq!(snap.comment.as_deref(), Some("second"));
+    assert_eq!(snap.issue_key, "ACME-1");
+    // The started_at should not have moved.
+    assert_eq!(snap.started_at, 1_000);
+}
+
+#[test]
+fn update_timer_comment_clears_when_blank() {
+    let (_dir, db) = fresh_db();
+    start_timer_inner(&db, "ACME-1", 0, Some("hello")).unwrap();
+    let cleared = update_timer_comment_inner(&db, Some("   "), 1_000).unwrap();
+    assert!(cleared.comment.is_none());
+    let null_cleared = update_timer_comment_inner(&db, None, 2_000).unwrap();
+    assert!(null_cleared.comment.is_none());
 }
 
 #[test]
