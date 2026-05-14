@@ -1,9 +1,8 @@
 /**
  * Smoke + interaction tests for the popover view.
  *
- * Mocks the Tauri IPC bridge so `getRecentIssues`, `getTimerState`, and
- * `startTimer` etc. resolve from fakes instead of actually hitting the
- * backend.
+ * Mocks the Tauri IPC bridge so `getRecentIssues`, `getTimerState`, etc.
+ * resolve from fakes instead of actually hitting the backend.
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,9 +17,13 @@ vi.mock("@tauri-apps/api/event", () => eventMock);
 function setupInvoke({
   timer = null,
   recent = [],
+  worklogs = [],
+  goal = 9 * 3600,
 }: {
   timer?: unknown;
   recent?: unknown[];
+  worklogs?: unknown[];
+  goal?: number;
 }) {
   mockInvoke.mockImplementation(async (cmd: string) => {
     switch (cmd) {
@@ -28,6 +31,12 @@ function setupInvoke({
         return timer;
       case "get_recent_issues":
         return recent;
+      case "get_worklogs_for_range":
+        return worklogs;
+      case "get_daily_goal":
+        return goal;
+      case "get_accent_color":
+        return "aurora";
       case "start_timer":
         return {
           issue_key: "ACME-1",
@@ -37,6 +46,8 @@ function setupInvoke({
       case "stop_timer_inner":
         return null;
       case "open_main_window":
+        return null;
+      case "enter_main_app":
         return null;
       default:
         return null;
@@ -50,22 +61,27 @@ beforeEach(() => {
 });
 
 describe("Popover", () => {
-  it("renders the idle placeholder when no timer is running", async () => {
+  it("renders the idle status card when no timer is running", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
 
-    // Initial render shows the dashes placeholder.
-    expect(screen.getByLabelText(/timer not running/i)).toBeInTheDocument();
-
-    // After hydrate the recent-issues empty message appears.
+    // After hydrate the idle status card appears.
     await waitFor(() =>
-      expect(screen.getByText(/no recent issues yet/i)).toBeInTheDocument(),
+      expect(screen.getByText(/no timer running/i)).toBeInTheDocument(),
     );
+    expect(screen.getByText(/click an issue to start tracking/i)).toBeInTheDocument();
+  });
 
-    // Stop button is disabled when there is no active timer.
-    const stopBtn = screen.getByRole("button", { name: /stop timer/i });
-    expect(stopBtn).toBeDisabled();
+  it("renders the Trcker. brand and Today goal block", async () => {
+    setupInvoke({ timer: null, recent: [] });
+
+    render(<Popover />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/trcker\./i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/today goal/i)).toBeInTheDocument();
   });
 
   it("lists recent issues and starts a timer on click", async () => {
@@ -79,7 +95,6 @@ describe("Popover", () => {
 
     render(<Popover />);
 
-    // Both rows show up.
     await waitFor(() => {
       expect(screen.getByText("ACME-1")).toBeInTheDocument();
       expect(screen.getByText("fix the bug")).toBeInTheDocument();
@@ -101,7 +116,7 @@ describe("Popover", () => {
     });
   });
 
-  it("invokes open_main_window when 'Open main app' is clicked", async () => {
+  it("invokes open_main_window when 'Open app' is clicked", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
@@ -109,7 +124,17 @@ describe("Popover", () => {
       expect(screen.getByText(/no recent issues yet/i)).toBeInTheDocument(),
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /open main app/i }));
+    await userEvent.click(screen.getByRole("button", { name: /open app/i }));
     expect(mockInvoke).toHaveBeenCalledWith("open_main_window");
+  });
+
+  it("renders the Settings and Quit footer buttons", async () => {
+    setupInvoke({ timer: null, recent: [] });
+
+    render(<Popover />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /quit/i })).toBeInTheDocument();
   });
 });
