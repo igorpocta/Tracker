@@ -48,6 +48,7 @@ import { IssueDetail } from "../components/Issues/IssueDetail";
 import { Timer } from "../components/Timer/Timer";
 import { StopDialog } from "../components/Timer/TimerControls";
 import { WorklogHistory } from "../components/History/WorklogHistory";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useNow } from "../hooks/useNow";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { isToday } from "../lib/format";
@@ -185,6 +186,14 @@ export default function Home() {
     [setActive],
   );
   useTauriEvent<ActiveTimerState>("timer-started", onTimerStarted);
+
+  // ---- keyboard shortcuts ---------------------------------------------------
+  // Cmd/Ctrl+R refreshes the cache; Cmd/Ctrl+, toggles the goal settings panel
+  // (closest thing we have to "Settings" in MVP).
+  useKeyboardShortcuts({
+    onRefresh: refresh,
+    onOpenSettings: () => setGoalSettingsOpen((v) => !v),
+  });
 
   // ---- derived totals -------------------------------------------------------
   const now = useNow(active ? 1000 : 60_000);
