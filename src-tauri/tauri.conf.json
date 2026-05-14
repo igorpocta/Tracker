@@ -42,7 +42,7 @@
       "iconAsTemplate": true
     },
     "security": {
-      "csp": "default-src 'self' tauri:; img-src 'self' tauri: data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' tauri: ipc: http://ipc.localhost https://*.atlassian.net"
+      "csp": "default-src 'self' tauri:; img-src 'self' tauri: data: https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' tauri: ipc: http://ipc.localhost https://*.atlassian.net https://fonts.googleapis.com https://fonts.gstatic.com"
     }
   },
   "plugins": {

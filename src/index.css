@@ -1,7 +1,9 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap");
 @import "tailwindcss";
 
 :root {
   font-family: "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
+  color-scheme: dark;
 }
 
 html, body, #root {
@@ -9,4 +11,20 @@ html, body, #root {
   margin: 0;
   background: #0f0f0f;
   color: #fff;
+}
+
+/*
+ * Light-theme fallback for users who prefer it system-wide.
+ * For MVP we stay dark by default; this just keeps the app from looking
+ * broken if launched into a light environment (and provides a hook for
+ * later polish without touching every component).
+ */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+  }
+  html, body, #root {
+    background: #f7f7f7;
+    color: #111;
+  }
 }
