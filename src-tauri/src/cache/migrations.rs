@@ -1,7 +1,10 @@
 use super::db::{Db, DbError};
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("../../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, include_str!("../../migrations/0001_init.sql")),
+    (2, include_str!("../../migrations/0002_worklog_authority.sql")),
+];
 
 pub fn run(db: &Db) -> Result<(), DbError> {
     let conn = db.pool().get()?;

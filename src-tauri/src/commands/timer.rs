@@ -121,6 +121,9 @@ pub fn record_local_stop(
         logged_at: now_s,
         comment: comment.map(|s| s.to_string()),
         jira_worklog_id: jira_worklog_id.map(|s| s.to_string()),
+        author_account_id: None,
+        source: "local".to_string(),
+        updated_at_jira: None,
     };
     let id = cache::worklogs::record(db, &row).map_err(|e| e.to_string())?;
     row.id = Some(id);
