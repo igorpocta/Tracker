@@ -16,7 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 
-import { refreshAll, startTimer } from "../../api/commands";
+import { hasConfig, refreshAll, startTimer } from "../../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
@@ -147,16 +147,13 @@ export function AppShell() {
 
   // When config changes (e.g. sign-out from Settings) bounce to setup.
   const onConfigChanged = useCallback(() => {
-    // Re-check whether we still have a config; if not, route to setup.
-    import("../../api/commands").then(({ hasConfig }) =>
-      hasConfig()
-        .then((ok) => {
-          if (!ok) navigate("/setup", { replace: true });
-        })
-        .catch(() => {
-          /* ignore */
-        }),
-    );
+    hasConfig()
+      .then((ok) => {
+        if (!ok) navigate("/setup", { replace: true });
+      })
+      .catch(() => {
+        /* ignore — best-effort */
+      });
   }, [navigate]);
   useTauriEvent<unknown>("config-changed", onConfigChanged);
 
