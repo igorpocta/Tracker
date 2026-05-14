@@ -1,7 +1,10 @@
 //! Strongly-typed structs for the subset of Jira Cloud v3 responses we consume.
 
+use chrono::{DateTime, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::cache::issues::IssueRow;
 
 /// `GET /rest/api/3/myself` response.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -144,4 +147,103 @@ pub struct WorklogResponse {
     pub time_spent_seconds: Option<i64>,
     #[serde(default)]
     pub started: Option<String>,
+}
+
+/// Parse Jira's timestamp formats into a Unix second.
+///
+/// Jira emits times like `"2026-05-14T09:30:00.000+0000"` (no colon in the
+/// offset), which is not strictly RFC3339. We try the Jira-native format first
+/// and fall back to RFC3339 / naive variants.
+fn parse_jira_timestamp(s: &str) -> Option<i64> {
+    if let Ok(dt) = DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.3f%z") {
+        return Some(dt.timestamp());
+    }
+    if let Ok(dt) = DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%z") {
+        return Some(dt.timestamp());
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp());
+    }
+    if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.3f") {
+        return Some(ndt.and_utc().timestamp());
+    }
+    None
+}
+
+/// Convert a Jira issue payload into the row shape expected by the local cache.
+///
+/// Missing optional fields map to `None`; an unparseable `updated` falls back
+/// to `0` so the row is still insertable.
+pub fn map_issue_to_row(issue: &JiraIssue) -> IssueRow {
+    let fields = &issue.fields;
+
+    let summary = fields.summary.clone().unwrap_or_default();
+
+    let status_category = fields
+        .status
+        .as_ref()
+        .and_then(|s| s.status_category.as_ref())
+        .and_then(|c| c.key.clone());
+
+    let priority_order = fields
+        .priority
+        .as_ref()
+        .and_then(|p| p.id.as_ref())
+        .and_then(|s| s.parse::<i64>().ok());
+
+    let (assignee_email, assignee_account_id) = match &fields.assignee {
+        Some(a) => (a.email_address.clone(), a.account_id.clone()),
+        None => (None, None),
+    };
+
+    let parent_key = fields.parent.as_ref().and_then(|p| p.key.clone());
+    let parent_summary = fields
+        .parent
+        .as_ref()
+        .and_then(|p| p.fields.as_ref())
+        .and_then(|f| f.summary.clone());
+
+    let issue_type = fields.issuetype.as_ref().and_then(|t| t.name.clone());
+
+    let time_spent = fields.timetracking.as_ref().and_then(|tt| tt.time_spent_seconds);
+    let time_original_estimate = fields
+        .timetracking
+        .as_ref()
+        .and_then(|tt| tt.original_estimate_seconds);
+    let time_estimate = fields
+        .timetracking
+        .as_ref()
+        .and_then(|tt| tt.remaining_estimate_seconds);
+
+    // Jira's "Epic Link" classic custom field is a plain string key like "EPIC-1".
+    let epic_key = fields
+        .customfield_10014
+        .as_ref()
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+
+    let updated_at = fields
+        .updated
+        .as_deref()
+        .and_then(parse_jira_timestamp)
+        .unwrap_or(0);
+
+    IssueRow {
+        issue_key: issue.key.clone(),
+        issue_id: Some(issue.id.clone()),
+        summary,
+        status_category,
+        priority_order,
+        assignee_email,
+        assignee_account_id,
+        parent_key,
+        parent_summary,
+        issue_type,
+        time_spent,
+        aggregate_time_spent: time_spent,
+        time_original_estimate,
+        time_estimate,
+        epic_key,
+        epic_summary: None,
+        updated_at,
+    }
 }
