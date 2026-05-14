@@ -1,9 +1,8 @@
 /**
- * Vertical icon navigation rail along the left edge of the shell.
+ * Vertical macOS-style icon rail along the left edge of the shell.
  *
- * Renders the four primary routes as icon buttons with a tooltip-ish label
- * appearing on hover (CSS only — no popover library). Active route is
- * indicated by a sky accent + an accent stripe on the left.
+ * Active route is signalled by an accent-soft background + accent text.
+ * Hover reveals the label via a CSS tooltip (no popover lib needed).
  */
 import { clsx } from "clsx";
 import { BarChart3, CalendarDays, Settings as SettingsIcon, Sun } from "lucide-react";
@@ -28,7 +27,8 @@ export function SideNav() {
   return (
     <nav
       aria-label="Primary"
-      className="flex flex-col items-stretch gap-1 px-1.5 py-3 w-[68px] shrink-0 border-r border-neutral-800/70 bg-neutral-950/40"
+      className="flex flex-col items-stretch gap-0.5 px-1.5 py-3 w-[64px] shrink-0
+                 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]/60"
     >
       {NAV_ITEMS.map((item) => (
         <NavLink
@@ -37,27 +37,18 @@ export function SideNav() {
           end={item.end}
           className={({ isActive }) =>
             clsx(
-              "group relative flex flex-col items-center gap-1 px-1 py-2 rounded-lg transition-colors",
+              "group relative flex flex-col items-center gap-1 px-1 py-2 rounded-[var(--radius-md)]",
+              "transition-colors duration-150",
               isActive
-                ? "bg-sky-600/15 text-sky-200"
-                : "text-neutral-400 hover:text-white hover:bg-neutral-800/60",
+                ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
             )
           }
         >
-          {({ isActive }) => (
-            <>
-              {isActive && (
-                <span
-                  aria-hidden
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 rounded-r-full bg-sky-400"
-                />
-              )}
-              {item.icon}
-              <span className="text-[10px] leading-none tracking-tight">
-                {item.label}
-              </span>
-            </>
-          )}
+          {item.icon}
+          <span className="text-[10px] leading-none tracking-tight font-medium">
+            {item.label}
+          </span>
         </NavLink>
       ))}
     </nav>

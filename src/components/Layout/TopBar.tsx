@@ -41,12 +41,15 @@ export function TopBar({
   const mod = isMac ? "⌘" : "Ctrl";
 
   return (
-    <header className="flex items-center justify-between gap-3 px-4 h-12 border-b border-neutral-800/70 bg-neutral-950/60 backdrop-blur shrink-0">
+    <header
+      className="flex items-center justify-between gap-3 px-4 h-11 shrink-0
+                 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur"
+    >
       <div className="flex items-center gap-3 min-w-0">
         <button
           type="button"
           onClick={() => navigate("/")}
-          className="text-sm font-semibold tracking-tight hover:text-sky-300 transition-colors"
+          className="text-sm font-medium tracking-tight text-[var(--text-primary)] hover:opacity-80 transition-opacity"
           aria-label="Tracker home"
         >
           Tracker
@@ -57,16 +60,18 @@ export function TopBar({
             type="button"
             onClick={() => navigate("/")}
             aria-label={`Tracking ${active.issue_key}, elapsed ${formatDuration(elapsed)}`}
-            className="inline-flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-emerald-600/10 border border-emerald-600/30 hover:bg-emerald-600/20 transition-colors"
+            className="inline-flex items-center gap-2 pl-2 pr-1 py-1 rounded-full
+                       bg-[var(--accent-soft)] border border-transparent
+                       hover:bg-[var(--accent-strong)] transition-colors duration-150"
           >
             <span
               aria-hidden
-              className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
+              className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse"
             />
-            <span className="font-mono text-[11px] text-neutral-200">
+            <span className="font-mono text-[11px] text-[var(--text-primary)]">
               {active.issue_key}
             </span>
-            <span className="font-mono tabular-nums text-xs text-emerald-300">
+            <span className="font-mono tabular-nums text-xs text-[var(--accent)]">
               {formatDuration(elapsed)}
             </span>
             {onStop && (
@@ -77,15 +82,22 @@ export function TopBar({
                   onStop();
                 }}
                 aria-label="Stop timer"
-                className="ml-0.5 w-5 h-5 inline-flex items-center justify-center rounded-full text-emerald-200 hover:text-white hover:bg-emerald-700/40"
+                className="ml-0.5 w-5 h-5 inline-flex items-center justify-center rounded-full
+                           text-[var(--text-primary)] hover:bg-[var(--bg-active)]"
               >
                 <Square className="w-3 h-3" aria-hidden />
               </button>
             )}
           </button>
         ) : (
-          <span className="inline-flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-full border border-neutral-800/80 text-[11px] text-neutral-500">
-            <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-neutral-700" />
+          <span
+            className="inline-flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-full
+                       border border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)]"
+          >
+            <span
+              aria-hidden
+              className="w-1.5 h-1.5 rounded-full bg-[var(--text-disabled)]"
+            />
             Idle
           </span>
         )}
@@ -94,17 +106,21 @@ export function TopBar({
       <button
         type="button"
         onClick={onOpenCommandPalette}
-        className="hidden md:inline-flex items-center gap-2 px-2.5 py-1 rounded-md border border-neutral-800 bg-neutral-950/80 text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200 transition-colors min-w-[260px]"
+        className="hidden md:inline-flex items-center gap-2 px-2.5 h-7 rounded-[var(--radius-md)]
+                   border border-[var(--border-subtle)] bg-[var(--bg-app)]
+                   text-xs text-[var(--text-tertiary)]
+                   hover:border-[var(--border-default)] hover:text-[var(--text-secondary)]
+                   transition-colors duration-150 min-w-[260px]"
         aria-label="Search or jump"
       >
         <Search className="w-3.5 h-3.5" aria-hidden />
         <span className="flex-1 text-left">Search issues, jump to view…</span>
-        <kbd className="text-[10px] font-mono text-neutral-500 border border-neutral-700 rounded px-1">
+        <kbd className="text-[10px] font-mono text-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded px-1">
           {mod}K
         </kbd>
       </button>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <SyncStatus state={syncState} onRefresh={onRefresh} />
         <IconButton
           aria-label="Settings"

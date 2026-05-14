@@ -4,8 +4,7 @@
  * Three states:
  * - idle: shows "Synced <relative-time>" or "Never synced" if no timestamp.
  * - syncing: spinner + "Syncing…".
- * - error: red dot + clickable for the user to inspect details (we just
- *   show the message inline; the parent can implement a fancier UI later).
+ * - error: danger-tinted, clickable to retry.
  */
 import { clsx } from "clsx";
 import { AlertCircle, RefreshCw } from "lucide-react";
@@ -41,8 +40,8 @@ export function SyncStatus({ state, onRefresh, className }: SyncStatusProps) {
   } else if (state.kind === "error") {
     content = (
       <>
-        <AlertCircle className="w-3.5 h-3.5 text-red-400" aria-hidden />
-        <span className="text-xs text-red-300" title={state.message}>
+        <AlertCircle className="w-3.5 h-3.5 text-[var(--danger)]" aria-hidden />
+        <span className="text-xs text-[var(--danger)]" title={state.message}>
           Sync failed
         </span>
       </>
@@ -50,8 +49,8 @@ export function SyncStatus({ state, onRefresh, className }: SyncStatusProps) {
   } else {
     content = (
       <>
-        <RefreshCw className="w-3.5 h-3.5 text-neutral-400" aria-hidden />
-        <span className="text-xs text-neutral-300">
+        <RefreshCw className="w-3.5 h-3.5 text-[var(--text-tertiary)]" aria-hidden />
+        <span className="text-xs text-[var(--text-secondary)]">
           {state.lastSyncMs
             ? `Synced ${formatRelativeTime(state.lastSyncMs, new Date(nowMs))}`
             : "Never synced"}
@@ -67,10 +66,10 @@ export function SyncStatus({ state, onRefresh, className }: SyncStatusProps) {
       disabled={state.kind === "syncing"}
       aria-label="Refresh issue cache"
       className={clsx(
-        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition-colors",
+        "inline-flex items-center gap-1.5 px-2 h-7 rounded-full border transition-colors duration-150",
         state.kind === "error"
-          ? "border-red-700/40 bg-red-900/10 hover:bg-red-900/20"
-          : "border-neutral-800 hover:bg-neutral-800",
+          ? "border-[var(--danger)]/30 hover:bg-[var(--bg-hover)]"
+          : "border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]",
         state.kind === "syncing" ? "cursor-default" : "cursor-pointer",
         className,
       )}

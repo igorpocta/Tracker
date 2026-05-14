@@ -221,7 +221,7 @@ export function AppShell() {
   );
 
   return (
-    <div className="h-screen flex flex-col bg-[#0f0f0f] text-neutral-100">
+    <div className="h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)]">
       <TopBar
         syncState={syncState}
         onRefresh={refresh}

@@ -1,13 +1,17 @@
 /**
  * Cmd/Ctrl+K command palette.
  *
- * Lets the user jump between routes or pick an issue from the cache. Pretty
- * minimal — no fuzzy scoring, no recent commands history — but enough to make
- * the app feel keyboard-driven.
+ * Lets the user jump between routes or pick an issue from the cache.
  */
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { BarChart3, CalendarDays, Search, Settings as SettingsIcon, Sun } from "lucide-react";
+import {
+  BarChart3,
+  CalendarDays,
+  Search,
+  Settings as SettingsIcon,
+  Sun,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -56,12 +60,10 @@ export function CommandPalette({
       setQuery("");
       setDebounced("");
       setHighlight(0);
-      // Defer focus so the input is mounted by the time we focus it.
       window.setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
-  // Debounce the search input by 120ms — keeps SQLite query frequency sane.
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(query.trim()), 120);
     return () => window.clearTimeout(t);
@@ -101,11 +103,14 @@ export function CommandPalette({
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-24 p-6"
+      className="fixed inset-0 z-50 bg-[var(--bg-overlay)] backdrop-blur-sm flex items-start justify-center pt-24 p-6"
     >
-      <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-800">
-          <Search className="w-4 h-4 text-neutral-500" aria-hidden />
+      <div
+        className="w-full max-w-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)]
+                   rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] overflow-hidden"
+      >
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-subtle)]">
+          <Search className="w-4 h-4 text-[var(--text-tertiary)]" aria-hidden />
           <input
             ref={inputRef}
             type="text"
@@ -120,7 +125,9 @@ export function CommandPalette({
                 onClose();
               } else if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setHighlight((h) => Math.min(h + 1, Math.max(0, options.length - 1)));
+                setHighlight((h) =>
+                  Math.min(h + 1, Math.max(0, options.length - 1)),
+                );
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setHighlight((h) => Math.max(h - 1, 0));
@@ -132,13 +139,13 @@ export function CommandPalette({
             }}
             placeholder="Search issues or jump to a view…"
             aria-label="Command palette search"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-500"
+            className="flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
         </div>
 
         <ul className="max-h-72 overflow-y-auto p-1" role="listbox">
           {options.length === 0 ? (
-            <li className="px-3 py-4 text-xs text-neutral-500 text-center">
+            <li className="px-3 py-4 text-xs text-[var(--text-tertiary)] text-center">
               No matches.
             </li>
           ) : (
@@ -151,26 +158,26 @@ export function CommandPalette({
                   onMouseEnter={() => setHighlight(idx)}
                   onClick={() => choose(opt)}
                   className={clsx(
-                    "w-full text-left px-2.5 py-1.5 rounded-md flex items-center gap-2 text-xs",
+                    "w-full text-left px-2.5 py-1.5 rounded-[var(--radius-sm)] flex items-center gap-2 text-xs",
                     idx === highlight
-                      ? "bg-sky-600/20 text-white"
-                      : "text-neutral-200 hover:bg-neutral-800/60",
+                      ? "bg-[var(--accent-soft)] text-[var(--text-primary)]"
+                      : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
                   )}
                 >
                   {opt.kind === "route" ? (
                     <>
-                      <span className="text-neutral-400">{opt.icon}</span>
+                      <span className="text-[var(--text-tertiary)]">{opt.icon}</span>
                       <span className="font-medium">Go to {opt.label}</span>
                     </>
                   ) : (
                     <>
-                      <span className="font-mono text-[11px] text-neutral-400 w-16 shrink-0">
+                      <span className="font-mono text-[11px] text-[var(--text-tertiary)] w-16 shrink-0">
                         {opt.issue.issue_key}
                       </span>
                       <span className="truncate flex-1">
                         {opt.issue.summary || "(no summary)"}
                       </span>
-                      <span className="text-[10px] text-neutral-500">
+                      <span className="text-[10px] text-[var(--text-tertiary)]">
                         {onStartIssue ? "↵ start timer" : "↵ open"}
                       </span>
                     </>
@@ -181,7 +188,7 @@ export function CommandPalette({
           )}
         </ul>
 
-        <div className="px-3 py-1.5 border-t border-neutral-800 flex items-center gap-3 text-[10px] text-neutral-500">
+        <div className="px-3 py-1.5 border-t border-[var(--border-subtle)] flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
           <kbd className="font-mono">↑↓</kbd> navigate
           <kbd className="font-mono">↵</kbd> select
           <kbd className="font-mono">Esc</kbd> close
