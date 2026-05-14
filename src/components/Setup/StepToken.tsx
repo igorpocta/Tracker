@@ -83,7 +83,7 @@ export function StepToken({
   return (
     <form onSubmit={handleFinish} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="setup-token" className="text-sm font-medium">
+        <label htmlFor="setup-token" className="text-sm font-medium text-[var(--text-primary)]">
           Jira API token
         </label>
         <input
@@ -93,7 +93,6 @@ export function StepToken({
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
-            // Any edit invalidates the previous test result.
             if (test.kind !== "idle") setTest({ kind: "idle" });
           }}
           aria-invalid={shapeError !== null}
@@ -101,25 +100,25 @@ export function StepToken({
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          className="px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm font-mono"
+          className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)] text-sm font-mono text-[var(--text-primary)] transition-colors duration-150"
         />
         {shapeError && (
-          <p id="setup-token-error" className="text-xs text-red-400">
+          <p id="setup-token-error" className="text-xs text-[var(--danger)]">
             {shapeError}
           </p>
         )}
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-[var(--text-tertiary)]">
           Create one at{" "}
-          <span className="text-neutral-400">id.atlassian.com → Security → API tokens</span>.
+          <span className="text-[var(--text-secondary)]">id.atlassian.com → Security → API tokens</span>.
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           type="button"
           onClick={handleTest}
           disabled={!canTest}
-          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 disabled:bg-neutral-900 disabled:text-neutral-600 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center gap-2"
+          className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-[var(--text-primary)] transition-colors duration-150 flex items-center gap-2"
         >
           {test.kind === "loading" && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
@@ -129,7 +128,7 @@ export function StepToken({
 
         {test.kind === "ok" && (
           <span
-            className="flex items-center gap-1.5 text-xs text-emerald-400"
+            className="flex items-center gap-1.5 text-xs text-[var(--success)]"
             role="status"
           >
             <CircleCheck className="w-4 h-4" aria-hidden />
@@ -137,7 +136,7 @@ export function StepToken({
           </span>
         )}
         {test.kind === "error" && (
-          <span className="text-xs text-red-400" role="alert">
+          <span className="text-xs text-[var(--danger)]" role="alert">
             {test.message}
           </span>
         )}
@@ -147,14 +146,14 @@ export function StepToken({
         <button
           type="button"
           onClick={onBack}
-          className="px-4 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 text-sm font-medium transition-colors"
+          className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
           Back
         </button>
         <button
           type="submit"
           disabled={!canFinish}
-          className="px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-sm font-medium transition-colors flex items-center gap-2"
+          className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150 flex items-center gap-2"
         >
           {submitting && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />

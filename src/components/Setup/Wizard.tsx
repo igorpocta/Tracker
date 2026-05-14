@@ -37,13 +37,13 @@ export function Wizard({ step, children }: WizardProps) {
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <section
-        className="w-full max-w-[480px] bg-neutral-900/80 border border-neutral-800 rounded-2xl shadow-xl p-6"
+        className="w-full max-w-[480px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] p-7"
         role="region"
         aria-label="Setup wizard"
       >
         <header className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight">Connect to Jira</h1>
-          <p className="text-sm text-neutral-400 mt-1">
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Connect to Jira</h1>
+          <p className="text-sm text-[var(--text-tertiary)] mt-1">
             Step {step + 1} of {SETUP_STEPS.length}
           </p>
         </header>
@@ -64,12 +64,12 @@ export function Wizard({ step, children }: WizardProps) {
               >
                 <div
                   className={
-                    "w-9 h-9 rounded-full flex items-center justify-center transition-colors " +
+                    "w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-150 " +
                     (isDone
-                      ? "bg-emerald-600/20 text-emerald-400"
+                      ? "bg-[var(--accent-soft)] text-[var(--accent)]"
                       : isCurrent
-                        ? "bg-sky-600/20 text-sky-300 ring-2 ring-sky-500/40"
-                        : "bg-neutral-800 text-neutral-500")
+                        ? "bg-[var(--accent-soft)] text-[var(--accent)] ring-2 ring-[var(--accent-ring)]"
+                        : "bg-[var(--bg-active)] text-[var(--text-tertiary)]")
                   }
                 >
                   {isDone ? (
@@ -83,7 +83,7 @@ export function Wizard({ step, children }: WizardProps) {
                 <span
                   className={
                     "text-xs " +
-                    (isCurrent ? "text-white" : "text-neutral-500")
+                    (isCurrent ? "text-[var(--text-primary)]" : "text-[var(--text-tertiary)]")
                   }
                 >
                   {s.label}

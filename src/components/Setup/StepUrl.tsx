@@ -31,7 +31,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
       className="flex flex-col gap-4"
     >
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="setup-url" className="text-sm font-medium">
+        <label htmlFor="setup-url" className="text-sm font-medium text-[var(--text-primary)]">
           Jira base URL
         </label>
         <input
@@ -45,14 +45,14 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          className="px-3 py-2 rounded-md bg-neutral-950 border border-neutral-700 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm"
+          className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)] text-sm text-[var(--text-primary)] transition-colors duration-150"
         />
         {error && (
-          <p id="setup-url-error" className="text-xs text-red-400">
+          <p id="setup-url-error" className="text-xs text-[var(--danger)]">
             {error}
           </p>
         )}
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-[var(--text-tertiary)]">
           Your Atlassian cloud URL, e.g. <code>https://acme.atlassian.net</code>.
         </p>
       </div>
@@ -61,7 +61,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
         <button
           type="submit"
           disabled={!isValid}
-          className="px-4 py-2 rounded-md bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+          className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
           Next
         </button>

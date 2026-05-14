@@ -67,7 +67,7 @@ export default function Setup() {
 
       {submitError && (
         <p
-          className="mt-4 text-xs text-red-400"
+          className="mt-4 text-xs text-[var(--danger)]"
           role="alert"
           data-testid="setup-submit-error"
         >
