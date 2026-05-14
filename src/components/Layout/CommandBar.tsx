@@ -37,10 +37,10 @@ export function CommandBar({
   const mod = isMac ? "⌘" : "Ctrl";
 
   const chips: Array<Chip & { onClick?: () => void }> = [
-    { keys: `${mod},`, label: "Settings", onClick: onSettings },
-    { keys: `${mod}R`, label: "Refresh", onClick: onRefresh },
-    { keys: `${mod}I`, label: "Re-index", onClick: onReindex },
-    { keys: `${mod}N`, label: "New entry", onClick: onNewEntry },
+    { keys: `${mod},`, label: "Nastavení", onClick: onSettings },
+    { keys: `${mod}R`, label: "Obnovit", onClick: onRefresh },
+    { keys: `${mod}I`, label: "Reindexovat", onClick: onReindex },
+    { keys: `${mod}N`, label: "Nový záznam", onClick: onNewEntry },
   ];
 
   return (

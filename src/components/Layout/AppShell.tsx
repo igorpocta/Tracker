@@ -111,7 +111,7 @@ export function AppShell() {
           : minutes % 60 === 0
             ? `${minutes / 60}h`
             : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-      pushToast("success", `Saved ${dur} on ${row.issue_key}.`);
+      pushToast("success", `Uloženo ${dur} na ${row.issue_key}.`);
       queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
       queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
       queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
@@ -124,8 +124,8 @@ export function AppShell() {
 
   const onWorklogError = useCallback(
     (err: unknown) => {
-      const msg = typeof err === "string" ? err : "Jira sync failed";
-      pushToast("error", `Worklog: ${msg}`);
+      const msg = typeof err === "string" ? err : "Synchronizace s Jirou selhala";
+      pushToast("error", `Záznam: ${msg}`);
     },
     [pushToast],
   );
@@ -201,7 +201,7 @@ export function AppShell() {
         await startTimer(issueKey);
         navigate("/");
       } catch (e) {
-        pushToast("error", typeof e === "string" ? e : "Failed to start timer");
+        pushToast("error", typeof e === "string" ? e : "Nepodařilo se spustit časomíru");
       }
     },
     [navigate, pushToast],
@@ -209,6 +209,25 @@ export function AppShell() {
 
   // ---- Add entry panel -----------------------------------------------------
   const [addEntryOpen, setAddEntryOpen] = useState(false);
+
+  // ---- Window focus -> CommandBar visibility -------------------------------
+  // The bottom CommandBar should only appear while the main window has OS
+  // focus; when the user switches to another app we fade it out. Listening
+  // to the browser `focus`/`blur` events on `window` works equivalently
+  // inside the Tauri webview because the runtime forwards OS focus changes.
+  const [windowFocused, setWindowFocused] = useState(() =>
+    typeof document !== "undefined" ? document.hasFocus() : true,
+  );
+  useEffect(() => {
+    const onFocus = () => setWindowFocused(true);
+    const onBlur = () => setWindowFocused(false);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   // ---- Keyboard shortcuts --------------------------------------------------
   useEffect(() => {
@@ -264,12 +283,21 @@ export function AppShell() {
             />
           </main>
           {!isSettings && (
-            <CommandBar
-              onSettings={() => navigate("/settings")}
-              onRefresh={() => void refresh()}
-              onReindex={() => void reindex()}
-              onNewEntry={() => setAddEntryOpen(true)}
-            />
+            <div
+              aria-hidden={!windowFocused}
+              className="transition-opacity duration-200"
+              style={{
+                opacity: windowFocused ? 1 : 0,
+                pointerEvents: windowFocused ? "auto" : "none",
+              }}
+            >
+              <CommandBar
+                onSettings={() => navigate("/settings")}
+                onRefresh={() => void refresh()}
+                onReindex={() => void reindex()}
+                onNewEntry={() => setAddEntryOpen(true)}
+              />
+            </div>
           )}
         </div>
 
@@ -279,7 +307,7 @@ export function AppShell() {
           onSave={async () => {
             pushToast(
               "info",
-              "Manual entries aren't persisted yet — UI preview only.",
+              "Ruční záznamy se zatím neukládají — pouze náhled UI.",
             );
           }}
         />

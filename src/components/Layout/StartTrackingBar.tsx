@@ -125,8 +125,8 @@ function IdleBar({ onPickIssue }: { onPickIssue: (issueKey: string) => void }) {
               onSubmit();
             }
           }}
-          placeholder="Start tracking…"
-          aria-label="Search and start a timer"
+          placeholder="Začít sledovat…"
+          aria-label="Vyhledat a spustit časomíru"
           aria-expanded={open}
           className="w-full h-11 pl-4 pr-24 rounded-[var(--radius-md)]
                      bg-[var(--bg-surface)] border border-[var(--border-subtle)]
@@ -162,7 +162,7 @@ function IdleBar({ onPickIssue }: { onPickIssue: (issueKey: string) => void }) {
             ? "text-[var(--text-tertiary)] cursor-not-allowed"
             : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
         )}
-        aria-label="Start timer for selected issue"
+        aria-label="Spustit časomíru pro vybraný úkol"
       >
         <Play className="w-3.5 h-3.5" aria-hidden />
         Start
@@ -194,12 +194,12 @@ function SearchDropdown({
     >
       {loading && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
-          Searching…
+          Vyhledávání…
         </div>
       )}
       {!loading && results.length === 0 && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
-          No matching issues.
+          Žádné odpovídající úkoly.
         </div>
       )}
       {results.map((iss, idx) => (
@@ -226,7 +226,7 @@ function SearchDropdown({
             {iss.issue_key}
           </span>
           <span className="truncate flex-1 text-[var(--text-primary)]">
-            {iss.summary || "(no summary)"}
+            {iss.summary || "(bez popisu)"}
           </span>
         </button>
       ))}
@@ -263,7 +263,7 @@ function RunningBar({
           {active.issue_key}
         </span>
         <span className="text-xs text-[var(--text-tertiary)] truncate">
-          Tracking…
+          Sledování…
         </span>
         <span className="ml-auto font-mono tabular-nums text-sm text-[var(--accent)]">
           {formatDuration(elapsed)}

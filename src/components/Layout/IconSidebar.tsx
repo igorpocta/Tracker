@@ -1,26 +1,23 @@
 /**
  * Thin icon rail along the left edge of the shell.
  *
- * Reference: `screens/SCR-20260514-rjbm-2.png` and friends.
- *
  *   ┌─────┐
  *   │ T.  │  ← cursive logo, accent color, always dark surface
- *   │     │
- *   │ 🕐  │  ← Time Log
- *   │ 📊  │  ← Reports
- *   │ 📅  │  ← Calendar
- *   │ 🎯  │  ← Goals
+ *   │ 🕐  │  ← Časový záznam
+ *   │ 📊  │  ← Reporty
+ *   │ 📅  │  ← Kalendář
+ *   │ 🎯  │  ← Cíle
  *   │ ··  │
- *   │ ⚙   │  ← Settings (lower group)
- *   │ ◯   │  ← User / timer ring
+ *   │ ⚙   │  ← Nastavení (lower group)
+ *   │ ◯   │  ← Cache count / running ring
  *   └─────┘
  *
- * Width: 64 px. Always dark surface (`--sidebar-bg`) — this is the visual
- * constant of the app and does NOT flip in light mode.
- *
- * Hover affordance: subtle background lightening + tooltip label. Active
- * route gets the accent-soft pill with accent-colored icon.
+ * The bottom ring shows the real cached-issue count (was a hardcoded "20"
+ * subscription-limit placeholder before Phase 14). When a timer is running,
+ * it shows running minutes instead. Caps at "500+" to keep the chip small;
+ * shows "–" when nothing is cached.
  */
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
   BarChart3,
@@ -30,9 +27,12 @@ import {
   Target,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 
+import { getCacheStats } from "../../api/commands";
 import { useNow } from "../../hooks/useNow";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
 export interface IconSidebarItem {
@@ -43,20 +43,41 @@ export interface IconSidebarItem {
 }
 
 const PRIMARY_NAV: IconSidebarItem[] = [
-  { to: "/", label: "Time Log", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
-  { to: "/reports", label: "Reports", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
-  { to: "/calendar", label: "Calendar", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
-  { to: "/goals", label: "Goals", icon: <Target className="w-5 h-5" aria-hidden /> },
+  { to: "/", label: "Časový záznam", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
+  { to: "/reports", label: "Reporty", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
+  { to: "/calendar", label: "Kalendář", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
+  { to: "/goals", label: "Cíle", icon: <Target className="w-5 h-5" aria-hidden /> },
 ];
 
 export function IconSidebar() {
   const active = useTimerStore((s) => s.active);
   const now = useNow(active ? 1000 : 60_000);
   const elapsed = elapsedSeconds(active, now);
+  const queryClient = useQueryClient();
+
+  const statsQ = useQuery({
+    queryKey: ["cache-stats"],
+    queryFn: getCacheStats,
+    staleTime: 30_000,
+  });
+
+  // Invalidate the cache-stats query when the backend tells us issues
+  // changed, so the ring number is always fresh after a sync.
+  useTauriEvent<unknown>("cache-refreshed", () => {
+    queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
+  });
+  useTauriEvent<unknown>("auto-sync-complete", () => {
+    queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
+  });
+  useEffect(() => {
+    /* hook deps satisfied; statsQ kept implicit */
+  }, []);
+
+  const cachedIssues = statsQ.data?.issues ?? 0;
 
   return (
     <aside
-      aria-label="Primary"
+      aria-label="Hlavní navigace"
       className="shrink-0 flex flex-col items-center w-[64px] py-3 gap-3
                  border-r"
       style={{
@@ -69,7 +90,7 @@ export function IconSidebar() {
       <NavLink
         to="/"
         end
-        aria-label="Tracker home"
+        aria-label="Tracker — domů"
         className="block px-1 py-0.5 mb-1 select-none"
         style={{ color: "var(--accent)" }}
       >
@@ -95,13 +116,17 @@ export function IconSidebar() {
         <SidebarLink
           item={{
             to: "/settings",
-            label: "Settings",
+            label: "Nastavení",
             icon: <SettingsIcon className="w-5 h-5" aria-hidden />,
           }}
         />
       </nav>
 
-      <UserRing elapsedSeconds={elapsed} running={active !== null} />
+      <CacheRing
+        elapsedSeconds={elapsed}
+        running={active !== null}
+        cachedIssues={cachedIssues}
+      />
     </aside>
   );
 }
@@ -159,33 +184,45 @@ function SidebarTooltip({ label }: { label: string }) {
 }
 
 /**
- * Small circular user/timer-status ring at the bottom of the sidebar.
- * Reference screenshots show a number ("20") inside an accent-tinted ring.
- *
- * We show:
- *   - When the timer is running, a thin accent ring + the running issue
- *     elapsed mm count (or short HH:MM if > 1h).
- *   - When idle, the same ring outline + a small clock dot.
+ * Bottom ring chip. Either shows running-timer minutes (when a timer is
+ * active) or the number of cached Jira issues. Caps at `500+` so the chip
+ * stays compact; `–` when the cache is empty.
  */
-function UserRing({
+function CacheRing({
   elapsedSeconds,
   running,
+  cachedIssues,
 }: {
   elapsedSeconds: number;
   running: boolean;
+  cachedIssues: number;
 }) {
-  const mins = Math.floor(elapsedSeconds / 60);
-  const label = running
-    ? mins < 60
-      ? `${mins}`
-      : `${Math.floor(mins / 60)}h`
-    : "20";
+  let label: string;
+  if (running) {
+    const mins = Math.floor(elapsedSeconds / 60);
+    label = mins < 60 ? `${mins}` : `${Math.floor(mins / 60)}h`;
+  } else if (cachedIssues <= 0) {
+    label = "–";
+  } else if (cachedIssues > 500) {
+    label = "500+";
+  } else {
+    label = `${cachedIssues}`;
+  }
   return (
     <div
-      aria-hidden
+      aria-label={
+        running
+          ? "Sledování běží"
+          : `V cache je ${cachedIssues} úkolů`
+      }
+      title={
+        running
+          ? "Sledování běží"
+          : `V cache je ${cachedIssues} úkolů`
+      }
       className="w-9 h-9 rounded-full flex items-center justify-center"
       style={{
-        border: `2px solid ${running ? "var(--accent)" : "var(--accent)"}`,
+        border: `2px solid var(--accent)`,
         color: "var(--accent)",
         background: "transparent",
       }}
