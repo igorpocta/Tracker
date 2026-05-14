@@ -8,7 +8,7 @@
 //!   exists in Jira; the user's data is untouched.
 //! - If the `POST new` succeeds but the `DELETE old` fails, we return a
 //!   dedicated error variant carrying the **new** worklog id so the caller can
-//!   show the original Trcker error string
+//!   show the original Tracker error string
 //!   (`"Original worklog still exists on {old_issue_key}"`) and offer a
 //!   retry-the-delete affordance. The new worklog is already in Jira.
 //!
@@ -50,7 +50,7 @@ pub enum MoveWorklogError {
     CreateFailed(#[source] JiraError),
     /// The new worklog was created but the delete of the old worklog failed.
     /// The new worklog id is included so the caller can retry the delete (or
-    /// show the original Trcker error message including `old_issue_key`).
+    /// show the original Tracker error message including `old_issue_key`).
     #[error("delete-after-create failed (new worklog {new_worklog_id} exists, old still on {old_issue_key}): {source}")]
     DeleteAfterCreate {
         new_worklog_id: String,
@@ -113,6 +113,7 @@ pub async fn move_worklog(
         updated_at_jira: Some(now_ts),
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     };
 
     // Step 2: DELETE the old worklog.

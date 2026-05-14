@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::cache::{self, timer::ActiveTimer, worklogs::WorklogRow, Db};
+use crate::commands::rounding;
 use crate::state::AppState;
 
 /// Snapshot of a running timer as the frontend wants to see it.
@@ -48,11 +49,17 @@ pub fn get_timer_state_inner(db: &Db, now_ms: i64) -> Result<Option<ActiveTimerS
 }
 
 /// Pure logic for `start_timer`. Replaces any running timer for the same row.
+///
+/// Phase 18A — Item 4: `issue_key` may be empty (or whitespace), in which case
+/// the timer is "unassigned" and the UI surfaces a red ⚠ banner until the user
+/// picks an issue. An unassigned timer stops into a `pending_assignment` row.
 pub fn start_timer_inner(
     db: &Db,
     issue_key: &str,
     started_at_ms: i64,
 ) -> Result<ActiveTimerState, String> {
+    // Normalise: trim whitespace; truly empty key is allowed (unassigned).
+    let issue_key = issue_key.trim();
     let started_at_s = started_at_ms / 1000;
     cache::timer::start(db, issue_key, started_at_s).map_err(|e| e.to_string())?;
     Ok(ActiveTimerState {
@@ -60,6 +67,30 @@ pub fn start_timer_inner(
         started_at: started_at_s.saturating_mul(1000),
         elapsed_seconds: 0,
     })
+}
+
+/// Assign an issue to the currently running (previously unassigned) timer.
+/// Returns the updated state, or an error if no timer is running.
+pub fn assign_active_timer_inner(
+    db: &Db,
+    issue_key: &str,
+    now_ms: i64,
+) -> Result<ActiveTimerState, String> {
+    let issue_key = issue_key.trim();
+    if issue_key.is_empty() {
+        return Err("Klíč úkolu nesmí být prázdný".into());
+    }
+    let current = cache::timer::get(db)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no active timer".to_string())?;
+    cache::timer::start(db, issue_key, current.started_at).map_err(|e| e.to_string())?;
+    Ok(ActiveTimerState::from_timer(
+        &ActiveTimer {
+            issue_key: issue_key.to_string(),
+            started_at: current.started_at,
+        },
+        now_ms,
+    ))
 }
 
 /// Pure logic for `update_timer_start`. Errors if there is no active timer.
@@ -92,16 +123,22 @@ pub struct StoppedTimer {
 
 /// Record a stop locally without talking to Jira. Used by tests and as a
 /// helper when a client isn't configured.
+///
+/// `override_duration_s`: if `Some`, use that duration instead of (now - started).
+/// Used by `stop_timer_inner` to apply rounding so the local row matches what
+/// was POSTed to Jira.
 pub fn record_local_stop(
     db: &Db,
     timer: &ActiveTimer,
     now_ms: i64,
     comment: Option<&str>,
     jira_worklog_id: Option<&str>,
+    override_duration_s: Option<i64>,
 ) -> Result<WorklogRow, String> {
     let now_s = now_ms / 1000;
     let started_at_s = timer.started_at;
-    let duration_s = (now_s - started_at_s).max(0);
+    let raw_duration_s = (now_s - started_at_s).max(0);
+    let duration_s = override_duration_s.unwrap_or(raw_duration_s);
 
     // Look up summary/issue_id from cache (best-effort).
     let (issue_id, summary) = match cache::issues::get_by_key(db, &timer.issue_key)
@@ -111,6 +148,7 @@ pub fn record_local_stop(
         None => (None, None),
     };
 
+    let pending_assignment = timer.issue_key.is_empty();
     let mut row = WorklogRow {
         id: None,
         issue_key: timer.issue_key.clone(),
@@ -126,6 +164,7 @@ pub fn record_local_stop(
         updated_at_jira: None,
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment,
     };
     let id = cache::worklogs::record(db, &row).map_err(|e| e.to_string())?;
     row.id = Some(id);
@@ -152,12 +191,31 @@ pub async fn get_timer_state(
 pub async fn start_timer(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    issue_key: String,
+    issue_key: Option<String>,
     started_at_ms: Option<i64>,
 ) -> Result<ActiveTimerState, String> {
+    // Phase 18A — Item 10: ALWAYS use server-side now() as the timer start
+    // unless the user explicitly passed an override (e.g. backdating via
+    // `update_timer_start`). The previous behaviour accepted whatever ms the
+    // frontend supplied, which lagged because the displayed clock only ticks
+    // every minute — producing a ~58s drift between wall clock and timer.
     let started = started_at_ms.unwrap_or_else(now_ms);
+    let issue_key = issue_key.unwrap_or_default();
     let res = start_timer_inner(&state.db, &issue_key, started)?;
     let _ = app.emit("timer-started", &res);
+    Ok(res)
+}
+
+/// Phase 18A — Item 4: assign an issue to the currently-running unassigned
+/// timer. Does NOT post a worklog to Jira (the timer is still running).
+#[tauri::command]
+pub async fn assign_active_timer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    issue_key: String,
+) -> Result<ActiveTimerState, String> {
+    let res = assign_active_timer_inner(&state.db, &issue_key, now_ms())?;
+    let _ = app.emit("timer-updated", &res);
     Ok(res)
 }
 
@@ -192,10 +250,19 @@ pub async fn stop_timer_inner(
     let client = state.jira_client_cloned();
     let now = now_ms();
     let now_s = now / 1000;
-    let duration_s = (now_s - timer.started_at).max(0);
+    let raw_duration_s = (now_s - timer.started_at).max(0);
 
-    // Talk to Jira if possible.
-    let jira_worklog_id = if let Some(client) = client {
+    // Phase 18A — Item 27: apply user-configured rounding.
+    let duration_s = rounding::apply_active_rounding(&state.db, raw_duration_s);
+
+    // Phase 18A — Item 4: an unassigned timer (issue_key == "") must NOT be
+    // pushed to Jira; we save locally with `pending_assignment = 1`.
+    let is_unassigned = timer.issue_key.is_empty();
+
+    // Talk to Jira if possible (and we have an issue key).
+    let jira_worklog_id = if is_unassigned {
+        None
+    } else if let Some(client) = client {
         let started_dt = Utc
             .timestamp_opt(timer.started_at, 0)
             .single()
@@ -226,6 +293,7 @@ pub async fn stop_timer_inner(
         now,
         comment.as_deref(),
         jira_worklog_id.as_deref(),
+        Some(duration_s),
     )?;
     let _ = app.emit("worklog-saved", &row);
     let _ = app.emit("timer-stopped", &row);

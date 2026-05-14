@@ -43,6 +43,7 @@ fn seed_old_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
         updated_at_jira: Some(1_700_000_000),
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     };
     upsert_from_jira(db, &row).unwrap()
 }

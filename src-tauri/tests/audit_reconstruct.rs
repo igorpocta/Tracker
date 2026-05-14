@@ -53,6 +53,7 @@ fn sample_row(jira_id: &str, issue_key: &str) -> WorklogRow {
         updated_at_jira: Some(1_700_000_000),
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     }
 }
 

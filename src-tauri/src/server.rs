@@ -323,6 +323,7 @@ async fn stop_timer_handler<R: Runtime>(
         now_ms(),
         comment.as_deref(),
         None,
+        None,
     ) {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),

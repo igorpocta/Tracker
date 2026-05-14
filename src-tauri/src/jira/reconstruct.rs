@@ -159,6 +159,7 @@ pub async fn restore_deleted_worklog(
         updated_at_jira: Some(now_s),
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     };
     let local_id = cache::worklogs::upsert_from_jira(db, &row)?;
     let mut saved = row.clone();
@@ -360,6 +361,7 @@ async fn retry_create(
                 updated_at_jira: Some(now_s),
                 pending_delete_at: None,
                 tombstoned_at: None,
+                pending_assignment: false,
             };
             let local_id = cache::worklogs::upsert_from_jira(db, &row)?;
             let mut saved = row.clone();

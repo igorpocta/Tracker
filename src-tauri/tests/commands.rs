@@ -109,7 +109,7 @@ fn record_local_stop_writes_worklog_and_clears_timer() {
         started_at: 0,
     };
 
-    let row = record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1")).unwrap();
+    let row = record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1"), None).unwrap();
     assert!(row.id.is_some());
     assert_eq!(row.duration_s, 60);
     assert_eq!(row.issue_key, "ACME-1");
@@ -134,7 +134,7 @@ fn record_local_stop_clamps_negative_duration_to_zero() {
         started_at: 100,
     };
     // now < started_at → duration would be negative; we expect 0.
-    let row = record_local_stop(&db, &timer_state, 0, None, None).unwrap();
+    let row = record_local_stop(&db, &timer_state, 0, None, None, None).unwrap();
     assert_eq!(row.duration_s, 0);
 }
 
@@ -300,7 +300,7 @@ fn suggested_issues_returns_only_issues_with_worklogs() {
         issue_key: "A-1".into(),
         started_at: 0,
     };
-    record_local_stop(&db, &timer_state, 60_000, None, None).unwrap();
+    record_local_stop(&db, &timer_state, 60_000, None, None, None).unwrap();
 
     let rows = issues_suggested(&db, 10).unwrap();
     assert_eq!(rows.len(), 1);

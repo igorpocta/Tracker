@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 use crate::cache::{self, audit::AuditOp, worklogs::WorklogRow};
+use crate::commands::rounding;
 use crate::jira;
 use crate::jira::worklog_ops::{MoveWorklogArgs, MoveWorklogError};
 use crate::jira::JiraError;
@@ -193,9 +194,15 @@ pub async fn create_manual_worklog(
     if duration_seconds <= 0 {
         return Err("Trvání musí být kladné".into());
     }
+    if duration_seconds > 24 * 3600 {
+        return Err("Trvání nesmí přesáhnout 24 hodin".into());
+    }
     if issue_key.trim().is_empty() {
         return Err("Chybí klíč úkolu".into());
     }
+
+    // Phase 18A — Item 27: apply rounding before talking to Jira.
+    let duration_seconds = rounding::apply_active_rounding(&state.db, duration_seconds);
 
     let client = state
         .jira_client_cloned()
@@ -258,6 +265,7 @@ pub async fn create_manual_worklog(
         updated_at_jira: Some(now_s),
         pending_delete_at: None,
         tombstoned_at: None,
+        pending_assignment: false,
     };
     let local_id = cache::worklogs::upsert_from_jira(&state.db, &row)
         .map_err(|e| e.to_string())?;
@@ -307,6 +315,15 @@ pub async fn update_worklog(
         ),
         None => None,
     };
+
+    // Phase 18A — Item 27: round the new duration before talking to Jira.
+    let new_duration_seconds = new_duration_seconds.map(|d| {
+        if d > 24 * 3600 {
+            d
+        } else {
+            rounding::apply_active_rounding(&state.db, d)
+        }
+    });
 
     // PUT to Jira.
     let resp = match client
@@ -537,7 +554,7 @@ pub async fn move_worklog(
                     "delete after create failed (new id {new_worklog_id}): {source}"
                 ),
             );
-            // Preserve the original Trcker error string so the UI can show
+            // Preserve the original Tracker error string so the UI can show
             // "Original worklog still exists on {key}" + a manual retry
             // affordance. The new worklog id is captured in the audit log.
             Err(format!(
@@ -615,7 +632,7 @@ fn reconstruct_err_to_string(e: jira::reconstruct::ReconstructError) -> String {
 /// `before_json` snapshot.
 ///
 /// Accepts audit entries of op = `delete` (we explicitly soft-deleted via the
-/// Trcker UI) or `sync_tombstone` (the row was detected as deleted in Jira by
+/// Tracker UI) or `sync_tombstone` (the row was detected as deleted in Jira by
 /// the mark-and-sweep pass). Both carry the full pre-deletion `WorklogRow`
 /// snapshot, which has everything we need to POST a fresh worklog:
 /// `issue_key`, `started_at`, `duration_s`, `comment`.
@@ -698,6 +715,135 @@ pub async fn retry_failed_audit_action(
         _ => {}
     }
     Ok(result)
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — unassigned timer + local-only delete (Items 4, 7)
+// -----------------------------------------------------------------------------
+
+/// Assign an issue to a previously-unassigned worklog (one that was stopped
+/// without a selected issue). Pushes a fresh POST to Jira so the worklog
+/// becomes "real", links the Jira id locally, and clears
+/// `pending_assignment`.
+#[tauri::command]
+pub async fn assign_worklog_issue(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    worklog_id: i64,
+    issue_key: String,
+) -> Result<WorklogRow, String> {
+    if issue_key.trim().is_empty() {
+        return Err("Klíč úkolu nesmí být prázdný".into());
+    }
+    let before = cache::worklogs::get_by_id(&state.db, worklog_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen".to_string())?;
+    if !before.pending_assignment {
+        return Err("Záznam již má přiřazený úkol".into());
+    }
+
+    let client = state
+        .jira_client_cloned()
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+
+    let started_dt = Utc
+        .timestamp_opt(before.started_at, 0)
+        .single()
+        .ok_or_else(|| "Neplatný čas začátku".to_string())?;
+
+    let resp = match client
+        .add_worklog(
+            &issue_key,
+            started_dt,
+            before.duration_s,
+            before.comment.as_deref(),
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            audit_failure(
+                &state.db,
+                AuditOp::Update,
+                Some(&issue_key),
+                None,
+                Some(&before),
+                &e.to_string(),
+            );
+            return Err(format!("Jira: {e}"));
+        }
+    };
+
+    let (issue_id, summary) = match cache::issues::get_by_key(&state.db, &issue_key)
+        .map_err(|e| e.to_string())?
+    {
+        Some(row) => (row.issue_id, Some(row.summary)),
+        None => (resp.issue_id.clone(), None),
+    };
+
+    cache::worklogs::assign_issue(
+        &state.db,
+        worklog_id,
+        &issue_key,
+        issue_id.as_deref(),
+        summary.as_deref(),
+        Some(&resp.id),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let after = cache::worklogs::get_by_id(&state.db, worklog_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam zmizel po přiřazení".to_string())?;
+
+    audit_success(
+        &state.db,
+        AuditOp::Update,
+        Some(&issue_key),
+        Some(&resp.id),
+        Some(&before),
+        Some(&after),
+    );
+
+    let _ = app.emit("worklog-updated", &after);
+    Ok(after)
+}
+
+/// Delete a worklog that exists only locally (no `jira_worklog_id`). Used by
+/// the UI for two cases:
+/// 1. Pending-assignment rows the user no longer wants to assign.
+/// 2. Rows that failed to sync to Jira (e.g. < 60s rejection) so there's
+///    nothing to delete remotely.
+///
+/// Refuses to delete rows that DO have a `jira_worklog_id` — those must go
+/// through the full `delete_worklog` flow.
+#[tauri::command]
+pub async fn delete_local_only_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    worklog_id: i64,
+) -> Result<(), String> {
+    let before = cache::worklogs::get_by_id(&state.db, worklog_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen".to_string())?;
+    if before.jira_worklog_id.is_some() {
+        return Err(
+            "Tento záznam je synchronizovaný s Jirou — použijte standardní smazání.".into(),
+        );
+    }
+    cache::worklogs::delete_local_only(&state.db, worklog_id)
+        .map_err(|e| e.to_string())?;
+
+    audit_success(
+        &state.db,
+        AuditOp::Delete,
+        Some(&before.issue_key),
+        None,
+        Some(&before),
+        None,
+    );
+
+    let _ = app.emit("worklog-deleted", &before);
+    Ok(())
 }
 
 /// Background task body: commit a pending delete if it's still pending.

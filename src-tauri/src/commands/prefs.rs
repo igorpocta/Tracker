@@ -7,7 +7,7 @@ use crate::state::AppState;
 
 /// Default daily goal: 8 hours, expressed in seconds.
 pub const DEFAULT_DAILY_GOAL_SECONDS: i64 = 8 * 60 * 60;
-/// Default widget format: `"hh:mm"` (matches the original Trcker product).
+/// Default widget format: `"hh:mm"` (matches the original Tracker product).
 pub const DEFAULT_WIDGET_FORMAT: &str = "hh:mm";
 /// Default app icon identifier.
 pub const DEFAULT_APP_ICON: &str = "default";
@@ -31,7 +31,7 @@ pub const DEFAULT_ACCENT: &str = "aurora";
 ///
 /// The Phase 11–12 hue names (`blue`, `indigo`, …) are kept for backwards
 /// compatibility with existing installs. Phase 13 introduces the named
-/// Mono + Dual palettes from the original Trcker reference.
+/// Mono + Dual palettes from the original Tracker reference.
 pub const ALLOWED_ACCENTS: &[&str] = &[
     // Legacy hues
     "blue", "indigo", "violet", "pink", "red", "orange", "yellow", "green",
