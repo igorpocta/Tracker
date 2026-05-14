@@ -362,3 +362,65 @@ pub async fn list_my_issues(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_jira_config_accepts_default() {
+        let cfg = JiraConnectionConfig {
+            base_url: "https://x.atlassian.net".into(),
+            email: "u@example.com".into(),
+            sync_jql: None,
+            my_issues_jql: None,
+        };
+        assert!(validate_jira_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_jira_config_accepts_typical_jql() {
+        let cfg = JiraConnectionConfig {
+            base_url: String::new(),
+            email: String::new(),
+            sync_jql: Some("project = ACME".into()),
+            my_issues_jql: Some("assignee = currentUser()".into()),
+        };
+        assert!(validate_jira_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_jira_config_rejects_nul_in_sync_jql() {
+        let cfg = JiraConnectionConfig {
+            base_url: String::new(),
+            email: String::new(),
+            sync_jql: Some("project = ACME\0".into()),
+            my_issues_jql: None,
+        };
+        assert!(validate_jira_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_jira_config_treats_empty_string_as_none() {
+        // An empty string should be normalised away by the caller and
+        // skipped here, not rejected as "empty JQL".
+        let cfg = JiraConnectionConfig {
+            base_url: String::new(),
+            email: String::new(),
+            sync_jql: Some(String::new()),
+            my_issues_jql: Some("   ".into()),
+        };
+        assert!(validate_jira_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_jira_config_rejects_overlong_my_issues_jql() {
+        let cfg = JiraConnectionConfig {
+            base_url: String::new(),
+            email: String::new(),
+            sync_jql: None,
+            my_issues_jql: Some("x".repeat(2001)),
+        };
+        assert!(validate_jira_config(&cfg).is_err());
+    }
+}

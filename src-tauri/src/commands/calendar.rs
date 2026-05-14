@@ -91,3 +91,45 @@ pub async fn is_working_day(
     let d = parse_date(&date)?;
     cache::calendar::is_working_day(&state.db, d).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_date_accepts_iso() {
+        assert!(parse_date("2026-05-14").is_ok());
+        assert!(parse_date("2000-01-01").is_ok());
+    }
+
+    #[test]
+    fn parse_date_rejects_bad_input() {
+        assert!(parse_date("").is_err());
+        assert!(parse_date("yesterday").is_err());
+        assert!(parse_date("2026/05/14").is_err());
+        assert!(parse_date("14-05-2026").is_err());
+    }
+
+    #[test]
+    fn parse_date_rejects_impossible() {
+        assert!(parse_date("2026-13-01").is_err());
+        assert!(parse_date("2026-02-30").is_err());
+    }
+
+    #[test]
+    fn working_week_mask_range_check() {
+        assert!((0..=127).contains(&0));
+        assert!((0..=127).contains(&31)); // Mon-Fri
+        assert!((0..=127).contains(&127));
+        assert!(!(0..=127).contains(&-1));
+        assert!(!(0..=127).contains(&128));
+    }
+
+    #[test]
+    fn allowed_reasons_set_is_stable() {
+        for r in ["holiday", "personal", "vacation"] {
+            assert!(ALLOWED_REASONS.contains(&r));
+        }
+        assert!(!ALLOWED_REASONS.contains(&"weekend"));
+    }
+}

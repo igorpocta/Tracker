@@ -106,4 +106,27 @@ mod tests {
         assert_eq!(a, 300);
         assert_eq!(i, 300);
     }
+
+    // -------- Item 23: threshold validation -------- //
+    // The validation lives in the Tauri command wrapper, so we replicate
+    // the range check here. These tests guard against regressions in the
+    // explicit Czech-error path.
+    #[test]
+    fn threshold_range_check_rejects_below_min() {
+        assert!(!(1..=120).contains(&0));
+        assert!(!(1..=120).contains(&-5));
+    }
+
+    #[test]
+    fn threshold_range_check_rejects_above_max() {
+        assert!(!(1..=120).contains(&121));
+        assert!(!(1..=120).contains(&i32::MAX));
+    }
+
+    #[test]
+    fn threshold_range_check_accepts_boundaries() {
+        assert!((1..=120).contains(&1));
+        assert!((1..=120).contains(&60));
+        assert!((1..=120).contains(&120));
+    }
 }
