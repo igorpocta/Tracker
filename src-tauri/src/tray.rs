@@ -46,21 +46,21 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     };
 
     // --- Menu items --------------------------------------------------------
-    let open_main = MenuItem::with_id(app, "open_main", "Open Tracker", true, None::<&str>)?;
+    let open_main = MenuItem::with_id(app, "open_main", "Otevřít Tracker", true, None::<&str>)?;
     let open_settings = MenuItem::with_id(
         app,
         "open_settings",
-        "Settings…",
+        "Nastavení…",
         true,
         Some("CmdOrCtrl+,"),
     )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Tracker", true, Some("CmdOrCtrl+Q"))?;
+    let quit = MenuItem::with_id(app, "quit", "Ukončit Tracker", true, Some("CmdOrCtrl+Q"))?;
 
     let menu = Menu::with_items(app, &[&open_main, &open_settings, &separator, &quit])?;
 
     tray.set_menu(Some(menu))?;
-    tray.set_tooltip(Some("Tracker — idle"))?;
+    tray.set_tooltip(Some("Tracker — nečinný"))?;
     tray.set_icon(Some(Image::from_bytes(TRAY_ICON_IDLE)?))?;
     tray.set_icon_as_template(true)?;
     // Left-click drives the popover; the menu fires on right-click only.

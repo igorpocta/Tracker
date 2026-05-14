@@ -50,7 +50,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                     let elapsed = (now_s - t.started_at).max(0);
                     (true, format!("Tracker — {}", format_hms(elapsed)))
                 }
-                None => (false, "Tracker — idle".to_string()),
+                None => (false, "Tracker — nečinný".to_string()),
             };
 
             // Icon swap is relatively expensive; only do it when running state
