@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <title>Tracker — Popover</title>
+    <style>
+      /* Inline override — the popover window is transparent so we don't want
+         the global `body { background: #0f0f0f }` from index.css to fill the
+         whole webview. The inner card supplies its own opaque background. */
+      html, body, #root { background: transparent !important; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
