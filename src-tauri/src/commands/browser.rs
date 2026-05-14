@@ -1,11 +1,19 @@
 //! Browser extension bridge commands.
 //!
-//! For Phase 4 these are *stubs* returning empty values. The real
-//! implementation lands in Phase 9 (local axum HTTP server + extension
-//! handshake). We expose the surface now so the frontend can be wired up
-//! against final command names and signatures.
+//! In Phase 9 these are wired up to the local axum HTTP server
+//! ([`crate::server`]). The extension itself doesn't exist yet, but the
+//! plumbing on the desktop side is real:
+//!
+//! - The server bumps a heartbeat timestamp on every request — exposed via
+//!   [`get_extension_last_heartbeat`].
+//! - The server keeps the most recent "what ticket is the user looking at"
+//!   payload — exposed via [`get_current_visible_ticket`].
+//! - [`get_browser_context`] is a tiny convenience returning a URL string
+//!   suitable for the UI's "open in Jira" affordance.
 
 use serde::{Deserialize, Serialize};
+
+use crate::server::ServerState;
 
 /// Description of a Jira ticket currently visible in the user's browser.
 /// Returned by [`get_current_visible_ticket`].
@@ -19,16 +27,27 @@ pub struct VisibleTicket {
 }
 
 #[tauri::command]
-pub async fn get_browser_context() -> Result<Option<String>, String> {
-    Ok(None)
+pub async fn get_browser_context(
+    state: tauri::State<'_, ServerState>,
+) -> Result<Option<String>, String> {
+    Ok(state
+        .visible_ticket
+        .read()
+        .unwrap()
+        .as_ref()
+        .and_then(|t| t.url.clone()))
 }
 
 #[tauri::command]
-pub async fn get_current_visible_ticket() -> Result<Option<VisibleTicket>, String> {
-    Ok(None)
+pub async fn get_current_visible_ticket(
+    state: tauri::State<'_, ServerState>,
+) -> Result<Option<VisibleTicket>, String> {
+    Ok(state.visible_ticket.read().unwrap().clone())
 }
 
 #[tauri::command]
-pub async fn get_extension_last_heartbeat() -> Result<Option<i64>, String> {
-    Ok(None)
+pub async fn get_extension_last_heartbeat(
+    state: tauri::State<'_, ServerState>,
+) -> Result<Option<i64>, String> {
+    Ok(*state.last_heartbeat.read().unwrap())
 }
