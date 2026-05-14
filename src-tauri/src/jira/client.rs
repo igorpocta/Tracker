@@ -1,9 +1,10 @@
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
+use serde_json::json;
 use thiserror::Error;
 use url::Url;
 
-use super::models::JiraUser;
+use super::models::{JiraUser, SearchPage};
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -87,5 +88,35 @@ impl JiraClient {
             .await?;
         let resp = Self::check_status(resp).await?;
         Ok(resp.json::<JiraUser>().await?)
+    }
+
+    /// `POST /rest/api/3/search/jql` — JQL search with pagination (new endpoint shape).
+    ///
+    /// `page_token` is the opaque `nextPageToken` returned by Jira on the previous
+    /// page. Pass `None` for the first page.
+    pub async fn search_jql(
+        &self,
+        jql: &str,
+        page_token: Option<&str>,
+        fields: &[&str],
+    ) -> Result<SearchPage, JiraError> {
+        let url = self.url("/rest/api/3/search/jql")?;
+        let mut body = json!({
+            "jql": jql,
+            "fields": fields,
+        });
+        if let Some(tok) = page_token {
+            body["nextPageToken"] = json!(tok);
+        }
+
+        let resp = self
+            .http
+            .post(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .json(&body)
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<SearchPage>().await?)
     }
 }
