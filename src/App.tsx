@@ -13,11 +13,12 @@ import { hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
 import { AppShell } from "./components/Layout/AppShell";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
-import History from "./routes/History";
+import Calendar from "./routes/Calendar";
+import Goals from "./routes/Goals";
 import Reports from "./routes/Reports";
 import Settings from "./routes/Settings";
 import Setup from "./routes/Setup";
-import Today from "./routes/Today";
+import TimeLog from "./routes/TimeLog";
 
 /**
  * Shared QueryClient instance. Sensible defaults for a desktop app:
@@ -79,11 +80,12 @@ export default function App() {
             {/* Setup wizard is rendered outside the AppShell so it owns the
                 full window. */}
             <Route path="/setup" element={<Setup />} />
-            {/* Everything else lives inside the shell (TopBar + SideNav). */}
+            {/* Everything else lives inside the shell. */}
             <Route element={<AppShell />}>
-              <Route index element={<Today />} />
-              <Route path="/history" element={<History />} />
+              <Route index element={<TimeLog />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/calendar" element={<Calendar />} />
+              <Route path="/goals" element={<Goals />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

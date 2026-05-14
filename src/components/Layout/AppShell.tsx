@@ -1,42 +1,57 @@
 /**
- * Top-level shell for the main app routes (Today, History, Reports, Settings).
+ * Top-level shell for the main app routes.
  *
- * Responsibilities:
- *   - Renders the TopBar (timer chip + search + sync + settings shortcut).
- *   - Renders the SideNav (icon rail).
- *   - Hosts the global StopDialog so the timer can be stopped from any route.
- *   - Hosts a toast region for cross-route notifications.
- *   - Owns the sync state (refresh_all spinner) and broadcasts toasts on
- *     worklog-saved / worklog-error.
- *   - Owns the CommandPalette and Cmd/Ctrl+K shortcut.
+ * Phase 13 layout — matches the original Trcker reference:
  *
- * The actual route content is rendered via React Router's `<Outlet />`.
+ *   ┌────────────────────────────────────────────────────────────────────┐
+ *   │ T│  Start tracking…                     19:57  [▶ Start]   │   ⊕  │
+ *   │ ⏰│  ─────────────────────────────────────────────────       │ Add │
+ *   │ 📊│  Route content                                            │ entry│
+ *   │ 📅│                                                            │ panel│
+ *   │ 🎯│                                                            │ (opt)│
+ *   │ ⚙ │                                                            │      │
+ *   │ ◯ │       ⌘, Settings  ⌘R Refresh  ⌘I Re-index  ⌘N New entry   │      │
+ *   └────────────────────────────────────────────────────────────────────┘
+ *
+ * Composed from:
+ *   • IconSidebar       — thin always-dark left rail
+ *   • StartTrackingBar  — top input + clock + start/stop
+ *   • <Outlet>          — route content
+ *   • CommandBar        — bottom keyboard hint pill
+ *   • AddEntryPanel     — optional right-side slide-in
+ *
+ * Settings has its own internal sidebar so we render WITHOUT the top
+ * StartTrackingBar and CommandBar in that case (the Settings page is a
+ * focus surface — no chrome competing with it).
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { hasConfig, refreshAll, startTimer } from "../../api/commands";
+import { hasConfig, refreshAll, refreshCache, startTimer } from "../../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { useTimerStore } from "../../stores/timerStore";
-import {
-  Toaster,
-  type Toast,
-  type ToastVariant,
-} from "../common/Toast";
+import { AddEntryPanel } from "../Entry/AddEntryPanel";
+import { Toaster, type Toast, type ToastVariant } from "../common/Toast";
 import { StopDialog } from "../Timer/TimerControls";
-import { CommandPalette } from "./CommandPalette";
-import { SideNav } from "./SideNav";
-import type { SyncState } from "./SyncStatus";
-import { TopBar } from "./TopBar";
+import { CommandBar } from "./CommandBar";
+import { IconSidebar } from "./IconSidebar";
+import { StartTrackingBar } from "./StartTrackingBar";
 
 /** Number of days of worklog history we pull on startup / manual refresh. */
 const REFRESH_WINDOW_DAYS = 30;
 
+export interface ShellOutletContext {
+  pushToast: (variant: ToastVariant, message: string) => void;
+  openStopDialog: () => void;
+  openAddEntry: () => void;
+}
+
 export function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
   const hydrateTimer = useTimerStore((s) => s.hydrate);
@@ -51,26 +66,27 @@ export function AppShell() {
     void hydratePrefs();
   }, [hydrateTimer, hydratePrefs]);
 
-  // ---- sync state ----------------------------------------------------------
-  const [syncState, setSyncState] = useState<SyncState>({
-    kind: "idle",
-    lastSyncMs: null,
-  });
+  // ---- refresh -------------------------------------------------------------
   const refresh = useCallback(async () => {
-    setSyncState({ kind: "syncing" });
     try {
       await refreshAll(REFRESH_WINDOW_DAYS);
-      setSyncState({ kind: "idle", lastSyncMs: Date.now() });
-      // Bust any TanStack Query cache keys that depend on backend data.
       queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
       queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
       queryClient.invalidateQueries({ queryKey: ["search-issues"] });
       queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
       queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-    } catch (e) {
-      const message =
-        typeof e === "string" ? e : (e as Error).message ?? "Refresh failed";
-      setSyncState({ kind: "error", message });
+    } catch {
+      /* swallow — toast lives elsewhere */
+    }
+  }, [queryClient]);
+
+  const reindex = useCallback(async () => {
+    try {
+      await refreshCache();
+      queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
+      queryClient.invalidateQueries({ queryKey: ["search-issues"] });
+    } catch {
+      /* swallow */
     }
   }, [queryClient]);
 
@@ -116,7 +132,6 @@ export function AppShell() {
   useTauriEvent<unknown>("worklog-error", onWorklogError);
 
   const onCacheRefreshed = useCallback(() => {
-    setSyncState({ kind: "idle", lastSyncMs: Date.now() });
     queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
     queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
   }, [queryClient]);
@@ -124,7 +139,6 @@ export function AppShell() {
 
   // Auto-sync event fired by backend ~3s after startup.
   const onAutoSyncComplete = useCallback(() => {
-    setSyncState({ kind: "idle", lastSyncMs: Date.now() });
     queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
     queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
     queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
@@ -151,9 +165,7 @@ export function AppShell() {
       .then((ok) => {
         if (!ok) navigate("/setup", { replace: true });
       })
-      .catch(() => {
-        /* ignore — best-effort */
-      });
+      .catch(() => {});
   }, [navigate]);
   useTauriEvent<unknown>("config-changed", onConfigChanged);
 
@@ -175,7 +187,6 @@ export function AppShell() {
         await useTimerStore
           .getState()
           .stop(comment.length > 0 ? comment : undefined);
-        // Toast fires via the worklog-saved event handler above.
       } catch (e) {
         pushToast("error", typeof e === "string" ? e : "Failed to save worklog");
       }
@@ -183,32 +194,8 @@ export function AppShell() {
     [pushToast],
   );
 
-  // ---- CommandPalette state + Cmd/Ctrl+K shortcut --------------------------
-  const [paletteOpen, setPaletteOpen] = useState(false);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      const isMac =
-        typeof navigator !== "undefined" &&
-        /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (mod && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
-      } else if (e.key === "Escape" && paletteOpen) {
-        setPaletteOpen(false);
-      }
-      // Refresh stays on Cmd/Ctrl+R.
-      if (mod && (e.key === "r" || e.key === "R")) {
-        e.preventDefault();
-        void refresh();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [refresh, paletteOpen]);
-
-  const handlePaletteStart = useCallback(
+  // ---- Start tracking handler ---------------------------------------------
+  const handlePickIssue = useCallback(
     async (issueKey: string) => {
       try {
         await startTimer(issueKey);
@@ -220,19 +207,82 @@ export function AppShell() {
     [navigate, pushToast],
   );
 
+  // ---- Add entry panel -----------------------------------------------------
+  const [addEntryOpen, setAddEntryOpen] = useState(false);
+
+  // ---- Keyboard shortcuts --------------------------------------------------
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isMac =
+        typeof navigator !== "undefined" &&
+        /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!mod) return;
+      const k = e.key.toLowerCase();
+      if (k === ",") {
+        e.preventDefault();
+        navigate("/settings");
+      } else if (k === "r") {
+        e.preventDefault();
+        void refresh();
+      } else if (k === "i") {
+        e.preventDefault();
+        void reindex();
+      } else if (k === "n") {
+        e.preventDefault();
+        navigate("/");
+        setAddEntryOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate, refresh, reindex]);
+
+  const isSettings = location.pathname.startsWith("/settings");
+
   return (
-    <div className="h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)]">
-      <TopBar
-        syncState={syncState}
-        onRefresh={refresh}
-        onOpenCommandPalette={() => setPaletteOpen(true)}
-        onStop={active ? () => setStopOpen(true) : undefined}
-      />
-      <div className="flex-1 flex min-h-0">
-        <SideNav />
-        <main className="flex-1 min-w-0 overflow-y-auto">
-          <Outlet context={{ pushToast, openStopDialog: () => setStopOpen(true) }} />
-        </main>
+    <div className="h-screen flex bg-[var(--bg-app)] text-[var(--text-primary)]">
+      <IconSidebar />
+
+      <div className="flex-1 min-w-0 flex">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {!isSettings && (
+            <div className="px-6 pt-4 pb-2">
+              <StartTrackingBar
+                onPickIssue={handlePickIssue}
+                onStop={active ? () => setStopOpen(true) : undefined}
+              />
+            </div>
+          )}
+          <main className="flex-1 min-w-0 overflow-y-auto">
+            <Outlet
+              context={{
+                pushToast,
+                openStopDialog: () => setStopOpen(true),
+                openAddEntry: () => setAddEntryOpen(true),
+              }}
+            />
+          </main>
+          {!isSettings && (
+            <CommandBar
+              onSettings={() => navigate("/settings")}
+              onRefresh={() => void refresh()}
+              onReindex={() => void reindex()}
+              onNewEntry={() => setAddEntryOpen(true)}
+            />
+          )}
+        </div>
+
+        <AddEntryPanel
+          open={addEntryOpen}
+          onClose={() => setAddEntryOpen(false)}
+          onSave={async () => {
+            pushToast(
+              "info",
+              "Manual entries aren't persisted yet — UI preview only.",
+            );
+          }}
+        />
       </div>
 
       {active && (
@@ -245,19 +295,7 @@ export function AppShell() {
         />
       )}
 
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onStartIssue={handlePaletteStart}
-      />
-
       <Toaster toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
-}
-
-/** Shape of the data passed to nested routes via `useOutletContext`. */
-export interface ShellOutletContext {
-  pushToast: (variant: ToastVariant, message: string) => void;
-  openStopDialog: () => void;
 }
