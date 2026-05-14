@@ -1,9 +1,22 @@
 @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap");
 @import "tailwindcss";
 
+/*
+ * Base typography and color-scheme tokens.
+ *
+ * `--base-font-size` is updated at runtime by `prefsStore.applyFontSize` so
+ * tweaking the size radio in Settings immediately scales the whole UI.
+ *
+ * Theme is encoded as a `data-theme` attribute on `<html>`:
+ *   (none)        → follow `prefers-color-scheme` (the `auto` mode)
+ *   "dark"        → force dark
+ *   "light"       → force light
+ */
 :root {
   font-family: "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
   color-scheme: dark;
+  --base-font-size: 14px;
+  font-size: var(--base-font-size);
 }
 
 html, body, #root {
@@ -13,18 +26,42 @@ html, body, #root {
   color: #fff;
 }
 
-/*
- * Light-theme fallback for users who prefer it system-wide.
- * For MVP we stay dark by default; this just keeps the app from looking
- * broken if launched into a light environment (and provides a hook for
- * later polish without touching every component).
- */
+/* --- explicit dark (default) -------------------------------------------- */
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #root {
+  background: #0f0f0f;
+  color: #fff;
+}
+
+/* --- explicit light ----------------------------------------------------- */
+html[data-theme="light"] {
+  color-scheme: light;
+}
+html[data-theme="light"], html[data-theme="light"] body, html[data-theme="light"] #root {
+  background: #f7f7f7;
+  color: #111;
+}
+
+/* --- auto / system ------------------------------------------------------ */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: light;
   }
-  html, body, #root {
+  html:not([data-theme]), html:not([data-theme]) body, html:not([data-theme]) #root {
     background: #f7f7f7;
     color: #111;
   }
+}
+
+/* --- density ------------------------------------------------------------ */
+/* `density-compact` shaves a couple px off list rows; comfortable is default. */
+body.density-compact .worklog-row {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+body.density-comfortable .worklog-row {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }
