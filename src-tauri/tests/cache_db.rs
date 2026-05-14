@@ -1,6 +1,7 @@
 use tempfile::TempDir;
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
+use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
 use tracker_lib::cache::worklogs::{recent as worklog_recent, record as worklog_record, WorklogRow};
 use tracker_lib::cache::Db;
 
@@ -209,4 +210,28 @@ fn recent_respects_limit() {
     }
     let rows = worklog_recent(&db, 3).unwrap();
     assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn settings_get_returns_none_for_missing_key() {
+    let (_d, db) = fresh_db();
+    assert!(setting_get(&db, "no.such.key").unwrap().is_none());
+}
+
+#[test]
+fn settings_set_and_get_roundtrip() {
+    let (_d, db) = fresh_db();
+    setting_set(&db, "daily_goal_minutes", "480").unwrap();
+    assert_eq!(
+        setting_get(&db, "daily_goal_minutes").unwrap().as_deref(),
+        Some("480")
+    );
+}
+
+#[test]
+fn settings_set_overwrites_existing_value() {
+    let (_d, db) = fresh_db();
+    setting_set(&db, "k", "v1").unwrap();
+    setting_set(&db, "k", "v2").unwrap();
+    assert_eq!(setting_get(&db, "k").unwrap().as_deref(), Some("v2"));
 }
