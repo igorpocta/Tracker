@@ -25,6 +25,11 @@ pub enum JiraError {
     Api { status: u16, body: String },
     #[error("chrono parse: {0}")]
     Chrono(#[from] chrono::ParseError),
+    /// Returned by [`JiraClient::delete_worklog`] (and update) when Jira
+    /// responds with a 404. Callers may want to treat this as "already gone,
+    /// OK" rather than a hard failure.
+    #[error("worklog not found")]
+    WorklogNotFound,
 }
 
 /// Typed Jira Cloud API client with Basic auth.
@@ -161,6 +166,100 @@ impl JiraClient {
             .await?;
         let resp = Self::check_status(resp).await?;
         Ok(resp.json::<WorklogResponse>().await?)
+    }
+
+    /// `PUT /rest/api/3/issue/{key}/worklog/{id}` — partially update a worklog.
+    ///
+    /// Builds the body with only the fields that are `Some(_)`. `started` uses
+    /// the same `%Y-%m-%dT%H:%M:%S%.3f+0000` format as [`Self::add_worklog`].
+    /// `comment` is converted to ADF via [`make_adf_comment`]; empty / `None`
+    /// comments are omitted from the request body entirely.
+    ///
+    /// Returns the updated `WorklogResponse`. A 404 from Jira is surfaced as
+    /// [`JiraError::WorklogNotFound`] so callers can react to the
+    /// "worklog already gone" case.
+    pub async fn update_worklog(
+        &self,
+        issue_key: &str,
+        worklog_id: &str,
+        started: Option<DateTime<Utc>>,
+        time_spent_seconds: Option<i64>,
+        comment: Option<&str>,
+    ) -> Result<WorklogResponse, JiraError> {
+        let url = self.url(&format!(
+            "/rest/api/3/issue/{issue_key}/worklog/{worklog_id}"
+        ))?;
+
+        let mut body = serde_json::Map::new();
+        if let Some(started) = started {
+            body.insert(
+                "started".to_string(),
+                serde_json::Value::String(
+                    started.format("%Y-%m-%dT%H:%M:%S%.3f+0000").to_string(),
+                ),
+            );
+        }
+        if let Some(secs) = time_spent_seconds {
+            body.insert(
+                "timeSpentSeconds".to_string(),
+                serde_json::Value::Number(secs.into()),
+            );
+        }
+        if let Some(text) = comment {
+            if let Some(adf) = make_adf_comment(text) {
+                body.insert("comment".to_string(), adf);
+            }
+        }
+
+        let resp = self
+            .http
+            .put(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .json(&serde_json::Value::Object(body))
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if status == StatusCode::NOT_FOUND {
+            return Err(JiraError::WorklogNotFound);
+        }
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<WorklogResponse>().await?)
+    }
+
+    /// `DELETE /rest/api/3/issue/{key}/worklog/{id}` — remove a worklog.
+    ///
+    /// Returns `Ok(())` on 204 No Content. A 404 is surfaced as
+    /// [`JiraError::WorklogNotFound`] (the row is already gone — callers
+    /// often treat this as success and just tombstone the local row).
+    pub async fn delete_worklog(
+        &self,
+        issue_key: &str,
+        worklog_id: &str,
+    ) -> Result<(), JiraError> {
+        let url = self.url(&format!(
+            "/rest/api/3/issue/{issue_key}/worklog/{worklog_id}"
+        ))?;
+        let resp = self
+            .http
+            .delete(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if status == StatusCode::NO_CONTENT || status.is_success() {
+            return Ok(());
+        }
+        if status == StatusCode::NOT_FOUND {
+            return Err(JiraError::WorklogNotFound);
+        }
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err(JiraError::Unauthorized);
+        }
+        let code = status.as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        Err(JiraError::Api { status: code, body })
     }
 
     /// `GET /rest/api/3/worklog/updated?since={ms_epoch}` — list worklog ids

@@ -231,6 +231,145 @@ async fn add_worklog_empty_comment_omits_field() {
         .unwrap();
 }
 
+// ---------- update_worklog ----------
+
+#[tokio::test]
+async fn update_worklog_sends_only_provided_fields() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("PUT"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/99999"))
+        .and(basic_auth(EMAIL, TOKEN))
+        .and(body_partial_json(json!({
+            "started": "2026-05-14T09:30:00.000+0000",
+            "timeSpentSeconds": 2400
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "99999",
+            "issueId": "10001",
+            "timeSpentSeconds": 2400,
+            "started": "2026-05-14T09:30:00.000+0000"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let started = Utc.with_ymd_and_hms(2026, 5, 14, 9, 30, 0).unwrap();
+    let resp = client
+        .update_worklog("ABC-1", "99999", Some(started), Some(2400), None)
+        .await
+        .expect("ok");
+    assert_eq!(resp.id, "99999");
+    assert_eq!(resp.time_spent_seconds, Some(2400));
+}
+
+#[tokio::test]
+async fn update_worklog_with_comment_includes_adf() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("PUT"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/99999"))
+        .and(body_partial_json(json!({
+            "timeSpentSeconds": 600,
+            "comment": {
+                "type": "doc",
+                "version": 1
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "99999",
+            "timeSpentSeconds": 600
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let resp = client
+        .update_worklog("ABC-1", "99999", None, Some(600), Some("Updated comment"))
+        .await
+        .expect("ok");
+    assert_eq!(resp.id, "99999");
+}
+
+#[tokio::test]
+async fn update_worklog_404_returns_not_found() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("PUT"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let err = client
+        .update_worklog("ABC-1", "missing", None, Some(60), None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JiraError::WorklogNotFound), "got {err:?}");
+}
+
+// ---------- delete_worklog ----------
+
+#[tokio::test]
+async fn delete_worklog_returns_ok_on_204() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/99999"))
+        .and(basic_auth(EMAIL, TOKEN))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    client
+        .delete_worklog("ABC-1", "99999")
+        .await
+        .expect("ok");
+}
+
+#[tokio::test]
+async fn delete_worklog_treats_404_as_not_found() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("gone"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = client
+        .delete_worklog("ABC-1", "missing")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, JiraError::WorklogNotFound), "got {err:?}");
+}
+
+#[tokio::test]
+async fn delete_worklog_500_returns_api_error() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/99999"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+        .mount(&server)
+        .await;
+
+    let err = client.delete_worklog("ABC-1", "99999").await.unwrap_err();
+    match err {
+        JiraError::Api { status, .. } => assert_eq!(status, 500),
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn delete_worklog_401_returns_unauthorized() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/ABC-1/worklog/99999"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    let err = client.delete_worklog("ABC-1", "99999").await.unwrap_err();
+    assert!(matches!(err, JiraError::Unauthorized), "got {err:?}");
+}
+
 // ---------- ADF ----------
 
 #[test]
