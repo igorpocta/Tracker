@@ -4,6 +4,7 @@ pub mod config;
 pub mod jira;
 pub mod keychain;
 pub mod popover;
+pub mod server;
 pub mod state;
 pub mod tray;
 pub mod tray_ticker;
@@ -47,7 +48,11 @@ pub fn run() {
             if let Err(e) = crate::tray::setup(&handle) {
                 tracing::warn!("tray setup failed: {e}");
             }
-            crate::tray_ticker::spawn(handle);
+            crate::tray_ticker::spawn(handle.clone());
+
+            // Local HTTP server for the (future) browser extension.
+            // Bind failures are logged inside; they never abort startup.
+            crate::server::start(handle);
 
             Ok(())
         })
