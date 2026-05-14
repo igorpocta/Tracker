@@ -10,7 +10,10 @@
 //! frontend), we land in `show_centered` which positions near the top of the
 //! primary monitor — visually rough but still usable.
 
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime, WebviewWindow};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime, WebviewWindow,
+    WindowEvent,
+};
 
 /// Window label that must match `tauri.conf.json`.
 pub const POPOVER_LABEL: &str = "popover";
@@ -25,6 +28,38 @@ const POPOVER_GAP_PX: f64 = 6.0;
 fn get_popover<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     app.get_webview_window(POPOVER_LABEL)
         .ok_or(tauri::Error::WebviewNotFound)
+}
+
+/// Install a `WindowEvent::Focused(false)` listener on the popover that auto-
+/// hides the window when focus is lost.
+///
+/// Why we do this on the Rust side rather than the JS side: when the user
+/// clicks anywhere outside the popover, the OS shifts focus away from the
+/// popover window — on macOS this fires `WindowEvent::Focused(false)`; on
+/// Windows it maps to `WM_KILLFOCUS`. The webview's own `blur` event is less
+/// reliable (e.g. it fires when the inner search input loses focus too).
+///
+/// Should be called exactly once during `tauri::Builder::setup`.
+pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let popover = get_popover(app)?;
+    let handle = popover.clone();
+    popover.on_window_event(move |event| {
+        if let WindowEvent::Focused(false) = event {
+            if handle.is_visible().unwrap_or(false) {
+                let _ = handle.hide();
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Pure decision helper for the auto-hide behaviour. Returns `true` iff the
+/// given event indicates that the popover should be hidden.
+///
+/// Extracted so the unit tests don't need a full Tauri runtime.
+#[must_use]
+pub fn should_auto_hide(event: &WindowEvent, currently_visible: bool) -> bool {
+    matches!(event, WindowEvent::Focused(false)) && currently_visible
 }
 
 /// Toggle popover visibility. Anchors to `tray_rect` when showing.
@@ -123,4 +158,33 @@ pub fn open_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         let _ = win.emit("main-window:navigate", "setup");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_hides_on_focus_loss_when_visible() {
+        let ev = WindowEvent::Focused(false);
+        assert!(should_auto_hide(&ev, true));
+    }
+
+    #[test]
+    fn does_not_auto_hide_when_already_hidden() {
+        let ev = WindowEvent::Focused(false);
+        assert!(!should_auto_hide(&ev, false));
+    }
+
+    #[test]
+    fn does_not_auto_hide_on_focus_gain() {
+        let ev = WindowEvent::Focused(true);
+        assert!(!should_auto_hide(&ev, true));
+    }
+
+    #[test]
+    fn does_not_auto_hide_on_destroyed() {
+        let ev = WindowEvent::Destroyed;
+        assert!(!should_auto_hide(&ev, true));
+    }
 }
