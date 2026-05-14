@@ -95,6 +95,22 @@ export type FontSizePref = "sm" | "md" | "lg";
 /** Density preference. */
 export type DensityPref = "compact" | "comfortable";
 
+/** Accent color identifier (maps to an HSL hue in the frontend). */
+export type AccentColor =
+  | "blue"
+  | "indigo"
+  | "violet"
+  | "pink"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "teal"
+  | "graphite";
+
+/** Supported currency codes. */
+export type Currency = "CZK" | "EUR" | "USD" | "GBP" | "PLN" | "CHF";
+
 /** Result of `refresh_all` — counts of records pulled from Jira. */
 export interface RefreshAllResult {
   issues: number;

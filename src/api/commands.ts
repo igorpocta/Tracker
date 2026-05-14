@@ -279,3 +279,23 @@ export function getDensity(): Promise<DensityPref> {
 export function setDensity(density: DensityPref): Promise<void> {
   return invoke<void>("set_density", { density });
 }
+
+// -----------------------------------------------------------------------------
+// Phase 12: Accent color + currency
+// -----------------------------------------------------------------------------
+
+export function getAccentColor(): Promise<string> {
+  return invoke<string>("get_accent_color");
+}
+
+export function setAccentColor(accent: string): Promise<void> {
+  return invoke<void>("set_accent_color", { accent });
+}
+
+export function getCurrency(): Promise<string> {
+  return invoke<string>("get_currency");
+}
+
+export function setCurrency(currency: string): Promise<void> {
+  return invoke<void>("set_currency", { currency });
+}

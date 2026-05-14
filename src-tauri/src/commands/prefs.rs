@@ -25,6 +25,18 @@ pub const ALLOWED_FONT_SIZES: &[&str] = &["sm", "md", "lg"];
 pub const DEFAULT_DENSITY: &str = "comfortable";
 /// Allowed density values.
 pub const ALLOWED_DENSITIES: &[&str] = &["compact", "comfortable"];
+/// Default accent color: Apple-style blue.
+pub const DEFAULT_ACCENT: &str = "blue";
+/// Allowed accent color identifiers (UI maps each to an HSL hue).
+pub const ALLOWED_ACCENTS: &[&str] = &[
+    "blue", "indigo", "violet", "pink", "red", "orange", "yellow", "green",
+    "teal", "graphite",
+];
+/// Default currency code.
+pub const DEFAULT_CURRENCY: &str = "CZK";
+/// Allowed ISO-4217 currency codes.
+pub const ALLOWED_CURRENCIES: &[&str] =
+    &["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -33,6 +45,8 @@ const KEY_HOURLY_RATE: &str = "hourly_rate";
 const KEY_THEME: &str = "theme";
 const KEY_FONT_SIZE: &str = "font_size";
 const KEY_DENSITY: &str = "density";
+const KEY_ACCENT: &str = "accent_color";
+const KEY_CURRENCY: &str = "currency";
 
 // -----------------------------------------------------------------------------
 // Inner (Tauri-free) helpers.
@@ -130,6 +144,42 @@ pub fn set_density_inner(db: &Db, density: &str) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_DENSITY, density).map_err(|e| e.to_string())
+}
+
+// ----- Accent color -----
+
+pub fn get_accent_color_inner(db: &Db) -> Result<String, String> {
+    match cache::settings::get(db, KEY_ACCENT).map_err(|e| e.to_string())? {
+        Some(v) if ALLOWED_ACCENTS.contains(&v.as_str()) => Ok(v),
+        _ => Ok(DEFAULT_ACCENT.to_string()),
+    }
+}
+
+pub fn set_accent_color_inner(db: &Db, accent: &str) -> Result<(), String> {
+    if !ALLOWED_ACCENTS.contains(&accent) {
+        return Err(format!(
+            "invalid accent {accent:?}; expected one of {ALLOWED_ACCENTS:?}"
+        ));
+    }
+    cache::settings::set(db, KEY_ACCENT, accent).map_err(|e| e.to_string())
+}
+
+// ----- Currency -----
+
+pub fn get_currency_inner(db: &Db) -> Result<String, String> {
+    match cache::settings::get(db, KEY_CURRENCY).map_err(|e| e.to_string())? {
+        Some(v) if ALLOWED_CURRENCIES.contains(&v.as_str()) => Ok(v),
+        _ => Ok(DEFAULT_CURRENCY.to_string()),
+    }
+}
+
+pub fn set_currency_inner(db: &Db, currency: &str) -> Result<(), String> {
+    if !ALLOWED_CURRENCIES.contains(&currency) {
+        return Err(format!(
+            "invalid currency {currency:?}; expected one of {ALLOWED_CURRENCIES:?}"
+        ));
+    }
+    cache::settings::set(db, KEY_CURRENCY, currency).map_err(|e| e.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -237,5 +287,41 @@ pub async fn set_density(
 ) -> Result<(), String> {
     set_density_inner(&state.db, &density)?;
     let _ = app.emit("prefs-changed", "density");
+    Ok(())
+}
+
+// ----- Accent color (Phase 12) -----
+
+#[tauri::command]
+pub async fn get_accent_color(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    get_accent_color_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_accent_color(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    accent: String,
+) -> Result<(), String> {
+    set_accent_color_inner(&state.db, &accent)?;
+    let _ = app.emit("prefs-changed", "accent_color");
+    Ok(())
+}
+
+// ----- Currency (Phase 12) -----
+
+#[tauri::command]
+pub async fn get_currency(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    get_currency_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_currency(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    currency: String,
+) -> Result<(), String> {
+    set_currency_inner(&state.db, &currency)?;
+    let _ = app.emit("prefs-changed", "currency");
     Ok(())
 }
