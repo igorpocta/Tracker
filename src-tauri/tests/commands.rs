@@ -18,7 +18,11 @@ use tracker_lib::commands::prefs::{
     set_hourly_rate_inner, set_widget_format_inner, DEFAULT_DAILY_GOAL_SECONDS,
     DEFAULT_HOURLY_RATE,
 };
-use tracker_lib::commands::config::test_jira_connection_inner;
+use tracker_lib::commands::config::{
+    sign_out_inner, test_jira_connection_inner, update_config_inner,
+};
+use tracker_lib::config::JiraConfig;
+use tracker_lib::state::AppState;
 use tracker_lib::commands::timer::{
     get_timer_state_inner, record_local_stop, start_timer_inner, update_timer_start_inner,
 };
@@ -293,4 +297,101 @@ async fn test_jira_connection_inner_rejects_bogus_url() {
         .await
         .unwrap_err();
     assert!(matches!(err, JiraError::InvalidUrl(_)), "got {err:?}");
+}
+
+// -----------------------------------------------------------------------------
+// Phase 11A — update_config / sign_out inner helpers.
+//
+// These tests stub out the keychain via the closure parameter, so they don't
+// require the OS keychain and run anywhere.
+// -----------------------------------------------------------------------------
+
+fn fresh_state() -> (TempDir, AppState) {
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(&dir.path().join("t.db")).unwrap();
+    (dir, AppState::new(db))
+}
+
+#[test]
+fn update_config_inner_writes_toml_and_updates_state() {
+    let (dir, state) = fresh_state();
+    let cfg_path = dir.path().join("config.toml");
+
+    let cfg = JiraConfig {
+        base_url: "https://acme.atlassian.net".into(),
+        email: "alice@acme.example".into(),
+    };
+
+    // Token closure: just record that we got it; no keychain access.
+    let saved = std::cell::Cell::new(None);
+    update_config_inner(&state, &cfg_path, cfg.clone(), Some("new-token".into()), |t| {
+        saved.set(Some(t.to_string()));
+        Ok(())
+    })
+    .unwrap();
+
+    assert!(cfg_path.exists(), "config file should be created");
+    assert_eq!(saved.into_inner().as_deref(), Some("new-token"));
+
+    let in_memory = state.jira_config_cloned().expect("config in memory");
+    assert_eq!(in_memory.base_url, cfg.base_url);
+    assert_eq!(in_memory.email, cfg.email);
+
+    // The TOML on disk should round-trip.
+    let loaded = tracker_lib::config::load_from_path(&cfg_path).unwrap();
+    assert_eq!(loaded.base_url, cfg.base_url);
+}
+
+#[test]
+fn update_config_inner_does_not_save_token_when_none() {
+    let (dir, state) = fresh_state();
+    let cfg_path = dir.path().join("config.toml");
+
+    let cfg = JiraConfig {
+        base_url: "https://acme.atlassian.net".into(),
+        email: "alice@acme.example".into(),
+    };
+    let called = std::cell::Cell::new(false);
+    update_config_inner(&state, &cfg_path, cfg, None, |_t| {
+        called.set(true);
+        Ok(())
+    })
+    .unwrap();
+    assert!(!called.into_inner(), "save_token closure must not run when new_token = None");
+}
+
+#[test]
+fn sign_out_inner_removes_config_and_clears_state() {
+    let (dir, state) = fresh_state();
+    let cfg_path = dir.path().join("config.toml");
+
+    // Seed: write a config + populate the in-memory state so we can verify
+    // both halves get cleared.
+    let cfg = JiraConfig {
+        base_url: "https://acme.atlassian.net".into(),
+        email: "alice@acme.example".into(),
+    };
+    tracker_lib::config::save_to_path(&cfg_path, &cfg).unwrap();
+    *state.jira_config.write().unwrap() = Some(cfg);
+
+    let cleared = std::cell::Cell::new(false);
+    sign_out_inner(&state, &cfg_path, || {
+        cleared.set(true);
+        Ok(())
+    })
+    .unwrap();
+
+    assert!(!cfg_path.exists(), "config file should be deleted");
+    assert!(cleared.into_inner(), "clear_token closure must run");
+    assert!(state.jira_config_cloned().is_none());
+    assert!(state.jira_client_cloned().is_none());
+}
+
+#[test]
+fn sign_out_inner_is_idempotent_when_already_signed_out() {
+    let (dir, state) = fresh_state();
+    let cfg_path = dir.path().join("missing.toml");
+    // File never existed.
+    sign_out_inner(&state, &cfg_path, || Ok(())).expect("idempotent");
+    assert!(state.jira_config_cloned().is_none());
 }
