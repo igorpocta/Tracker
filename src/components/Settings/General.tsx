@@ -13,7 +13,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { purgeAuditLog } from "../../api/commands";
+import {
+  getActivityThresholdMin,
+  getAutostart,
+  getRoundingIntervalMinutes,
+  getRoundingMode,
+  purgeAuditLog,
+  setActivityThresholdMin,
+  setAutostart,
+  setRoundingIntervalMinutes,
+  setRoundingMode,
+  type RoundingMode,
+} from "../../api/commands";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
@@ -42,6 +53,14 @@ export default function General() {
   const [purgeDays, setPurgeDays] = useState(90);
   const [purgeStatus, setPurgeStatus] = useState<string | null>(null);
 
+  // Phase 18A — Item 30: autostart on login (opt-in).
+  const [autostartOn, setAutostartOn] = useState<boolean | null>(null);
+  // Phase 18A — Item 27: time rounding.
+  const [rndMode, setRndMode] = useState<RoundingMode>("none");
+  const [rndInterval, setRndInterval] = useState<number>(1);
+  // Phase 18A — Item 32: inactivity threshold (minutes).
+  const [actThreshold, setActThreshold] = useState<number>(5);
+
   useEffect(() => {
     try {
       const ti = window.localStorage.getItem(LS_TIME_INPUT_KEY);
@@ -54,6 +73,37 @@ export default function General() {
       /* ignore */
     }
   }, []);
+
+  // Hydrate Phase 18A toggles from the backend.
+  useEffect(() => {
+    void getAutostart().then(setAutostartOn).catch(() => setAutostartOn(false));
+    void getRoundingMode().then(setRndMode).catch(() => {});
+    void getRoundingIntervalMinutes().then(setRndInterval).catch(() => {});
+    void getActivityThresholdMin().then(setActThreshold).catch(() => {});
+  }, []);
+
+  const updateAutostart = async (enabled: boolean) => {
+    setAutostartOn(enabled);
+    try {
+      await setAutostart(enabled);
+    } catch {
+      // Revert on failure (e.g. permission denied).
+      setAutostartOn(!enabled);
+    }
+  };
+
+  const updateRndMode = async (m: RoundingMode) => {
+    setRndMode(m);
+    await setRoundingMode(m).catch(() => {});
+  };
+  const updateRndInterval = async (n: number) => {
+    setRndInterval(n);
+    await setRoundingIntervalMinutes(n).catch(() => {});
+  };
+  const updateActThreshold = async (n: number) => {
+    setActThreshold(n);
+    await setActivityThresholdMin(n).catch(() => {});
+  };
 
   const updateTimeInput = (v: TimeInputStyle) => {
     setTimeInput(v);
@@ -118,6 +168,90 @@ export default function General() {
             onChange={() => updateTimeInput("duration")}
           />
         </div>
+      </Section>
+
+      <Section
+        title="Zaokrouhlování času"
+        description="Před uložením do Jiry můžete dobu zaokrouhlit nahoru nebo dolů na zvolený interval."
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
+            <RadioRow
+              label="Žádné — uložit přesnou dobu"
+              checked={rndMode === "none"}
+              onChange={() => void updateRndMode("none")}
+            />
+            <RadioRow
+              label="Nahoru — zaokrouhlit na další interval"
+              checked={rndMode === "up"}
+              onChange={() => void updateRndMode("up")}
+            />
+            <RadioRow
+              label="Dolů — zaokrouhlit na předchozí interval"
+              checked={rndMode === "down"}
+              onChange={() => void updateRndMode("down")}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+            <span>Interval:</span>
+            <select
+              value={rndInterval}
+              onChange={(e) => void updateRndInterval(Number(e.target.value))}
+              disabled={rndMode === "none"}
+              className="h-8 px-2 rounded-[var(--radius-md)] bg-transparent
+                         border border-[var(--border-subtle)] text-sm
+                         text-[var(--text-primary)] focus:outline-none
+                         focus:border-[var(--border-default)] transition-colors duration-150
+                         disabled:opacity-50"
+            >
+              <option value={1}>1 minuta</option>
+              <option value={5}>5 minut</option>
+              <option value={15}>15 minut</option>
+              <option value={60}>1 hodina</option>
+            </select>
+          </label>
+        </div>
+      </Section>
+
+      <Section
+        title="Spustit při přihlášení"
+        description="Tracker se automaticky spustí při přihlášení do systému. Okno zůstane skryté — bude dostupné z menu baru."
+      >
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={autostartOn === true}
+            onChange={(e) => void updateAutostart(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-[var(--text-primary)]">
+            Spouštět Tracker automaticky
+          </span>
+        </label>
+      </Section>
+
+      <Section
+        title="Sledování aktivity"
+        description="Tracker sleduje, kdy s aplikací aktivně pracujete, a tuto informaci zobrazuje v přehledu cílů. Nemá vliv na uložené worklogy."
+      >
+        <label className="flex flex-col gap-1 text-xs text-[var(--text-secondary)]">
+          <span>Práh nečinnosti (minuty)</span>
+          <input
+            type="number"
+            min={1}
+            max={120}
+            value={actThreshold}
+            onChange={(e) =>
+              void updateActThreshold(
+                Math.min(120, Math.max(1, Number(e.target.value) || 5)),
+              )
+            }
+            className="w-28 h-8 px-2 rounded-[var(--radius-md)] bg-transparent
+                       border border-[var(--border-subtle)] text-sm
+                       text-[var(--text-primary)] focus:outline-none
+                       focus:border-[var(--border-default)] transition-colors duration-150 tabular-nums"
+          />
+        </label>
       </Section>
 
       <Section

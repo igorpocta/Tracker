@@ -1,7 +1,7 @@
 /**
  * Top-level shell for the main app routes.
  *
- * Phase 13 layout — matches the original Trcker reference:
+ * Phase 13 layout — matches the original Tracker reference:
  *
  *   ┌────────────────────────────────────────────────────────────────────┐
  *   │ T│  Start tracking…                     19:57  [▶ Start]   │   ⊕  │
@@ -36,6 +36,7 @@ import {
   startTimer,
 } from "../../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
+import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { useTimerStore } from "../../stores/timerStore";
@@ -74,6 +75,10 @@ export function AppShell() {
   const active = useTimerStore((s) => s.active);
   const timerBusy = useTimerStore((s) => s.busy);
   const setActive = useTimerStore((s) => s.setActive);
+
+  // Phase 18A — Item 32: record user activity at the shell level so every
+  // route benefits without each component needing to wire its own listeners.
+  useActivityTracker();
 
   // Hydrate stores once.
   useEffect(() => {
@@ -245,6 +250,23 @@ export function AppShell() {
     [navigate, pushToast],
   );
 
+  // Phase 18A — Item 4: start an unassigned timer.
+  const handleStartUnassigned = useCallback(async () => {
+    try {
+      await startTimer(null);
+      navigate("/");
+      pushToast(
+        "info",
+        "Časomíra běží bez přiřazeného úkolu — nezapomeňte ho přiřadit před uložením.",
+      );
+    } catch (e) {
+      pushToast(
+        "error",
+        typeof e === "string" ? e : "Nepodařilo se spustit časomíru",
+      );
+    }
+  }, [navigate, pushToast]);
+
   // ---- Add entry panel -----------------------------------------------------
   const [addEntryOpen, setAddEntryOpen] = useState(false);
 
@@ -308,6 +330,7 @@ export function AppShell() {
               <StartTrackingBar
                 onPickIssue={handlePickIssue}
                 onStop={active ? () => setStopOpen(true) : undefined}
+                onStartUnassigned={handleStartUnassigned}
               />
             </div>
           )}

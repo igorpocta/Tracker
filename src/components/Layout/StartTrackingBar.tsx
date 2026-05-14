@@ -29,13 +29,22 @@ import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 export interface StartTrackingBarProps {
   onPickIssue: (issueKey: string) => void;
   onStop?: () => void;
+  /**
+   * Phase 18A — Item 4: callback to start an unassigned timer (empty issue
+   * key). When omitted, the "Bez úkolu" button is hidden.
+   */
+  onStartUnassigned?: () => void;
 }
 
 const LIMIT = 20;
 /** Debounce time for the issue search query, in ms. */
 const DEBOUNCE_MS = 120;
 
-export function StartTrackingBar({ onPickIssue, onStop }: StartTrackingBarProps) {
+export function StartTrackingBar({
+  onPickIssue,
+  onStop,
+  onStartUnassigned,
+}: StartTrackingBarProps) {
   const active = useTimerStore((s) => s.active);
   const busy = useTimerStore((s) => s.busy);
 
@@ -43,20 +52,30 @@ export function StartTrackingBar({ onPickIssue, onStop }: StartTrackingBarProps)
     return <RunningBar active={active} busy={busy} onStop={onStop} />;
   }
 
-  return <IdleBar onPickIssue={onPickIssue} />;
+  return <IdleBar onPickIssue={onPickIssue} onStartUnassigned={onStartUnassigned} />;
 }
 
 // -----------------------------------------------------------------------------
 // Idle state — search + start.
 // -----------------------------------------------------------------------------
 
-function IdleBar({ onPickIssue }: { onPickIssue: (issueKey: string) => void }) {
+function IdleBar({
+  onPickIssue,
+  onStartUnassigned,
+}: {
+  onPickIssue: (issueKey: string) => void;
+  onStartUnassigned?: () => void;
+}) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const now = useNow(60_000);
+  // Phase 18A — Item 10: tick every second so the displayed wall clock
+  // matches what gets recorded when the user clicks Start. Previously
+  // this ticked at 60s, which left a perceived ~58s offset between the
+  // visible time and the timer's actual start.
+  const now = useNow(1000);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(query.trim()), DEBOUNCE_MS);
@@ -167,6 +186,20 @@ function IdleBar({ onPickIssue }: { onPickIssue: (issueKey: string) => void }) {
         <Play className="w-3.5 h-3.5" aria-hidden />
         Start
       </button>
+      {onStartUnassigned && (
+        <button
+          type="button"
+          onClick={onStartUnassigned}
+          className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3 h-11
+                     rounded-[var(--radius-md)] border border-[var(--border-subtle)]
+                     text-xs text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]
+                     transition-colors duration-150"
+          aria-label="Spustit časomíru bez úkolu (přiřadit později)"
+          title="Spustit bez úkolu — můžete přiřadit později"
+        >
+          ⚠ Bez úkolu
+        </button>
+      )}
     </div>
   );
 }
@@ -226,7 +259,7 @@ function SearchDropdown({
             {iss.issue_key}
           </span>
           <span className="truncate flex-1 text-[var(--text-primary)]">
-            {iss.summary || "(bez popisu)"}
+            {iss.summary || "(načítá se…)"}
           </span>
         </button>
       ))}
@@ -249,23 +282,44 @@ function RunningBar({
 }) {
   const now = useNow(1000);
   const elapsed = elapsedSeconds(active, now);
+  // Phase 18A — Item 4: unassigned timer surfaces ⚠ + red ring.
+  const unassigned = !active.issue_key;
 
   return (
     <div className="flex items-stretch gap-2">
-      <div className="flex-1 min-w-0 relative h-11 rounded-[var(--radius-md)]
-                      bg-[var(--bg-surface)] border border-[var(--border-subtle)]
-                      flex items-center px-4 gap-3">
+      <div
+        className={clsx(
+          "flex-1 min-w-0 relative h-11 rounded-[var(--radius-md)]",
+          "bg-[var(--bg-surface)] flex items-center px-4 gap-3",
+          unassigned
+            ? "border-2 border-red-500/70"
+            : "border border-[var(--border-subtle)]",
+        )}
+      >
         <span
           aria-hidden
-          className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse shrink-0"
+          className={clsx(
+            "w-2 h-2 rounded-full animate-pulse shrink-0",
+            unassigned ? "bg-red-500" : "bg-[var(--accent)]",
+          )}
         />
-        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--accent)] shrink-0">
-          {active.issue_key}
+        <span
+          className={clsx(
+            "font-mono text-[11px] uppercase tracking-[0.08em] shrink-0",
+            unassigned ? "text-red-500" : "text-[var(--accent)]",
+          )}
+        >
+          {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
         </span>
         <span className="text-xs text-[var(--text-tertiary)] truncate">
-          Sledování…
+          {unassigned ? "Přiřaďte úkol před uložením" : "Sledování…"}
         </span>
-        <span className="ml-auto font-mono tabular-nums text-sm text-[var(--accent)]">
+        <span
+          className={clsx(
+            "ml-auto font-mono tabular-nums text-sm",
+            unassigned ? "text-red-500" : "text-[var(--accent)]",
+          )}
+        >
           {formatDuration(elapsed)}
         </span>
       </div>

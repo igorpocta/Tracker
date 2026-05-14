@@ -25,6 +25,7 @@ import { useOutletContext } from "react-router-dom";
 
 import {
   deleteWorklog,
+  deleteLocalOnlyWorklog,
   getWorklogsForRange,
   undoDeleteWorklog,
   updateWorklog,
@@ -41,6 +42,7 @@ import {
   startOfWeek,
 } from "../lib/dates";
 import { formatDateCs, formatDurationShort } from "../lib/format";
+import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import { usePrefsStore } from "../stores/prefsStore";
 
 type Period = "today" | "yesterday" | "this-week";
@@ -57,10 +59,18 @@ export default function TimeLog() {
   const [period, setPeriod] = useState<Period>("today");
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
 
+  // Phase 18A — Item 9: re-evaluate the period range when the day rolls
+  // over so a long-open Today view doesn't keep showing yesterday's date.
+  const dayBoundary = useTodayBoundary();
+
   /** Rows the user just clicked "delete" on — optimistically hidden. */
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
-  const [from, to] = useMemo(() => periodRange(period), [period]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const [from, to] = useMemo(
+    () => periodRange(period),
+    [period, dayBoundary.rolloverCount],
+  );
 
   const fromUnix = dayStartUnixS(from);
   const toUnix = dayEndUnixS(to);
@@ -78,8 +88,19 @@ export default function TimeLog() {
   const handleDelete = useCallback(
     async (row: ApiWorklogRow) => {
       const jiraId = row.jira_worklog_id;
+      // Phase 18A — Item 7: local-only rows (no Jira id) bypass the Jira
+      // DELETE and are hard-deleted from the cache directly.
       if (!jiraId) {
-        ctx.pushToast("error", "Tento záznam ještě nebyl synchronizován do Jiry.");
+        if (!row.id) return;
+        try {
+          await deleteLocalOnlyWorklog(row.id);
+          queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+        } catch (e) {
+          ctx.pushToast(
+            "error",
+            typeof e === "string" ? e : "Nepodařilo se smazat záznam",
+          );
+        }
         return;
       }
       // Optimistic hide.
@@ -358,12 +379,33 @@ function WorklogRow({ row, onUpdate, onDelete }: WorklogRowProps) {
           title="Upravit komentář"
         >
           <span className="inline-flex items-center gap-1">
-            {row.summary || "(bez popisu)"}
+            {/* Phase 18A — Item 8: fall back to "(načítá se…)" instead of
+                "(bez popisu)" when the summary is missing; the next sync will
+                backfill it. */}
+            {row.summary || "(načítá se…)"}
             {row.comment && (
               <MessageSquare
                 className="w-3 h-3 text-[var(--text-tertiary)]"
                 aria-hidden
               />
+            )}
+            {/* Phase 18A — Item 7: visual marker for local-only / unsynced
+                worklogs (no Jira id). */}
+            {!row.jira_worklog_id && !row.pending_assignment && (
+              <span
+                title="Tento záznam se nepodařilo synchronizovat s Jirou"
+                className="font-mono text-[10px] text-orange-500 ml-1"
+              >
+                ⚠ lokální
+              </span>
+            )}
+            {row.pending_assignment && (
+              <span
+                title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol pomocí kontextového menu"
+                className="font-mono text-[10px] text-red-500 ml-1"
+              >
+                ⚠ bez úkolu
+              </span>
             )}
           </span>
         </button>
