@@ -8,5 +8,7 @@
 //! The client uses `reqwest` with `rustls-tls` and Basic auth (email + API token).
 
 pub mod client;
+pub mod models;
 
 pub use client::{JiraClient, JiraError};
+pub use models::JiraUser;

@@ -1,9 +1,9 @@
-#![allow(dead_code)] // helpers added incrementally in follow-up commits
-
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use thiserror::Error;
 use url::Url;
+
+use super::models::JiraUser;
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -55,25 +55,13 @@ impl JiraClient {
         })
     }
 
-    pub(crate) fn url(&self, path: &str) -> Result<Url, JiraError> {
+    fn url(&self, path: &str) -> Result<Url, JiraError> {
         // join() on a Url replaces the entire path if the input starts with `/`,
         // which is what we want for `/rest/api/3/...`.
         Ok(self.base_url.join(path)?)
     }
 
-    pub(crate) fn http(&self) -> &Client {
-        &self.http
-    }
-
-    pub(crate) fn email(&self) -> &str {
-        &self.email
-    }
-
-    pub(crate) fn token(&self) -> &str {
-        &self.token
-    }
-
-    pub(crate) async fn check_status(
+    async fn check_status(
         resp: reqwest::Response,
     ) -> Result<reqwest::Response, JiraError> {
         let status = resp.status();
@@ -86,5 +74,18 @@ impl JiraClient {
         let code = status.as_u16();
         let body = resp.text().await.unwrap_or_default();
         Err(JiraError::Api { status: code, body })
+    }
+
+    /// `GET /rest/api/3/myself` — current user.
+    pub async fn myself(&self) -> Result<JiraUser, JiraError> {
+        let url = self.url("/rest/api/3/myself")?;
+        let resp = self
+            .http
+            .get(url)
+            .basic_auth(&self.email, Some(&self.token))
+            .send()
+            .await?;
+        let resp = Self::check_status(resp).await?;
+        Ok(resp.json::<JiraUser>().await?)
     }
 }
