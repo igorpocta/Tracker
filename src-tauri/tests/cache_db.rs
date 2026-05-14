@@ -304,7 +304,7 @@ fn migration_runner_applies_v1_then_v2_on_existing_db() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
 }
 
 #[test]
@@ -556,6 +556,7 @@ fn seed_jira_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
             updated_at_jira: Some(1_700_000_000),
             pending_delete_at: None,
             tombstoned_at: None,
+            pending_assignment: false,
         },
     )
     .unwrap()

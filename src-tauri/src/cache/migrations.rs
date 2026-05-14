@@ -7,6 +7,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (3, include_str!("../../migrations/0003_worklog_tombstone.sql")),
     (4, include_str!("../../migrations/0004_audit_log.sql")),
     (5, include_str!("../../migrations/0005_audit_log_linkage.sql")),
+    (6, include_str!("../../migrations/0006_connections.sql")),
+    (7, include_str!("../../migrations/0007_calendar.sql")),
+    (8, include_str!("../../migrations/0008_activity.sql")),
+    (9, include_str!("../../migrations/0009_pending_assignment.sql")),
 ];
 
 pub fn run(db: &Db) -> Result<(), DbError> {

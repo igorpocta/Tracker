@@ -37,6 +37,13 @@ pub struct WorklogRow {
     /// (either by us or detected via mark-and-sweep). Rows with this set are
     /// hidden from the default `for_date_range` query but kept for audit.
     pub tombstoned_at: Option<i64>,
+    /// Phase 18A: true (1) for unassigned-timer worklogs (stopped without an
+    /// issue selected). They have `issue_key = ""`, `source = "local"`, and no
+    /// `jira_worklog_id`. The user assigns an issue later via
+    /// `assign_worklog_issue` — at which point this flag is cleared and the
+    /// row is POSTed to Jira.
+    #[serde(default)]
+    pub pending_assignment: bool,
 }
 
 /// Insert a new locally-created worklog. The row is appended; no dedup is
@@ -47,9 +54,10 @@ pub fn record(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
     conn.execute(
         "INSERT INTO recent_worklogs (
             issue_key, issue_id, summary, duration_s, started_at, logged_at,
-            comment, jira_worklog_id, author_account_id, source, updated_at
+            comment, jira_worklog_id, author_account_id, source, updated_at,
+            pending_assignment
          )
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         rusqlite::params![
             w.issue_key,
             w.issue_id,
@@ -62,6 +70,7 @@ pub fn record(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
             w.author_account_id,
             source,
             w.updated_at_jira,
+            if w.pending_assignment { 1 } else { 0 },
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -158,7 +167,7 @@ pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                 comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at
+                pending_delete_at, tombstoned_at, pending_assignment
          FROM recent_worklogs
          WHERE tombstoned_at IS NULL
          ORDER BY logged_at DESC LIMIT ?1",
@@ -185,7 +194,7 @@ pub fn for_date_range(
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                         comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at
+                        pending_delete_at, tombstoned_at, pending_assignment
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                    AND author_account_id = ?3
@@ -202,7 +211,7 @@ pub fn for_date_range(
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                         comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at
+                        pending_delete_at, tombstoned_at, pending_assignment
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                    AND tombstoned_at IS NULL
@@ -232,7 +241,7 @@ pub fn for_date_range_including_tombstoned(
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                         comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at
+                        pending_delete_at, tombstoned_at, pending_assignment
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                    AND author_account_id = ?3
@@ -248,7 +257,7 @@ pub fn for_date_range_including_tombstoned(
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                         comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at
+                        pending_delete_at, tombstoned_at, pending_assignment
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                  ORDER BY started_at DESC",
@@ -303,7 +312,7 @@ pub fn get_by_id(db: &Db, id: i64) -> Result<Option<WorklogRow>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                 comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at
+                pending_delete_at, tombstoned_at, pending_assignment
          FROM recent_worklogs WHERE id = ?1",
     )?;
     match stmt.query_row([id], row_to_worklog) {
@@ -320,7 +329,7 @@ pub fn get_by_jira_id(db: &Db, jira_id: &str) -> Result<Option<WorklogRow>, DbEr
     let mut stmt = conn.prepare(
         "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                 comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at
+                pending_delete_at, tombstoned_at, pending_assignment
          FROM recent_worklogs WHERE jira_worklog_id = ?1",
     )?;
     match stmt.query_row([jira_id], row_to_worklog) {
@@ -457,7 +466,7 @@ pub fn pending_deletes_older_than(
     let mut stmt = conn.prepare(
         "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
                 comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at
+                pending_delete_at, tombstoned_at, pending_assignment
          FROM recent_worklogs
          WHERE pending_delete_at IS NOT NULL
            AND pending_delete_at < ?1
@@ -516,5 +525,52 @@ fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
         updated_at_jira: r.get(11)?,
         pending_delete_at: r.get(12)?,
         tombstoned_at: r.get(13)?,
+        pending_assignment: r.get::<_, i64>(14).unwrap_or(0) != 0,
     })
+}
+
+/// Assign an issue to a previously-unassigned worklog. Clears the
+/// `pending_assignment` flag and stamps a fresh `updated_at`.
+pub fn assign_issue(
+    db: &Db,
+    id: i64,
+    issue_key: &str,
+    issue_id: Option<&str>,
+    summary: Option<&str>,
+    jira_worklog_id: Option<&str>,
+) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "UPDATE recent_worklogs SET
+            issue_key = ?2,
+            issue_id = ?3,
+            summary = ?4,
+            jira_worklog_id = ?5,
+            source = CASE WHEN ?5 IS NOT NULL THEN 'jira' ELSE source END,
+            pending_assignment = 0,
+            updated_at = ?6
+         WHERE id = ?1",
+        rusqlite::params![
+            id,
+            issue_key,
+            issue_id,
+            summary,
+            jira_worklog_id,
+            now,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Hard-delete a local-only row (no Jira-side delete). The caller is
+/// responsible for ensuring `jira_worklog_id IS NULL` — this function does
+/// not check.
+pub fn delete_local_only(db: &Db, id: i64) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "DELETE FROM recent_worklogs WHERE id = ?1 AND jira_worklog_id IS NULL",
+        [id],
+    )?;
+    Ok(())
 }

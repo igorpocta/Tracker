@@ -1,4 +1,7 @@
+pub mod activity;
 pub mod audit;
+pub mod calendar;
+pub mod connections;
 pub mod db;
 pub mod migrations;
 pub mod issues;
