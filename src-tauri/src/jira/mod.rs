@@ -11,6 +11,7 @@ pub mod adf;
 pub mod client;
 pub mod jql;
 pub mod models;
+pub mod reconstruct;
 pub mod worklog_ops;
 pub mod worklog_sync;
 
