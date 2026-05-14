@@ -48,6 +48,11 @@ pub fn run() {
             if let Err(e) = crate::tray::setup(&handle) {
                 tracing::warn!("tray setup failed: {e}");
             }
+            // Popover auto-hide-on-blur. Safe to attach unconditionally;
+            // the listener becomes a no-op when the popover isn't visible.
+            if let Err(e) = crate::popover::setup(&handle) {
+                tracing::warn!("popover setup failed: {e}");
+            }
             crate::tray_ticker::spawn(handle.clone());
 
             // Local HTTP server for the (future) browser extension.
@@ -128,6 +133,8 @@ pub fn run() {
             commands::prefs::set_accent_color,
             commands::prefs::get_currency,
             commands::prefs::set_currency,
+            commands::prefs::get_palette_mode,
+            commands::prefs::set_palette_mode,
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,
             commands::browser::get_extension_last_heartbeat,

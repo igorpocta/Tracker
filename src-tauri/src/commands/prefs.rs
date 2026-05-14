@@ -25,13 +25,26 @@ pub const ALLOWED_FONT_SIZES: &[&str] = &["sm", "md", "lg"];
 pub const DEFAULT_DENSITY: &str = "comfortable";
 /// Allowed density values.
 pub const ALLOWED_DENSITIES: &[&str] = &["compact", "comfortable"];
-/// Default accent color: Apple-style blue.
-pub const DEFAULT_ACCENT: &str = "blue";
-/// Allowed accent color identifiers (UI maps each to an HSL hue).
+/// Default accent (palette) identifier: Aurora teal — the Phase 13 default.
+pub const DEFAULT_ACCENT: &str = "aurora";
+/// Allowed accent / palette identifiers.
+///
+/// The Phase 11–12 hue names (`blue`, `indigo`, …) are kept for backwards
+/// compatibility with existing installs. Phase 13 introduces the named
+/// Mono + Dual palettes from the original Trcker reference.
 pub const ALLOWED_ACCENTS: &[&str] = &[
+    // Legacy hues
     "blue", "indigo", "violet", "pink", "red", "orange", "yellow", "green",
     "teal", "graphite",
+    // Mono palettes
+    "aurora", "trcker", "love", "halloween",
+    // Dual palettes
+    "czech", "aurora-boreal", "sakura-night", "cyber-lime", "nordic-fjord",
 ];
+/// Default palette mode.
+pub const DEFAULT_PALETTE_MODE: &str = "mono";
+/// Allowed palette mode values.
+pub const ALLOWED_PALETTE_MODES: &[&str] = &["mono", "dual"];
 /// Default currency code.
 pub const DEFAULT_CURRENCY: &str = "CZK";
 /// Allowed ISO-4217 currency codes.
@@ -47,6 +60,7 @@ const KEY_FONT_SIZE: &str = "font_size";
 const KEY_DENSITY: &str = "density";
 const KEY_ACCENT: &str = "accent_color";
 const KEY_CURRENCY: &str = "currency";
+const KEY_PALETTE_MODE: &str = "palette_mode";
 
 // -----------------------------------------------------------------------------
 // Inner (Tauri-free) helpers.
@@ -180,6 +194,24 @@ pub fn set_currency_inner(db: &Db, currency: &str) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_CURRENCY, currency).map_err(|e| e.to_string())
+}
+
+// ----- Palette mode (Phase 13) -----
+
+pub fn get_palette_mode_inner(db: &Db) -> Result<String, String> {
+    match cache::settings::get(db, KEY_PALETTE_MODE).map_err(|e| e.to_string())? {
+        Some(v) if ALLOWED_PALETTE_MODES.contains(&v.as_str()) => Ok(v),
+        _ => Ok(DEFAULT_PALETTE_MODE.to_string()),
+    }
+}
+
+pub fn set_palette_mode_inner(db: &Db, mode: &str) -> Result<(), String> {
+    if !ALLOWED_PALETTE_MODES.contains(&mode) {
+        return Err(format!(
+            "invalid palette mode {mode:?}; expected one of {ALLOWED_PALETTE_MODES:?}"
+        ));
+    }
+    cache::settings::set(db, KEY_PALETTE_MODE, mode).map_err(|e| e.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -323,5 +355,23 @@ pub async fn set_currency(
 ) -> Result<(), String> {
     set_currency_inner(&state.db, &currency)?;
     let _ = app.emit("prefs-changed", "currency");
+    Ok(())
+}
+
+// ----- Palette mode (Phase 13) -----
+
+#[tauri::command]
+pub async fn get_palette_mode(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    get_palette_mode_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_palette_mode(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: String,
+) -> Result<(), String> {
+    set_palette_mode_inner(&state.db, &mode)?;
+    let _ = app.emit("prefs-changed", "palette_mode");
     Ok(())
 }
