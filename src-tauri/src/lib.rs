@@ -9,9 +9,10 @@ pub mod state;
 pub mod tray;
 pub mod tray_ticker;
 
+use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone};
 use tauri::{Emitter, Manager};
 
-use crate::state::AppState;
+use crate::state::{AppState, ProviderClient};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,6 +20,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -30,38 +35,79 @@ pub fn run() {
             let db = cache::Db::open(&db_path).expect("open db");
             let state = AppState::new(db, app_data_dir.clone());
 
-            // Best-effort: load on-disk config and rebuild the Jira client.
-            // Missing/invalid config is fine — the setup wizard will create it.
+            // Phase 18A: migrate legacy single-Jira config into the
+            // connections table on first run. If a config.toml + token exist
+            // but no rows in `connections`, create the first connection.
             let cfg_path = app_data_dir.join("config.toml");
             if cfg_path.exists() {
                 if let Ok(cfg) = config::load_from_path(&cfg_path) {
-                    *state.jira_config.write().unwrap() = Some(cfg);
+                    // Legacy shims (so old commands still work).
+                    *state.jira_config.write().unwrap() = Some(cfg.clone());
                     let _ = state.try_build_client();
+                    // Migrate into the connections table if empty.
+                    if let Ok(rows) = cache::connections::list(&state.db) {
+                        if rows.is_empty() {
+                            let connection_cfg =
+                                crate::commands::connections::JiraConnectionConfig {
+                                    base_url: cfg.base_url.clone(),
+                                    email: cfg.email.clone(),
+                                    sync_jql: None,
+                                    my_issues_jql: None,
+                                };
+                            let cfg_json = serde_json::to_string(&connection_cfg)
+                                .unwrap_or_else(|_| "{}".into());
+                            let new_id = cache::connections::insert(
+                                &state.db,
+                                cache::connections::NewConnection {
+                                    provider: "jira",
+                                    name: "Jira",
+                                    enabled: true,
+                                    config_json: &cfg_json,
+                                },
+                            )
+                            .ok();
+                            // Copy the legacy token into the new
+                            // connection:N:token key so the multi-connection
+                            // hydration finds it.
+                            if let Some(id) = new_id {
+                                if let Ok(Some(tok)) =
+                                    crate::keychain::load_jira_token(&app_data_dir)
+                                {
+                                    let key = cache::connections::token_key(id);
+                                    let _ = crate::keychain::set(
+                                        &app_data_dir,
+                                        crate::keychain::KEYCHAIN_SERVICE,
+                                        &key,
+                                        &tok,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            // Hydrate the in-memory connections list (no-op if no
+            // connections are configured yet — the setup wizard will create
+            // the first one).
+            if let Err(e) = state.hydrate_connections() {
+                tracing::warn!("hydrate_connections failed: {e}");
             }
 
             app.manage(state);
 
-            // Tray icon + background tooltip ticker. Both run unconditionally;
-            // if the user has no Jira configured the tray simply sits idle.
             let handle = app.handle().clone();
             if let Err(e) = crate::tray::setup(&handle) {
                 tracing::warn!("tray setup failed: {e}");
             }
-            // Popover auto-hide-on-blur. Safe to attach unconditionally;
-            // the listener becomes a no-op when the popover isn't visible.
             if let Err(e) = crate::popover::setup(&handle) {
                 tracing::warn!("popover setup failed: {e}");
             }
             crate::tray_ticker::spawn(handle.clone());
 
-            // Local HTTP server for the (future) browser extension.
-            // Bind failures are logged inside; they never abort startup.
             crate::server::start(handle);
 
-            // Phase 15: startup recovery for pending deletes left over from a
-            // crashed undo window. Anything older than 30s is committed
-            // straight away (i.e. the Jira DELETE is issued + tombstoned).
+            // Phase 15: startup recovery for pending deletes.
             let recovery_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -90,42 +136,58 @@ pub fn run() {
                 }
             });
 
-            // Auto-sync issues + worklogs shortly after startup. All errors
-            // are swallowed: a fresh install with no Jira config simply
-            // returns early, and transient network failures should never
-            // prevent the user from interacting with the local UI.
+            // Auto-sync issues + worklogs across all enabled connections.
             let auto_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Let the main window mount before hammering the network.
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 let state = auto_handle.state::<AppState>();
-                let Some(client) = state.jira_client_cloned() else {
-                    return;
-                };
+                let active = state.connections.read().unwrap().clone();
+                for active_conn in active {
+                    let ProviderClient::Jira(client) = active_conn.client;
+                    let _ = jira::sync_issues_from_jira(&client, &state.db).await;
 
-                let _ = jira::sync_issues_from_jira(&client, &state.db).await;
-
-                let me = match client.myself().await {
-                    Ok(u) => u.account_id,
-                    Err(_) => return,
-                };
-                let today = chrono::Local::now().date_naive();
-                let from = today - chrono::Duration::days(30);
-                let _ = jira::worklog_sync::sync_worklogs_for_range(
-                    &client,
-                    &state.db,
-                    &me,
-                    from,
-                    today,
-                )
-                .await;
+                    let me = match client.myself().await {
+                        Ok(u) => u.account_id,
+                        Err(_) => continue,
+                    };
+                    let today = chrono::Local::now().date_naive();
+                    let from = today - chrono::Duration::days(30);
+                    let _ = jira::worklog_sync::sync_worklogs_for_range(
+                        &client,
+                        &state.db,
+                        &me,
+                        from,
+                        today,
+                    )
+                    .await;
+                }
 
                 let _ = auto_handle.emit("auto-sync-complete", ());
+            });
+
+            // Phase 18A — Item 9: emit a `day-rollover` event at local midnight.
+            // The frontend listens and re-evaluates "today" boundaries.
+            let rollover_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let now = Local::now();
+                    let midnight = (now.date_naive() + ChronoDuration::days(1))
+                        .and_time(NaiveTime::from_hms_opt(0, 0, 1).unwrap());
+                    let next = Local
+                        .from_local_datetime(&midnight)
+                        .single()
+                        .unwrap_or(now + ChronoDuration::days(1));
+                    let wait_ms = (next - now).num_milliseconds().max(1000);
+                    tokio::time::sleep(std::time::Duration::from_millis(wait_ms as u64))
+                        .await;
+                    let _ = rollover_handle.emit("day-rollover", ());
+                }
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Legacy single-Jira config (kept for backwards compat).
             commands::config::has_config,
             commands::config::save_config,
             commands::config::enter_setup,
@@ -135,15 +197,27 @@ pub fn run() {
             commands::config::get_current_config,
             commands::config::update_config,
             commands::config::sign_out,
+            // Multi-connection (Phase 18A).
+            commands::connections::list_connections,
+            commands::connections::add_connection,
+            commands::connections::update_connection,
+            commands::connections::remove_connection,
+            commands::connections::enable_connection,
+            commands::connections::test_connection_for_provider,
+            commands::connections::list_my_issues,
+            // Timer
             commands::timer::get_timer_state,
             commands::timer::start_timer,
             commands::timer::stop_timer_inner,
             commands::timer::update_timer_start,
+            commands::timer::assign_active_timer,
+            // Issues
             commands::issues::search_issues_cache,
             commands::issues::get_recent_issues,
             commands::issues::get_suggested_issues,
             commands::issues::refresh_cache,
             commands::issues::get_cache_stats,
+            // Worklog
             commands::worklog::get_worklog_issues,
             commands::worklog::get_worklogs_for_range,
             commands::worklog::refresh_all,
@@ -157,8 +231,12 @@ pub fn run() {
             commands::worklog::restore_deleted_worklog,
             commands::worklog::revert_worklog_update,
             commands::worklog::retry_failed_audit_action,
+            commands::worklog::assign_worklog_issue,
+            commands::worklog::delete_local_only_worklog,
+            // Misc
             commands::misc::open_jira_issue,
             commands::misc::open_url,
+            // Prefs
             commands::prefs::get_daily_goal,
             commands::prefs::set_daily_goal,
             commands::prefs::set_widget_format,
@@ -179,9 +257,28 @@ pub fn run() {
             commands::prefs::set_palette_mode,
             commands::prefs::get_day_timeline_visible,
             commands::prefs::set_day_timeline_visible,
+            // Rounding (Phase 18A — Item 27)
+            commands::rounding::get_rounding_mode,
+            commands::rounding::set_rounding_mode,
+            commands::rounding::get_rounding_interval_minutes,
+            commands::rounding::set_rounding_interval_minutes,
+            // Calendar (Phase 18A — Item 2)
+            commands::calendar::get_working_week_mask,
+            commands::calendar::set_working_week_mask,
+            commands::calendar::list_non_working_days,
+            commands::calendar::add_non_working_day,
+            commands::calendar::remove_non_working_day,
+            commands::calendar::is_working_day,
+            // Activity (Phase 18A — Item 32)
+            commands::activity::record_user_activity,
+            commands::activity::get_daily_activity,
+            commands::activity::get_activity_threshold_min,
+            commands::activity::set_activity_threshold_min,
+            // Browser extension
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,
             commands::browser::get_extension_last_heartbeat,
+            // Tray
             commands::tray::show_tray_popover,
             commands::tray::hide_tray_popover,
             commands::tray::toggle_tray_popover,

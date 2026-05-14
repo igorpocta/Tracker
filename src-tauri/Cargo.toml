@@ -23,6 +23,7 @@ tauri = { version = "2.11", features = ["macos-private-api", "tray-icon", "image
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2.4"
 tauri-plugin-deep-link = "2.4"
+tauri-plugin-autostart = "2"
 
 # Storage
 rusqlite = { version = "0.31", features = ["bundled", "chrono"] }

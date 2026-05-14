@@ -122,6 +122,19 @@ pub fn set_tooltip<R: Runtime>(app: &AppHandle<R>, text: &str) -> tauri::Result<
     Ok(())
 }
 
+/// Phase 18A — Item 34: set the menu-bar title text on macOS.
+///
+/// `text` is shown next to the tray icon (e.g. `"ACME-1 01:23"` when a timer
+/// is running, empty when idle). On Windows/Linux `set_title` is a no-op or
+/// not supported — the call is safe everywhere.
+pub fn set_title<R: Runtime>(app: &AppHandle<R>, text: Option<&str>) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    tray.set_title(text)?;
+    Ok(())
+}
+
 /// Show or hide the tray icon entirely. Used by `set_tray_available` so the
 /// user can opt out of the tray.
 pub fn set_visible<R: Runtime>(app: &AppHandle<R>, visible: bool) -> tauri::Result<()> {

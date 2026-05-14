@@ -44,13 +44,25 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                 }
             };
 
-            let (running, tooltip) = match timer {
+            let (running, tooltip, title) = match timer {
                 Some(t) => {
                     let now_s = Utc::now().timestamp();
                     let elapsed = (now_s - t.started_at).max(0);
-                    (true, format!("Tracker — {}", format_hms(elapsed)))
+                    // Phase 18A — Item 34: menu bar title = `{KEY} HH:MM`.
+                    // Unassigned timer (empty key) shows ⚠ instead of a code.
+                    let key_part = if t.issue_key.is_empty() {
+                        "⚠".to_string()
+                    } else {
+                        t.issue_key.clone()
+                    };
+                    let title = format!("{} {}", key_part, format_hm(elapsed));
+                    (
+                        true,
+                        format!("Tracker — {}", format_hms(elapsed)),
+                        Some(title),
+                    )
                 }
-                None => (false, "Tracker — nečinný".to_string()),
+                None => (false, "Tracker — nečinný".to_string(), None),
             };
 
             // Icon swap is relatively expensive; only do it when running state
@@ -60,8 +72,18 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                 last_running = Some(running);
             }
             let _ = crate::tray::set_tooltip(&app, &tooltip);
+            let _ = crate::tray::set_title(&app, title.as_deref());
         }
     });
+}
+
+/// Format a non-negative seconds value as `HH:MM`. Used for the menu-bar
+/// title (the seconds digits get truncated on macOS).
+pub fn format_hm(seconds: i64) -> String {
+    let s = seconds.max(0);
+    let hours = s / 3600;
+    let minutes = (s % 3600) / 60;
+    format!("{hours:02}:{minutes:02}")
 }
 
 /// Format a non-negative seconds value as `HH:MM:SS`. Pulled out so it can be
@@ -99,5 +121,14 @@ mod tests {
     fn format_hms_large() {
         // 100 hours fits without truncation.
         assert_eq!(format_hms(100 * 3600 + 23 * 60 + 45), "100:23:45");
+    }
+
+    #[test]
+    fn format_hm_truncates_seconds() {
+        assert_eq!(format_hm(0), "00:00");
+        assert_eq!(format_hm(59), "00:00");
+        assert_eq!(format_hm(60), "00:01");
+        assert_eq!(format_hm(3661), "01:01");
+        assert_eq!(format_hm(-10), "00:00");
     }
 }
