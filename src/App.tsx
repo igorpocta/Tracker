@@ -11,6 +11,7 @@ import {
 
 import { hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
+import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import Home from "./routes/Home";
 import Setup from "./routes/Setup";
 
@@ -66,16 +67,18 @@ export default function App() {
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialRoute]}>
-        <NavigationBridge />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/setup" element={<Setup />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <NavigationBridge />
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/setup" element={<Setup />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 
