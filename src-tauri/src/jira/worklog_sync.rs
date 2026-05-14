@@ -83,7 +83,12 @@ pub async fn sync_worklogs_for_range(
 
     loop {
         let page = client
-            .search_jql(&jql, page_token.as_deref(), &["summary", "updated"])
+            .search_jql(
+                &jql,
+                page_token.as_deref(),
+                &["summary", "updated"],
+                crate::jira::SYNC_PAGE_MAX_RESULTS,
+            )
             .await?;
 
         for issue in &page.issues {

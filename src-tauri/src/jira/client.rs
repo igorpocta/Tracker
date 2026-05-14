@@ -97,17 +97,20 @@ impl JiraClient {
     /// `POST /rest/api/3/search/jql` — JQL search with pagination (new endpoint shape).
     ///
     /// `page_token` is the opaque `nextPageToken` returned by Jira on the previous
-    /// page. Pass `None` for the first page.
+    /// page. Pass `None` for the first page. `max_results` controls the
+    /// per-page page size; Jira caps it server-side (typically at 100).
     pub async fn search_jql(
         &self,
         jql: &str,
         page_token: Option<&str>,
         fields: &[&str],
+        max_results: u32,
     ) -> Result<SearchPage, JiraError> {
         let url = self.url("/rest/api/3/search/jql")?;
         let mut body = json!({
             "jql": jql,
             "fields": fields,
+            "maxResults": max_results,
         });
         if let Some(tok) = page_token {
             body["nextPageToken"] = json!(tok);

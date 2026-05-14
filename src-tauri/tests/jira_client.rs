@@ -102,7 +102,7 @@ async fn search_jql_parses_first_page_with_next_token() {
         .await;
 
     let page = client
-        .search_jql(DEFAULT_JQL, None, &["summary", "updated"])
+        .search_jql(DEFAULT_JQL, None, &["summary", "updated"], 50)
         .await
         .expect("ok");
     assert_eq!(page.issues.len(), 2);
@@ -124,7 +124,7 @@ async fn search_jql_handles_empty_page() {
         .await;
 
     let page = client
-        .search_jql(DEFAULT_JQL, None, &["summary"])
+        .search_jql(DEFAULT_JQL, None, &["summary"], 50)
         .await
         .unwrap();
     assert!(page.issues.is_empty());
@@ -149,7 +149,7 @@ async fn search_jql_forwards_page_token() {
         .await;
 
     client
-        .search_jql(DEFAULT_JQL, Some("tok-2"), &["summary"])
+        .search_jql(DEFAULT_JQL, Some("tok-2"), &["summary"], 50)
         .await
         .unwrap();
 }
@@ -351,10 +351,10 @@ fn map_issue_to_row_unparseable_updated_falls_back_to_zero() {
 
 #[test]
 fn default_jql_matches_plan() {
-    assert_eq!(
-        DEFAULT_JQL,
-        r#"NOT (statusCategory = "Done" AND updated < "-14d") ORDER BY updated DESC"#
-    );
+    // Phase 14: the sync no longer applies any restrictive WHERE clause; we
+    // pull "everything visible, most-recently-updated first" and let the
+    // pagination caps in `mod.rs` bound the total volume.
+    assert_eq!(DEFAULT_JQL, r#"ORDER BY updated DESC"#);
 }
 
 #[test]
