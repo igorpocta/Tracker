@@ -13,8 +13,7 @@ const TOKEN: &str = "secret";
 
 async fn server_and_client() -> (MockServer, JiraClient) {
     let server = MockServer::start().await;
-    let client =
-        JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("ok");
+    let client = JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("ok");
     (server, client)
 }
 

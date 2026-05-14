@@ -13,6 +13,9 @@ use tracker_lib::cache::issues::{
 use tracker_lib::cache::timer::{self, ActiveTimer};
 use tracker_lib::cache::worklogs::{recent as worklog_recent, WorklogRow};
 use tracker_lib::cache::Db;
+use tracker_lib::commands::config::{
+    sign_out_inner, test_jira_connection_inner, update_config_inner,
+};
 use tracker_lib::commands::prefs::{
     get_daily_goal_inner, get_density_inner, get_font_size_inner, get_hourly_rate_inner,
     get_theme_inner, set_app_icon_inner, set_daily_goal_inner, set_density_inner,
@@ -20,16 +23,13 @@ use tracker_lib::commands::prefs::{
     DEFAULT_DAILY_GOAL_SECONDS, DEFAULT_DENSITY, DEFAULT_FONT_SIZE, DEFAULT_HOURLY_RATE,
     DEFAULT_THEME,
 };
-use tracker_lib::commands::config::{
-    sign_out_inner, test_jira_connection_inner, update_config_inner,
-};
-use tracker_lib::config::JiraConfig;
-use tracker_lib::state::AppState;
 use tracker_lib::commands::timer::{
     get_timer_state_inner, record_local_stop, start_timer_inner, update_timer_comment_inner,
     update_timer_start_inner,
 };
+use tracker_lib::config::JiraConfig;
 use tracker_lib::jira::JiraError;
+use tracker_lib::state::AppState;
 
 fn fresh_db() -> (TempDir, Db) {
     let dir = TempDir::new().unwrap();
@@ -141,7 +141,8 @@ fn record_local_stop_writes_worklog_and_clears_timer() {
         comment: None,
     };
 
-    let row = record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1"), None).unwrap();
+    let row =
+        record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1"), None).unwrap();
     assert!(row.id.is_some());
     assert_eq!(row.duration_s, 60);
     assert_eq!(row.issue_key, "ACME-1");
@@ -430,10 +431,16 @@ fn update_config_inner_writes_toml_and_updates_state() {
 
     // Token closure: just record that we got it; no keychain access.
     let saved = std::cell::Cell::new(None);
-    update_config_inner(&state, &cfg_path, cfg.clone(), Some("new-token".into()), |t| {
-        saved.set(Some(t.to_string()));
-        Ok(())
-    })
+    update_config_inner(
+        &state,
+        &cfg_path,
+        cfg.clone(),
+        Some("new-token".into()),
+        |t| {
+            saved.set(Some(t.to_string()));
+            Ok(())
+        },
+    )
     .unwrap();
 
     assert!(cfg_path.exists(), "config file should be created");
@@ -463,7 +470,10 @@ fn update_config_inner_does_not_save_token_when_none() {
         Ok(())
     })
     .unwrap();
-    assert!(!called.into_inner(), "save_token closure must not run when new_token = None");
+    assert!(
+        !called.into_inner(),
+        "save_token closure must not run when new_token = None"
+    );
 }
 
 #[test]

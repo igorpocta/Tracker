@@ -1,16 +1,16 @@
 use tempfile::TempDir;
 use tracker_lib::cache::audit::{
     get_by_id as audit_get_by_id, list as audit_list, purge_older_than as audit_purge,
-    record as audit_record, recent as audit_recent, AuditEvent, AuditOp,
+    recent as audit_recent, record as audit_record, AuditEvent, AuditOp,
 };
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
-use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
+use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::worklogs::{
     clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id, get_by_jira_id,
-    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_jira_id,
-    pending_deletes_older_than, recent as worklog_recent, record as worklog_record,
-    total_seconds_for_range, update_fields, upsert_from_jira, WorklogRow,
+    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_jira_id, pending_deletes_older_than,
+    recent as worklog_recent, record as worklog_record, total_seconds_for_range, update_fields,
+    upsert_from_jira, WorklogRow,
 };
 use tracker_lib::cache::Db;
 
@@ -692,13 +692,13 @@ fn audit_record_and_recent_roundtrip() {
     assert_eq!(entries.len(), 2);
     // Newest first.
     assert_eq!(entries[0].op, "delete");
-    assert_eq!(entries[0].success, false);
+    assert!(!entries[0].success);
     assert_eq!(entries[0].error.as_deref(), Some("network glitch"));
     assert!(entries[0].before_json.is_some());
     assert!(entries[0].after_json.is_none());
 
     assert_eq!(entries[1].op, "create");
-    assert_eq!(entries[1].success, true);
+    assert!(entries[1].success);
     assert!(entries[1].after_json.is_some());
     assert!(entries[1].before_json.is_none());
 }

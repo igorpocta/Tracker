@@ -87,10 +87,7 @@ where
 
 /// Test-friendly variant of [`with_retry`] that accepts a custom sleep
 /// function. Production code calls [`with_retry`].
-pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(
-    mut f: F,
-    sleep: S,
-) -> Result<T, JiraError>
+pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(mut f: F, sleep: S) -> Result<T, JiraError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, JiraError>>,
@@ -153,9 +150,7 @@ impl JiraClient {
         Ok(self.base_url.join(path)?)
     }
 
-    async fn check_status(
-        resp: reqwest::Response,
-    ) -> Result<reqwest::Response, JiraError> {
+    async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, JiraError> {
         let status = resp.status();
         if status.is_success() {
             return Ok(resp);
@@ -289,9 +284,7 @@ impl JiraClient {
         if let Some(started) = started {
             body.insert(
                 "started".to_string(),
-                serde_json::Value::String(
-                    started.format("%Y-%m-%dT%H:%M:%S%.3f+0000").to_string(),
-                ),
+                serde_json::Value::String(started.format("%Y-%m-%dT%H:%M:%S%.3f+0000").to_string()),
             );
         }
         if let Some(secs) = time_spent_seconds {
@@ -330,11 +323,7 @@ impl JiraClient {
     /// Returns `Ok(())` on 204 No Content. A 404 is surfaced as
     /// [`JiraError::WorklogNotFound`] (the row is already gone — callers
     /// often treat this as success and just tombstone the local row).
-    pub async fn delete_worklog(
-        &self,
-        issue_key: &str,
-        worklog_id: &str,
-    ) -> Result<(), JiraError> {
+    pub async fn delete_worklog(&self, issue_key: &str, worklog_id: &str) -> Result<(), JiraError> {
         let url = self.url(&format!(
             "/rest/api/3/issue/{issue_key}/worklog/{worklog_id}"
         ))?;
@@ -357,8 +346,7 @@ impl JiraClient {
                 return Err(JiraError::Unauthorized);
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_secs =
-                    parse_retry_after_header(resp.headers().get("Retry-After"));
+                let retry_after_secs = parse_retry_after_header(resp.headers().get("Retry-After"));
                 return Err(JiraError::RateLimited { retry_after_secs });
             }
             let code = status.as_u16();

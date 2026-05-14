@@ -32,6 +32,10 @@ pub enum RoundingMode {
 }
 
 impl RoundingMode {
+    // Note: this is a fallible-free, infallible parse, so we avoid the
+    // `std::str::FromStr` trait (which would force a `Result` return). The
+    // shape mirrors how the legacy code reads the string from SQLite.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "up" => RoundingMode::Up,
@@ -45,11 +49,7 @@ impl RoundingMode {
 ///
 /// The interval is converted to seconds internally. Negative durations are
 /// clamped to 0 first. Mode = "none" or interval <= 0 returns the input.
-pub fn apply_rounding(
-    duration_seconds: i64,
-    mode: &str,
-    interval_minutes: i64,
-) -> i64 {
+pub fn apply_rounding(duration_seconds: i64, mode: &str, interval_minutes: i64) -> i64 {
     let d = duration_seconds.max(0);
     if interval_minutes <= 0 {
         return d;
@@ -103,15 +103,13 @@ pub fn set_rounding_interval_minutes_inner(db: &Db, minutes: i64) -> Result<(), 
             "Neplatný interval zaokrouhlení {minutes}; očekáváno {ALLOWED_INTERVALS:?}"
         ));
     }
-    cache::settings::set(db, KEY_ROUNDING_INTERVAL, &minutes.to_string())
-        .map_err(|e| e.to_string())
+    cache::settings::set(db, KEY_ROUNDING_INTERVAL, &minutes.to_string()).map_err(|e| e.to_string())
 }
 
 /// Convenience: read both settings and apply rounding in one call.
 pub fn apply_active_rounding(db: &Db, duration_seconds: i64) -> i64 {
     let mode = get_rounding_mode_inner(db).unwrap_or_else(|_| DEFAULT_ROUNDING_MODE.to_string());
-    let interval =
-        get_rounding_interval_minutes_inner(db).unwrap_or(DEFAULT_ROUNDING_INTERVAL);
+    let interval = get_rounding_interval_minutes_inner(db).unwrap_or(DEFAULT_ROUNDING_INTERVAL);
     apply_rounding(duration_seconds, &mode, interval)
 }
 

@@ -197,12 +197,11 @@ pub fn record_local_stop(
     let duration_s = override_duration_s.unwrap_or(raw_duration_s);
 
     // Look up summary/issue_id from cache (best-effort).
-    let (issue_id, summary) = match cache::issues::get_by_key(db, &timer.issue_key)
-        .map_err(|e| e.to_string())?
-    {
-        Some(row) => (row.issue_id, Some(row.summary)),
-        None => (None, None),
-    };
+    let (issue_id, summary) =
+        match cache::issues::get_by_key(db, &timer.issue_key).map_err(|e| e.to_string())? {
+            Some(row) => (row.issue_id, Some(row.summary)),
+            None => (None, None),
+        };
 
     let pending_assignment = timer.issue_key.is_empty();
     let mut row = WorklogRow {

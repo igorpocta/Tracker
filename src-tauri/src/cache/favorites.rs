@@ -42,8 +42,7 @@ pub fn is_favorite(db: &Db, issue_key: &str) -> Result<bool, DbError> {
 /// Returns the list of starred `issue_key`s ordered newest-first.
 pub fn list_keys(db: &Db) -> Result<Vec<String>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn
-        .prepare("SELECT issue_key FROM favorite_issues ORDER BY added_at DESC")?;
+    let mut stmt = conn.prepare("SELECT issue_key FROM favorite_issues ORDER BY added_at DESC")?;
     let rows = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;

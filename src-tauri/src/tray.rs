@@ -39,9 +39,7 @@ const TRAY_ICON_RUNNING: &[u8] = include_bytes!("../icons/tray-running.png");
 /// would result in two macOS menu-bar icons.
 pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        tracing::warn!(
-            "tray with id {TRAY_ID:?} not registered — check tauri.conf.json"
-        );
+        tracing::warn!("tray with id {TRAY_ID:?} not registered — check tauri.conf.json");
         return Ok(());
     };
 

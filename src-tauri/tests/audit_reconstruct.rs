@@ -26,8 +26,8 @@ const TOKEN: &str = "secret-token";
 
 async fn server_and_client() -> (MockServer, JiraClient) {
     let server = MockServer::start().await;
-    let client = JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string())
-        .expect("client builds");
+    let client =
+        JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("client builds");
     (server, client)
 }
 
@@ -208,7 +208,9 @@ async fn restore_rejects_non_delete_audit_entry() {
     )
     .unwrap();
 
-    let err = restore_deleted_worklog(&client, &db, audit_id).await.unwrap_err();
+    let err = restore_deleted_worklog(&client, &db, audit_id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, ReconstructError::WrongOp), "got {err:?}");
 }
 
@@ -226,7 +228,9 @@ async fn restore_records_failure_audit_when_jira_returns_500() {
         .mount(&server)
         .await;
 
-    let err = restore_deleted_worklog(&client, &db, audit_id).await.unwrap_err();
+    let err = restore_deleted_worklog(&client, &db, audit_id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, ReconstructError::Jira(_)), "got {err:?}");
 
     // The failure must have been audited with source_audit_id linkage.
@@ -287,13 +291,18 @@ async fn revert_worklog_update_pushes_before_back_to_jira() {
         .mount(&server)
         .await;
 
-    let after = revert_worklog_update(&client, &db, audit_id).await.expect("revert ok");
+    let after = revert_worklog_update(&client, &db, audit_id)
+        .await
+        .expect("revert ok");
     assert_eq!(after.duration_s, 1800);
     assert_eq!(after.comment.as_deref(), Some("Original comment"));
 
     // A `revert` audit entry should be present with source linkage.
     let entries = audit_list(&db, 50, None, None, false).unwrap();
-    let revert_entry = entries.iter().find(|e| e.op == "revert").expect("revert row");
+    let revert_entry = entries
+        .iter()
+        .find(|e| e.op == "revert")
+        .expect("revert row");
     assert!(revert_entry.success);
     assert_eq!(revert_entry.source_audit_id, Some(audit_id));
 }
@@ -330,7 +339,9 @@ async fn revert_emits_error_when_worklog_missing_in_jira() {
         .mount(&server)
         .await;
 
-    let err = revert_worklog_update(&client, &db, audit_id).await.unwrap_err();
+    let err = revert_worklog_update(&client, &db, audit_id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, ReconstructError::WorklogGone), "got {err:?}");
 }
 
@@ -361,7 +372,9 @@ async fn revert_errors_when_local_row_is_tombstoned() {
     )
     .unwrap();
 
-    let err = revert_worklog_update(&client, &db, audit_id).await.unwrap_err();
+    let err = revert_worklog_update(&client, &db, audit_id)
+        .await
+        .unwrap_err();
     assert!(matches!(err, ReconstructError::WorklogGone), "got {err:?}");
 }
 
@@ -407,10 +420,15 @@ async fn retry_failed_create_uses_after_json_args() {
         .await
         .expect("retry ok");
     assert_eq!(result.get("op").and_then(|v| v.as_str()), Some("create"));
-    assert_eq!(result.get("worklog_id").and_then(|v| v.as_str()), Some("7777"));
+    assert_eq!(
+        result.get("worklog_id").and_then(|v| v.as_str()),
+        Some("7777")
+    );
 
     // Linked retry audit entry.
-    let retry_entry = audit_get_by_id(&db, audit_id + 1).unwrap().expect("retry row");
+    let retry_entry = audit_get_by_id(&db, audit_id + 1)
+        .unwrap()
+        .expect("retry row");
     assert_eq!(retry_entry.op, "retry");
     assert_eq!(retry_entry.source_audit_id, Some(audit_id));
     assert!(retry_entry.success);
@@ -438,8 +456,13 @@ async fn retry_rejects_successful_audit_entry() {
     )
     .unwrap();
 
-    let err = retry_failed_audit_action(&client, &db, audit_id).await.unwrap_err();
-    assert!(matches!(err, ReconstructError::AuditUnsuccessful(_)), "got {err:?}");
+    let err = retry_failed_audit_action(&client, &db, audit_id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ReconstructError::AuditUnsuccessful(_)),
+        "got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -474,7 +497,9 @@ async fn retry_failed_delete_marks_local_tombstoned() {
         .mount(&server)
         .await;
 
-    retry_failed_audit_action(&client, &db, audit_id).await.expect("retry ok");
+    retry_failed_audit_action(&client, &db, audit_id)
+        .await
+        .expect("retry ok");
 
     let cached = get_by_jira_id(&db, "5001").unwrap().expect("row present");
     assert!(cached.tombstoned_at.is_some());

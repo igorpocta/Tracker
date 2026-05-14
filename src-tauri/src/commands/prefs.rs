@@ -34,14 +34,33 @@ pub const DEFAULT_ACCENT: &str = "aurora";
 /// Mono + Dual palettes from the original Tracker reference.
 pub const ALLOWED_ACCENTS: &[&str] = &[
     // Legacy hues
-    "blue", "indigo", "violet", "pink", "red", "orange", "yellow", "green",
-    "teal", "graphite",
+    "blue",
+    "indigo",
+    "violet",
+    "pink",
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "teal",
+    "graphite",
     // Mono palettes
-    "aurora", "trcker", "love", "halloween",
+    "aurora",
+    "trcker",
+    "love",
+    "halloween",
     // Phase 18B — Item 16: new MONO palettes
-    "mocha", "electric", "forest", "plum", "rust",
+    "mocha",
+    "electric",
+    "forest",
+    "plum",
+    "rust",
     // Dual palettes
-    "czech", "aurora-boreal", "sakura-night", "cyber-lime", "nordic-fjord",
+    "czech",
+    "aurora-boreal",
+    "sakura-night",
+    "cyber-lime",
+    "nordic-fjord",
 ];
 /// Default palette mode.
 pub const DEFAULT_PALETTE_MODE: &str = "mono";
@@ -50,8 +69,7 @@ pub const ALLOWED_PALETTE_MODES: &[&str] = &["mono", "dual"];
 /// Default currency code.
 pub const DEFAULT_CURRENCY: &str = "CZK";
 /// Allowed ISO-4217 currency codes.
-pub const ALLOWED_CURRENCIES: &[&str] =
-    &["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
+pub const ALLOWED_CURRENCIES: &[&str] = &["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
 /// Default day timeline visibility — visible.
 pub const DEFAULT_DAY_TIMELINE_VISIBLE: bool = true;
 /// Phase 18B — Item 22: default visibility of the Reports earnings card.
@@ -449,9 +467,7 @@ pub async fn set_palette_mode(
 // ----- Day timeline visibility (Phase 14) -----
 
 #[tauri::command]
-pub async fn get_day_timeline_visible(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn get_day_timeline_visible(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     get_day_timeline_visible_inner(&state.db)
 }
 
@@ -469,9 +485,7 @@ pub async fn set_day_timeline_visible(
 // ----- Earnings visibility (Phase 18B — Item 22) -----
 
 #[tauri::command]
-pub async fn get_earnings_visible(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn get_earnings_visible(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     get_earnings_visible_inner(&state.db)
 }
 

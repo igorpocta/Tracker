@@ -67,12 +67,9 @@ pub async fn refresh_cache(
 /// surfaces like the sidebar badge so they can show "real" numbers instead
 /// of a hardcoded placeholder.
 #[tauri::command]
-pub async fn get_cache_stats(
-    state: tauri::State<'_, AppState>,
-) -> Result<CacheStats, String> {
+pub async fn get_cache_stats(state: tauri::State<'_, AppState>) -> Result<CacheStats, String> {
     let issues = cache::issues::count(&state.db).map_err(|e| e.to_string())?;
-    let worklogs_local =
-        cache::worklogs::count(&state.db).map_err(|e| e.to_string())?;
+    let worklogs_local = cache::worklogs::count(&state.db).map_err(|e| e.to_string())?;
     Ok(CacheStats {
         issues,
         worklogs_local,

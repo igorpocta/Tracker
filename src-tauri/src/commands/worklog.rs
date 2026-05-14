@@ -54,13 +54,8 @@ pub async fn get_worklogs_for_range(
     to_unix_s: i64,
     with_author: Option<String>,
 ) -> Result<Vec<WorklogRow>, String> {
-    cache::worklogs::for_date_range(
-        &state.db,
-        from_unix_s,
-        to_unix_s,
-        with_author.as_deref(),
-    )
-    .map_err(|e| e.to_string())
+    cache::worklogs::for_date_range(&state.db, from_unix_s, to_unix_s, with_author.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 /// Result payload of [`refresh_all`].
@@ -215,12 +210,7 @@ pub async fn create_manual_worklog(
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
 
     let resp = match client
-        .add_worklog(
-            &issue_key,
-            started_dt,
-            duration_seconds,
-            comment.as_deref(),
-        )
+        .add_worklog(&issue_key, started_dt, duration_seconds, comment.as_deref())
         .await
     {
         Ok(r) => r,
@@ -242,12 +232,11 @@ pub async fn create_manual_worklog(
         .jira_config_cloned()
         .map(|c| c.email)
         .unwrap_or_default();
-    let (issue_id, summary) = match cache::issues::get_by_key(&state.db, &issue_key)
-        .map_err(|e| e.to_string())?
-    {
-        Some(row) => (row.issue_id, Some(row.summary)),
-        None => (resp.issue_id.clone(), None),
-    };
+    let (issue_id, summary) =
+        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
+            Some(row) => (row.issue_id, Some(row.summary)),
+            None => (resp.issue_id.clone(), None),
+        };
 
     let started_at_s = started_at_ms / 1000;
     let now_s = Utc::now().timestamp();
@@ -261,15 +250,18 @@ pub async fn create_manual_worklog(
         logged_at: now_s,
         comment: comment.clone(),
         jira_worklog_id: Some(resp.id.clone()),
-        author_account_id: if author.is_empty() { None } else { Some(author) },
+        author_account_id: if author.is_empty() {
+            None
+        } else {
+            Some(author)
+        },
         source: "jira".to_string(),
         updated_at_jira: Some(now_s),
         pending_delete_at: None,
         tombstoned_at: None,
         pending_assignment: false,
     };
-    let local_id = cache::worklogs::upsert_from_jira(&state.db, &row)
-        .map_err(|e| e.to_string())?;
+    let local_id = cache::worklogs::upsert_from_jira(&state.db, &row).map_err(|e| e.to_string())?;
     let mut saved = row.clone();
     saved.id = Some(local_id);
 
@@ -361,7 +353,9 @@ pub async fn update_worklog(
     };
 
     // Build the new row from before + new fields.
-    let local_id = before.id.ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
+    let local_id = before
+        .id
+        .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
     let new_started = new_started_at_ms
         .map(|ms| ms / 1000)
         .unwrap_or(before.started_at);
@@ -423,11 +417,12 @@ pub async fn delete_worklog(
     let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
-    let local_id = before.id.ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
+    let local_id = before
+        .id
+        .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
 
     let now_s = Utc::now().timestamp();
-    cache::worklogs::mark_pending_delete(&state.db, local_id, now_s)
-        .map_err(|e| e.to_string())?;
+    cache::worklogs::mark_pending_delete(&state.db, local_id, now_s).map_err(|e| e.to_string())?;
 
     audit_success(
         &state.db,
@@ -461,10 +456,11 @@ pub async fn undo_delete_worklog(
     let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
-    let local_id = before.id.ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
+    let local_id = before
+        .id
+        .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
 
-    cache::worklogs::clear_pending_delete(&state.db, local_id)
-        .map_err(|e| e.to_string())?;
+    cache::worklogs::clear_pending_delete(&state.db, local_id).map_err(|e| e.to_string())?;
 
     audit_success(
         &state.db,
@@ -482,6 +478,7 @@ pub async fn undo_delete_worklog(
 /// Move a worklog from one issue to another. Calls into
 /// [`crate::jira::worklog_ops::move_worklog`] (POST new + DELETE old).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn move_worklog(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -511,8 +508,8 @@ pub async fn move_worklog(
         .single()
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
 
-    let before = cache::worklogs::get_by_jira_id(&state.db, &old_worklog_id)
-        .map_err(|e| e.to_string())?;
+    let before =
+        cache::worklogs::get_by_jira_id(&state.db, &old_worklog_id).map_err(|e| e.to_string())?;
 
     let account_id = before.as_ref().and_then(|b| b.author_account_id.clone());
 
@@ -565,9 +562,7 @@ pub async fn move_worklog(
                 Some(&old_issue_key),
                 Some(&old_worklog_id),
                 before.as_ref(),
-                &format!(
-                    "delete after create failed (new id {new_worklog_id}): {source}"
-                ),
+                &format!("delete after create failed (new id {new_worklog_id}): {source}"),
             );
             // Preserve the original Tracker error string so the UI can show
             // "Original worklog still exists on {key}" + a manual retry
@@ -623,8 +618,7 @@ pub async fn purge_audit_log(
     older_than_days: u32,
 ) -> Result<u32, String> {
     let cutoff = Utc::now().timestamp() - (older_than_days as i64) * 86_400;
-    let n = cache::audit::purge_older_than(&state.db, cutoff)
-        .map_err(|e| e.to_string())?;
+    let n = cache::audit::purge_older_than(&state.db, cutoff).map_err(|e| e.to_string())?;
     Ok(n as u32)
 }
 
@@ -789,12 +783,11 @@ pub async fn assign_worklog_issue(
         }
     };
 
-    let (issue_id, summary) = match cache::issues::get_by_key(&state.db, &issue_key)
-        .map_err(|e| e.to_string())?
-    {
-        Some(row) => (row.issue_id, Some(row.summary)),
-        None => (resp.issue_id.clone(), None),
-    };
+    let (issue_id, summary) =
+        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
+            Some(row) => (row.issue_id, Some(row.summary)),
+            None => (resp.issue_id.clone(), None),
+        };
 
     cache::worklogs::assign_issue(
         &state.db,
@@ -845,8 +838,7 @@ pub async fn delete_local_only_worklog(
             "Tento záznam je synchronizovaný s Jirou — použijte standardní smazání.".into(),
         );
     }
-    cache::worklogs::delete_local_only(&state.db, worklog_id)
-        .map_err(|e| e.to_string())?;
+    cache::worklogs::delete_local_only(&state.db, worklog_id).map_err(|e| e.to_string())?;
 
     audit_success(
         &state.db,

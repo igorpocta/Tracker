@@ -15,8 +15,8 @@ const TOKEN: &str = "secret-token";
 
 async fn server_and_client() -> (MockServer, JiraClient) {
     let server = MockServer::start().await;
-    let client = JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string())
-        .expect("client builds");
+    let client =
+        JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("client builds");
     (server, client)
 }
 
@@ -93,12 +93,10 @@ async fn move_worklog_happy_path() {
     assert_eq!(res.new_row.issue_key, "NEW-2");
 
     // The new row should be in the DB.
-    let by_new =
-        tracker_lib::cache::worklogs::get_by_jira_id(&db, "6001").unwrap();
+    let by_new = tracker_lib::cache::worklogs::get_by_jira_id(&db, "6001").unwrap();
     assert!(by_new.is_some());
     // The old row should be gone.
-    let by_old =
-        tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001").unwrap();
+    let by_old = tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001").unwrap();
     assert!(by_old.is_none(), "old row should have been hard-deleted");
 }
 
@@ -130,7 +128,10 @@ async fn move_worklog_create_failed_leaves_old_intact() {
     };
 
     let err = move_worklog(&client, &db, args).await.unwrap_err();
-    assert!(matches!(err, MoveWorklogError::CreateFailed(_)), "got {err:?}");
+    assert!(
+        matches!(err, MoveWorklogError::CreateFailed(_)),
+        "got {err:?}"
+    );
 
     // Old row should still be in the DB.
     let by_old = tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
@@ -240,9 +241,7 @@ async fn move_worklog_delete_404_is_treated_as_success() {
     let res = move_worklog(&client, &db, args).await.expect("ok");
     assert_eq!(res.new_worklog_id, "6001");
     // Old row should be removed locally too (404 means "already gone").
-    assert!(
-        tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
-            .unwrap()
-            .is_none()
-    );
+    assert!(tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
+        .unwrap()
+        .is_none());
 }

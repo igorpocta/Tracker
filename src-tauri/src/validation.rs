@@ -44,9 +44,7 @@ pub fn validate_issue_key(key: &str) -> Result<(), String> {
         None => return Err(format!("Neplatný klíč úkolu {trimmed:?} (chybí pomlčka)")),
     };
     if trimmed.matches('-').count() != 1 {
-        return Err(format!(
-            "Neplatný klíč úkolu {trimmed:?} (více pomlček)"
-        ));
+        return Err(format!("Neplatný klíč úkolu {trimmed:?} (více pomlček)"));
     }
     if proj.len() < 2 {
         return Err(format!("Neplatný klíč úkolu {trimmed:?} (krátká zkratka)"));
@@ -119,13 +117,7 @@ mod tests {
 
     #[test]
     fn issue_key_accepts_canonical() {
-        for k in [
-            "ACME-1",
-            "ACME-12345",
-            "AB-9",
-            "ABC123-7",
-            "PROJ-1000000",
-        ] {
+        for k in ["ACME-1", "ACME-12345", "AB-9", "ABC123-7", "PROJ-1000000"] {
             assert!(validate_issue_key(k).is_ok(), "{k} should be accepted");
         }
     }
@@ -197,7 +189,7 @@ mod tests {
 
     #[test]
     fn jql_rejects_nul() {
-        let bad = format!("project = ACME\0; DROP TABLE");
+        let bad = "project = ACME\0; DROP TABLE".to_string();
         assert!(validate_jql(&bad).is_err());
     }
 

@@ -92,11 +92,7 @@ pub fn get_by_date(db: &Db, date: NaiveDate) -> Result<DailyActivityRow, DbError
     }
 }
 
-pub fn record_active_chunk(
-    db: &Db,
-    date: NaiveDate,
-    seconds: i64,
-) -> Result<(), DbError> {
+pub fn record_active_chunk(db: &Db, date: NaiveDate, seconds: i64) -> Result<(), DbError> {
     if seconds <= 0 {
         return Ok(());
     }
@@ -113,11 +109,7 @@ pub fn record_active_chunk(
     Ok(())
 }
 
-pub fn record_inactive_chunk(
-    db: &Db,
-    date: NaiveDate,
-    seconds: i64,
-) -> Result<(), DbError> {
+pub fn record_inactive_chunk(db: &Db, date: NaiveDate, seconds: i64) -> Result<(), DbError> {
     if seconds <= 0 {
         return Ok(());
     }

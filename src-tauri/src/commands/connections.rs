@@ -96,14 +96,11 @@ pub async fn list_connections(
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let key = cache::connections::token_key(row.id);
-        let has_token = crate::keychain::get(
-            &state.app_data_dir,
-            crate::keychain::KEYCHAIN_SERVICE,
-            &key,
-        )
-        .ok()
-        .flatten()
-        .is_some();
+        let has_token =
+            crate::keychain::get(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key)
+                .ok()
+                .flatten()
+                .is_some();
         out.push(ConnectionDto::from_row(row, has_token));
     }
     Ok(out)
@@ -141,8 +138,8 @@ pub async fn add_connection(
             validate_jira_config(&cfg)?;
         }
     }
-    let config_json = serde_json::to_string(&args.config)
-        .map_err(|e| format!("invalid config JSON: {e}"))?;
+    let config_json =
+        serde_json::to_string(&args.config).map_err(|e| format!("invalid config JSON: {e}"))?;
 
     let id = cache::connections::insert(
         &state.db,
@@ -228,14 +225,11 @@ pub async fn update_connection(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
     let key = cache::connections::token_key(row.id);
-    let has_token = crate::keychain::get(
-        &state.app_data_dir,
-        crate::keychain::KEYCHAIN_SERVICE,
-        &key,
-    )
-    .ok()
-    .flatten()
-    .is_some();
+    let has_token =
+        crate::keychain::get(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key)
+            .ok()
+            .flatten()
+            .is_some();
     let dto = ConnectionDto::from_row(row, has_token);
     let _ = app.emit("connections-changed", &dto);
     Ok(dto)
@@ -249,11 +243,7 @@ pub async fn remove_connection(
 ) -> Result<(), String> {
     // Token first (it would be orphaned if we crash between).
     let key = cache::connections::token_key(id);
-    let _ = crate::keychain::delete(
-        &state.app_data_dir,
-        crate::keychain::KEYCHAIN_SERVICE,
-        &key,
-    );
+    let _ = crate::keychain::delete(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key);
     cache::connections::delete(&state.db, id).map_err(|e| e.to_string())?;
     let _ = state.hydrate_connections();
     let _ = app.emit("connections-changed", id);
@@ -274,14 +264,11 @@ pub async fn enable_connection(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
     let key = cache::connections::token_key(row.id);
-    let has_token = crate::keychain::get(
-        &state.app_data_dir,
-        crate::keychain::KEYCHAIN_SERVICE,
-        &key,
-    )
-    .ok()
-    .flatten()
-    .is_some();
+    let has_token =
+        crate::keychain::get(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key)
+            .ok()
+            .flatten()
+            .is_some();
     let dto = ConnectionDto::from_row(row, has_token);
     let _ = app.emit("connections-changed", &dto);
     Ok(dto)
@@ -297,9 +284,7 @@ pub struct TestProviderArgs {
 /// Verify provider credentials without persisting. For Jira this delegates to
 /// `JiraClient::myself()`.
 #[tauri::command]
-pub async fn test_connection_for_provider(
-    args: TestProviderArgs,
-) -> Result<JiraUser, String> {
+pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<JiraUser, String> {
     if args.provider != "jira" {
         return Err(format!(
             "Provider {:?} zatím není podporován",
@@ -308,8 +293,7 @@ pub async fn test_connection_for_provider(
     }
     let cfg: JiraConnectionConfig =
         serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
-    let client =
-        JiraClient::new(cfg.base_url, cfg.email, args.token).map_err(|e| e.to_string())?;
+    let client = JiraClient::new(cfg.base_url, cfg.email, args.token).map_err(|e| e.to_string())?;
     client.myself().await.map_err(|e| e.to_string())
 }
 
@@ -325,13 +309,11 @@ pub async fn list_my_issues(
     let row = cache::connections::get_by_id(&state.db, connection_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
-    let cfg: JiraConnectionConfig =
-        serde_json::from_str(&row.config_json).unwrap_or_default();
+    let cfg: JiraConnectionConfig = serde_json::from_str(&row.config_json).unwrap_or_default();
 
-    let jql = cfg
-        .my_issues_jql
-        .as_deref()
-        .unwrap_or(r#"assignee = currentUser() AND statusCategory != "Done" ORDER BY updated DESC"#);
+    let jql = cfg.my_issues_jql.as_deref().unwrap_or(
+        r#"assignee = currentUser() AND statusCategory != "Done" ORDER BY updated DESC"#,
+    );
 
     // Resolve the live client for this connection.
     let client = {
@@ -345,12 +327,7 @@ pub async fn list_my_issues(
     };
 
     let page = client
-        .search_jql(
-            jql,
-            None,
-            crate::jira::SYNC_FIELDS,
-            limit,
-        )
+        .search_jql(jql, None, crate::jira::SYNC_FIELDS, limit)
         .await
         .map_err(|e| e.to_string())?;
 

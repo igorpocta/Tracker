@@ -33,10 +33,7 @@ pub async fn toggle_tray_popover(app: tauri::AppHandle) -> Result<(), String> {
 /// Show or hide the tray icon entirely. Lets the user opt out of the tray
 /// (e.g. on a screen-recording session) without quitting the app.
 #[tauri::command]
-pub async fn set_tray_available(
-    app: tauri::AppHandle,
-    available: bool,
-) -> Result<(), String> {
+pub async fn set_tray_available(app: tauri::AppHandle, available: bool) -> Result<(), String> {
     crate::tray::set_visible(&app, available).map_err(|e| e.to_string())?;
     let _ = app.emit("tray-available", available);
     Ok(())

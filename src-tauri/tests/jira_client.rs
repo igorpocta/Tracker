@@ -16,8 +16,8 @@ const TOKEN: &str = "secret-token";
 
 async fn server_and_client() -> (MockServer, JiraClient) {
     let server = MockServer::start().await;
-    let client = JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string())
-        .expect("client builds");
+    let client =
+        JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("client builds");
     (server, client)
 }
 
@@ -318,10 +318,7 @@ async fn delete_worklog_returns_ok_on_204() {
         .mount(&server)
         .await;
 
-    client
-        .delete_worklog("ABC-1", "99999")
-        .await
-        .expect("ok");
+    client.delete_worklog("ABC-1", "99999").await.expect("ok");
 }
 
 #[tokio::test]
@@ -334,10 +331,7 @@ async fn delete_worklog_treats_404_as_not_found() {
         .mount(&server)
         .await;
 
-    let err = client
-        .delete_worklog("ABC-1", "missing")
-        .await
-        .unwrap_err();
+    let err = client.delete_worklog("ABC-1", "missing").await.unwrap_err();
     assert!(matches!(err, JiraError::WorklogNotFound), "got {err:?}");
 }
 
@@ -399,10 +393,7 @@ fn make_adf_comment_empty_text_returns_none() {
 #[test]
 fn make_adf_comment_trims_whitespace() {
     let adf = make_adf_comment("  hi  ").unwrap();
-    assert_eq!(
-        adf["content"][0]["content"][0]["text"].as_str(),
-        Some("hi")
-    );
+    assert_eq!(adf["content"][0]["content"][0]["text"].as_str(), Some("hi"));
 }
 
 // ---------- map_issue_to_row ----------
@@ -610,7 +601,10 @@ async fn worklog_updated_since_parses_page() {
         .mount(&server)
         .await;
 
-    let page = client.worklog_updated_since(1_700_000_000_000).await.unwrap();
+    let page = client
+        .worklog_updated_since(1_700_000_000_000)
+        .await
+        .unwrap();
     assert_eq!(page.values.len(), 2);
     assert_eq!(page.values[0].worklog_id, 1001);
     assert_eq!(page.values[1].worklog_id, 1002);
@@ -829,8 +823,8 @@ async fn sync_worklogs_for_range_filters_by_user_and_range() {
     assert_eq!(count, 1, "exactly one entry should match");
 
     // Verify the surviving worklog landed in the DB with the right shape.
-    let rows = tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc"))
-        .unwrap();
+    let rows =
+        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc")).unwrap();
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row.jira_worklog_id.as_deref(), Some("5001"));
@@ -938,8 +932,7 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
 
     // Default query should now show only 5001 (5002 is tombstoned).
     let rows =
-        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc"))
-            .unwrap();
+        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc")).unwrap();
     let ids: Vec<&str> = rows
         .iter()
         .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
@@ -947,14 +940,13 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
     assert_eq!(ids, vec!["5001"]);
 
     // …but the diagnostic query includes the tombstoned row.
-    let with_tomb =
-        tracker_lib::cache::worklogs::for_date_range_including_tombstoned(
-            &db,
-            0,
-            i64::MAX,
-            Some("me-acc"),
-        )
-        .unwrap();
+    let with_tomb = tracker_lib::cache::worklogs::for_date_range_including_tombstoned(
+        &db,
+        0,
+        i64::MAX,
+        Some("me-acc"),
+    )
+    .unwrap();
     assert_eq!(with_tomb.len(), 2);
     let tombstoned = with_tomb
         .iter()
@@ -1001,8 +993,7 @@ fn for_date_range_excludes_tombstoned() {
     assert_eq!(default_ids.len(), 2);
     assert!(!default_ids.contains(&"b"));
 
-    let all_rows =
-        for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
+    let all_rows = for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
     assert_eq!(all_rows.len(), 3);
 }
 

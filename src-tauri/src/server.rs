@@ -224,9 +224,7 @@ pub fn status_body() -> StatusResponse {
     }
 }
 
-async fn status_handler<R: Runtime>(
-    State(state): State<ServerState<R>>,
-) -> Json<StatusResponse> {
+async fn status_handler<R: Runtime>(State(state): State<ServerState<R>>) -> Json<StatusResponse> {
     state.bump_heartbeat();
     Json(status_body())
 }
@@ -336,9 +334,7 @@ async fn stop_timer_handler<R: Runtime>(
     Json(row).into_response()
 }
 
-async fn get_visible_ticket_handler<R: Runtime>(
-    State(state): State<ServerState<R>>,
-) -> Response {
+async fn get_visible_ticket_handler<R: Runtime>(State(state): State<ServerState<R>>) -> Response {
     state.bump_heartbeat();
     let v = state.visible_ticket.read().unwrap().clone();
     Json::<Option<VisibleTicket>>(v).into_response()

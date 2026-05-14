@@ -76,18 +76,11 @@ fn upsert_legacy_jira_connection(
         sync_jql: None,
         my_issues_jql: None,
     };
-    let cfg_json = serde_json::to_string(&jira_cfg)
-        .unwrap_or_else(|_| "{}".to_string());
+    let cfg_json = serde_json::to_string(&jira_cfg).unwrap_or_else(|_| "{}".to_string());
 
     let target_id = if let Some(row) = rows.iter().find(|r| r.provider == "jira") {
-        cache::connections::update_fields(
-            &state.db,
-            row.id,
-            None,
-            Some(true),
-            Some(&cfg_json),
-        )
-        .map_err(|e| e.to_string())?;
+        cache::connections::update_fields(&state.db, row.id, None, Some(true), Some(&cfg_json))
+            .map_err(|e| e.to_string())?;
         row.id
     } else {
         cache::connections::insert(
@@ -214,11 +207,7 @@ where
 /// Pure helper for [`sign_out`]: deletes `config.toml`, clears the in-memory
 /// state, and runs the supplied `clear_token` closure. Returns `Ok(())` even
 /// if the config file is already absent (idempotent).
-pub fn sign_out_inner<F>(
-    state: &AppState,
-    config_path: &Path,
-    clear_token: F,
-) -> Result<(), String>
+pub fn sign_out_inner<F>(state: &AppState, config_path: &Path, clear_token: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
 {
@@ -261,8 +250,7 @@ pub async fn update_config(
 ) -> Result<(), String> {
     let path = config_path_for(&app)?;
     update_config_inner(&state, &path, new_cfg, new_token, |tok| {
-        crate::keychain::save_jira_token(&state.app_data_dir, tok)
-            .map_err(|e| e.to_string())
+        crate::keychain::save_jira_token(&state.app_data_dir, tok).map_err(|e| e.to_string())
     })?;
     let _ = app.emit("config-changed", ());
     Ok(())
@@ -278,8 +266,7 @@ pub async fn sign_out(
 ) -> Result<(), String> {
     let path = config_path_for(&app)?;
     sign_out_inner(&state, &path, || {
-        crate::keychain::clear_jira_token(&state.app_data_dir)
-            .map_err(|e| e.to_string())
+        crate::keychain::clear_jira_token(&state.app_data_dir).map_err(|e| e.to_string())
     })?;
     let _ = app.emit("config-changed", ());
     let _ = app.emit("main-window:navigate", "setup");

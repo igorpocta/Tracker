@@ -24,16 +24,12 @@ pub mod timer;
 pub mod tray;
 pub mod worklog;
 
-pub use browser::{
-    get_browser_context, get_current_visible_ticket, get_extension_last_heartbeat,
-};
+pub use browser::{get_browser_context, get_current_visible_ticket, get_extension_last_heartbeat};
 pub use config::{
     enter_main_app, enter_setup, get_current_config, has_config, open_main_window, save_config,
     sign_out, test_jira_connection, update_config,
 };
-pub use issues::{
-    get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache,
-};
+pub use issues::{get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache};
 pub use misc::{haptic_feedback, open_jira_issue, open_url};
 pub use prefs::{
     get_daily_goal, get_density, get_font_size, get_hourly_rate, get_theme, set_app_icon,

@@ -52,6 +52,7 @@ fn now_unix() -> i64 {
     Utc::now().timestamp()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_linked(
     db: &Db,
     op: AuditOp,
@@ -80,8 +81,7 @@ fn record_linked(
 }
 
 fn fetch_audit(db: &Db, audit_id: i64) -> Result<AuditEntry, ReconstructError> {
-    cache::audit::get_by_id(db, audit_id)?
-        .ok_or(ReconstructError::AuditNotFound)
+    cache::audit::get_by_id(db, audit_id)?.ok_or(ReconstructError::AuditNotFound)
 }
 
 /// Restore a worklog deleted via `delete` or `sync_tombstone`.
@@ -208,8 +208,8 @@ pub async fn revert_worklog_update(
         .ok_or(ReconstructError::SnapshotMissing)?;
     let issue_key = before.issue_key.as_str();
 
-    let current = cache::worklogs::get_by_jira_id(db, worklog_id)?
-        .ok_or(ReconstructError::WorklogGone)?;
+    let current =
+        cache::worklogs::get_by_jira_id(db, worklog_id)?.ok_or(ReconstructError::WorklogGone)?;
     if current.tombstoned_at.is_some() {
         return Err(ReconstructError::WorklogGone);
     }
@@ -274,8 +274,8 @@ pub async fn revert_worklog_update(
         Some(now_s),
     )?;
 
-    let after = cache::worklogs::get_by_id(db, local_id)?
-        .ok_or(ReconstructError::SnapshotMissing)?;
+    let after =
+        cache::worklogs::get_by_id(db, local_id)?.ok_or(ReconstructError::SnapshotMissing)?;
 
     record_linked(
         db,
@@ -340,11 +340,10 @@ async fn retry_create(
         .await
     {
         Ok(resp) => {
-            let (issue_id, summary) =
-                match cache::issues::get_by_key(db, &snap.issue_key)? {
-                    Some(row) => (row.issue_id, Some(row.summary)),
-                    None => (resp.issue_id.clone(), snap.summary.clone()),
-                };
+            let (issue_id, summary) = match cache::issues::get_by_key(db, &snap.issue_key)? {
+                Some(row) => (row.issue_id, Some(row.summary)),
+                None => (resp.issue_id.clone(), snap.summary.clone()),
+            };
             let now_s = now_unix();
             let row = WorklogRow {
                 id: None,

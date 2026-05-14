@@ -50,7 +50,11 @@ pub struct WorklogRow {
 /// attempted because timer stops always produce a unique entry.
 pub fn record(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
     let conn = db.pool().get()?;
-    let source = if w.source.is_empty() { "local" } else { w.source.as_str() };
+    let source = if w.source.is_empty() {
+        "local"
+    } else {
+        w.source.as_str()
+    };
     conn.execute(
         "INSERT INTO recent_worklogs (
             issue_key, issue_id, summary, duration_s, started_at, logged_at,
@@ -99,7 +103,11 @@ pub fn upsert_from_jira(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
         Err(e) => return Err(e.into()),
     };
 
-    let source = if w.source.is_empty() { "jira" } else { w.source.as_str() };
+    let source = if w.source.is_empty() {
+        "jira"
+    } else {
+        w.source.as_str()
+    };
 
     if let Some(id) = existing {
         conn.execute(
@@ -217,10 +225,8 @@ pub fn for_date_range(
                    AND tombstoned_at IS NULL
                  ORDER BY started_at DESC",
             )?;
-            let mapped = stmt.query_map(
-                rusqlite::params![from_unix_s, to_unix_s],
-                row_to_worklog,
-            )?;
+            let mapped =
+                stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
             mapped.collect::<Result<Vec<_>, _>>()?
         }
     };
@@ -262,10 +268,8 @@ pub fn for_date_range_including_tombstoned(
                  WHERE started_at BETWEEN ?1 AND ?2
                  ORDER BY started_at DESC",
             )?;
-            let mapped = stmt.query_map(
-                rusqlite::params![from_unix_s, to_unix_s],
-                row_to_worklog,
-            )?;
+            let mapped =
+                stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
             mapped.collect::<Result<Vec<_>, _>>()?
         }
     };
@@ -341,6 +345,7 @@ pub fn get_by_jira_id(db: &Db, jira_id: &str) -> Result<Option<WorklogRow>, DbEr
 
 /// Update the mutable fields (issue_key, duration_s, started_at, comment) on a
 /// local row. Used by the `update_worklog` and `move_worklog` Tauri commands.
+#[allow(clippy::too_many_arguments)]
 pub fn update_fields(
     db: &Db,
     id: i64,
@@ -418,11 +423,7 @@ pub fn mark_tombstoned(db: &Db, id: i64, now_unix_s: i64) -> Result<(), DbError>
 
 /// Mark a row tombstoned by Jira worklog id. Convenience wrapper for the
 /// mark-and-sweep code path in `worklog_sync`.
-pub fn mark_tombstoned_by_jira_id(
-    db: &Db,
-    jira_id: &str,
-    now_unix_s: i64,
-) -> Result<(), DbError> {
+pub fn mark_tombstoned_by_jira_id(db: &Db, jira_id: &str, now_unix_s: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
         "UPDATE recent_worklogs SET
@@ -551,14 +552,7 @@ pub fn assign_issue(
             pending_assignment = 0,
             updated_at = ?6
          WHERE id = ?1",
-        rusqlite::params![
-            id,
-            issue_key,
-            issue_id,
-            summary,
-            jira_worklog_id,
-            now,
-        ],
+        rusqlite::params![id, issue_key, issue_id, summary, jira_worklog_id, now,],
     )?;
     Ok(())
 }

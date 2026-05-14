@@ -284,7 +284,10 @@ pub fn map_issue_to_row(issue: &JiraIssue) -> IssueRow {
 
     let issue_type = fields.issuetype.as_ref().and_then(|t| t.name.clone());
 
-    let time_spent = fields.timetracking.as_ref().and_then(|tt| tt.time_spent_seconds);
+    let time_spent = fields
+        .timetracking
+        .as_ref()
+        .and_then(|tt| tt.time_spent_seconds);
     let time_original_estimate = fields
         .timetracking
         .as_ref()

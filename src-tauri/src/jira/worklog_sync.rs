@@ -73,7 +73,14 @@ pub async fn sync_worklogs_for_range(
     // Convert the date range to inclusive unix seconds. We use UTC bounds:
     // anything started on `from_date` 00:00 UTC up to `to_date` 23:59:59 UTC.
     let from_ts = Utc
-        .with_ymd_and_hms(from_date.year(), from_date.month(), from_date.day(), 0, 0, 0)
+        .with_ymd_and_hms(
+            from_date.year(),
+            from_date.month(),
+            from_date.day(),
+            0,
+            0,
+            0,
+        )
         .single()
         .ok_or_else(|| SyncError::InvalidRange("from_date is ambiguous".into()))?
         .timestamp();
@@ -179,8 +186,7 @@ pub async fn sync_worklogs_for_range(
     // — without that filter we'd tombstone other users' worklogs if the
     // current user can see them (which doesn't happen in our schema today
     // because we only sync our own, but defensive is cheap).
-    let local_ids =
-        cache::worklogs::jira_ids_in_range(db, from_ts, to_ts, me_account_id)?;
+    let local_ids = cache::worklogs::jira_ids_in_range(db, from_ts, to_ts, me_account_id)?;
     let now_unix = Utc::now().timestamp();
     for local_id in &local_ids {
         if !seen_ids.contains(local_id) {

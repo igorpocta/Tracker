@@ -115,15 +115,12 @@ pub fn run() {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 let state = recovery_handle.state::<AppState>();
                 let cutoff = chrono::Utc::now().timestamp() - 30;
-                let pending = match cache::worklogs::pending_deletes_older_than(
-                    &state.db, cutoff,
-                ) {
+                let pending = match cache::worklogs::pending_deletes_older_than(&state.db, cutoff) {
                     Ok(p) => p,
                     Err(_) => return,
                 };
                 for row in pending {
-                    let (Some(local_id), Some(jira_id)) =
-                        (row.id, row.jira_worklog_id.clone())
+                    let (Some(local_id), Some(jira_id)) = (row.id, row.jira_worklog_id.clone())
                     else {
                         continue;
                     };
@@ -182,11 +179,7 @@ pub fn run() {
                         }),
                     );
                     let _ = jira::worklog_sync::sync_worklogs_for_range(
-                        &client,
-                        &state.db,
-                        &me,
-                        from,
-                        today,
+                        &client, &state.db, &me, from, today,
                     )
                     .await;
                 }
@@ -207,8 +200,7 @@ pub fn run() {
                         .single()
                         .unwrap_or(now + ChronoDuration::days(1));
                     let wait_ms = (next - now).num_milliseconds().max(1000);
-                    tokio::time::sleep(std::time::Duration::from_millis(wait_ms as u64))
-                        .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(wait_ms as u64)).await;
                     let _ = rollover_handle.emit("day-rollover", ());
                 }
             });

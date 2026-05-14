@@ -130,11 +130,7 @@ pub fn get(
 
 /// Delete the entry under (`service`, `account`). Idempotent: missing entries
 /// are treated as success.
-pub fn delete(
-    app_data_dir: &Path,
-    service: &str,
-    account: &str,
-) -> Result<(), KeychainError> {
+pub fn delete(app_data_dir: &Path, service: &str, account: &str) -> Result<(), KeychainError> {
     let mut f = load_file(app_data_dir)?;
     f.secrets.remove(&format!("{service}:{account}"));
     save_file(app_data_dir, &f)

@@ -96,8 +96,7 @@ impl AppState {
                         Some(t) => t,
                         None => continue, // no token yet — skip
                     };
-                    let client =
-                        JiraClient::new(cfg.base_url.clone(), cfg.email.clone(), token)?;
+                    let client = JiraClient::new(cfg.base_url.clone(), cfg.email.clone(), token)?;
                     built.push(ActiveConnection {
                         id: row.id,
                         kind: row.provider.clone(),

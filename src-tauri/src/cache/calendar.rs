@@ -91,17 +91,14 @@ pub fn list_non_working_days(
          WHERE date BETWEEN ?1 AND ?2
          ORDER BY date ASC",
     )?;
-    let rows = stmt.query_map(
-        rusqlite::params![from.to_string(), to.to_string()],
-        |r| {
-            Ok(NonWorkingDay {
-                date: r.get(0)?,
-                reason: r.get(1)?,
-                label: r.get(2)?,
-                created_at: r.get(3)?,
-            })
-        },
-    )?;
+    let rows = stmt.query_map(rusqlite::params![from.to_string(), to.to_string()], |r| {
+        Ok(NonWorkingDay {
+            date: r.get(0)?,
+            reason: r.get(1)?,
+            label: r.get(2)?,
+            created_at: r.get(3)?,
+        })
+    })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 

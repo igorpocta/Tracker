@@ -55,9 +55,7 @@ pub async fn get_daily_activity(
 }
 
 #[tauri::command]
-pub async fn get_activity_threshold_min(
-    state: tauri::State<'_, AppState>,
-) -> Result<i32, String> {
+pub async fn get_activity_threshold_min(state: tauri::State<'_, AppState>) -> Result<i32, String> {
     cache::activity::get_threshold_min(&state.db).map_err(|e| e.to_string())
 }
 
