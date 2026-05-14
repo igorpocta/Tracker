@@ -13,6 +13,7 @@ import { hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
 import { AppShell } from "./components/Layout/AppShell";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
+import Audit from "./routes/Audit";
 import Calendar from "./routes/Calendar";
 import Goals from "./routes/Goals";
 import Reports from "./routes/Reports";
@@ -86,6 +87,7 @@ export default function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/goals" element={<Goals />} />
+              <Route path="/audit" element={<Audit />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

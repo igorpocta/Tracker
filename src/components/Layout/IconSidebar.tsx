@@ -23,6 +23,7 @@ import {
   BarChart3,
   CalendarDays,
   Clock,
+  History,
   Settings as SettingsIcon,
   Target,
 } from "lucide-react";
@@ -47,6 +48,11 @@ const PRIMARY_NAV: IconSidebarItem[] = [
   { to: "/reports", label: "Reporty", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
   { to: "/calendar", label: "Kalendář", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
   { to: "/goals", label: "Cíle", icon: <Target className="w-5 h-5" aria-hidden /> },
+  {
+    to: "/audit",
+    label: "Historie změn",
+    icon: <History className="w-5 h-5" aria-hidden />,
+  },
 ];
 
 export function IconSidebar() {
