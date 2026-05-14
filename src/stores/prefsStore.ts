@@ -21,6 +21,7 @@ import {
   getDensity,
   getFontSize,
   getHourlyRate,
+  getPaletteMode,
   getTheme,
   setAccentColor as invokeSetAccentColor,
   setAppIcon as invokeSetAppIcon,
@@ -29,6 +30,7 @@ import {
   setDensity as invokeSetDensity,
   setFontSize as invokeSetFontSize,
   setHourlyRate as invokeSetHourlyRate,
+  setPaletteMode as invokeSetPaletteMode,
   setTheme as invokeSetTheme,
   setWidgetFormat as invokeSetWidgetFormat,
 } from "../api/commands";
@@ -37,16 +39,18 @@ import type {
   Currency,
   DensityPref,
   FontSizePref,
+  PaletteMode,
   ThemePref,
 } from "../api/types";
-import { applyAccent } from "../lib/accent";
+import { applyPalette, DEFAULT_PALETTE_ID, isDualPalette } from "../lib/accent";
 
 export const DEFAULT_DAILY_GOAL_SECONDS = 8 * 60 * 60;
 export const DEFAULT_HOURLY_RATE = 0;
 export const DEFAULT_THEME: ThemePref = "auto";
 export const DEFAULT_FONT_SIZE: FontSizePref = "md";
 export const DEFAULT_DENSITY: DensityPref = "comfortable";
-export const DEFAULT_ACCENT: AccentColor = "blue";
+export const DEFAULT_ACCENT: AccentColor = DEFAULT_PALETTE_ID as AccentColor;
+export const DEFAULT_PALETTE_MODE: PaletteMode = "mono";
 export const DEFAULT_CURRENCY: Currency = "CZK";
 
 /** Widget time display format. */
@@ -70,8 +74,10 @@ export interface PrefsStoreState {
   fontSize: FontSizePref;
   /** Density preference (`compact`/`comfortable`). */
   density: DensityPref;
-  /** Accent color identifier. */
+  /** Accent palette identifier. */
   accent: AccentColor;
+  /** Mono vs Dual palette mode. */
+  paletteMode: PaletteMode;
   /** True until the first hydrate completes — used to avoid flicker. */
   hydrated: boolean;
   error: string | null;
@@ -87,6 +93,7 @@ export interface PrefsStoreActions {
   setFontSize: (size: FontSizePref) => Promise<void>;
   setDensity: (density: DensityPref) => Promise<void>;
   setAccent: (accent: AccentColor) => Promise<void>;
+  setPaletteMode: (mode: PaletteMode) => Promise<void>;
   setAppIcon: (icon: string) => Promise<void>;
 }
 
@@ -161,19 +168,37 @@ function writeWidgetFormat(f: WidgetFormat): void {
   }
 }
 
+const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
+  // Legacy hues
+  "blue",
+  "indigo",
+  "violet",
+  "pink",
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "graphite",
+  // Mono palettes
+  "aurora",
+  "trcker",
+  "love",
+  "halloween",
+  // Dual palettes
+  "czech",
+  "aurora-boreal",
+  "sakura-night",
+  "cyber-lime",
+  "nordic-fjord",
+]);
+
 function isAccentId(v: string): v is AccentColor {
-  return (
-    v === "blue" ||
-    v === "indigo" ||
-    v === "violet" ||
-    v === "pink" ||
-    v === "red" ||
-    v === "orange" ||
-    v === "yellow" ||
-    v === "green" ||
-    v === "teal" ||
-    v === "graphite"
-  );
+  return KNOWN_ACCENTS.has(v);
+}
+
+function isPaletteMode(v: string): v is PaletteMode {
+  return v === "mono" || v === "dual";
 }
 
 function isCurrencyCode(v: string): v is Currency {
@@ -196,31 +221,49 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   fontSize: DEFAULT_FONT_SIZE,
   density: DEFAULT_DENSITY,
   accent: DEFAULT_ACCENT,
+  paletteMode: DEFAULT_PALETTE_MODE,
   hydrated: false,
   error: null,
 
   hydrate: async () => {
     try {
-      const [goal, rate, theme, fontSize, density, accentRaw, currencyRaw] =
-        await Promise.all([
-          getDailyGoal(),
-          getHourlyRate(),
-          getTheme().catch(() => DEFAULT_THEME),
-          getFontSize().catch(() => DEFAULT_FONT_SIZE),
-          getDensity().catch(() => DEFAULT_DENSITY),
-          getAccentColor().catch(() => DEFAULT_ACCENT as string),
-          getCurrency().catch(() => DEFAULT_CURRENCY as string),
-        ]);
+      const [
+        goal,
+        rate,
+        theme,
+        fontSize,
+        density,
+        accentRaw,
+        currencyRaw,
+        paletteModeRaw,
+      ] = await Promise.all([
+        getDailyGoal(),
+        getHourlyRate(),
+        getTheme().catch(() => DEFAULT_THEME),
+        getFontSize().catch(() => DEFAULT_FONT_SIZE),
+        getDensity().catch(() => DEFAULT_DENSITY),
+        getAccentColor().catch(() => DEFAULT_ACCENT as string),
+        getCurrency().catch(() => DEFAULT_CURRENCY as string),
+        getPaletteMode().catch(() => DEFAULT_PALETTE_MODE as string),
+      ]);
       const accent: AccentColor = isAccentId(accentRaw)
         ? accentRaw
         : DEFAULT_ACCENT;
       const currency: Currency = isCurrencyCode(currencyRaw)
         ? currencyRaw
         : DEFAULT_CURRENCY;
+      // Auto-derive the mode from the accent id when possible — keeps the UI
+      // consistent with the actual palette even if the stored `palette_mode`
+      // drifts (e.g. user picked a dual palette from a list).
+      const derivedMode: PaletteMode = isDualPalette(accent) ? "dual" : "mono";
+      const paletteMode: PaletteMode = isPaletteMode(paletteModeRaw)
+        ? (paletteModeRaw as PaletteMode)
+        : derivedMode;
+
       applyTheme(theme);
       applyFontSize(fontSize);
       applyDensity(density);
-      applyAccent(accent);
+      applyPalette(accent);
       set({
         dailyGoalSeconds: goal,
         hourlyRate: rate,
@@ -229,6 +272,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         density,
         accent,
         currency,
+        paletteMode,
         hydrated: true,
         error: null,
       });
@@ -283,8 +327,25 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
 
   setAccent: async (accent) => {
     await invokeSetAccentColor(accent);
-    applyAccent(accent);
-    set({ accent });
+    applyPalette(accent);
+    // Keep the palette mode in sync with the accent's natural mode so the
+    // Mono/Dual toggle UI always reflects reality.
+    const derivedMode: PaletteMode = isDualPalette(accent) ? "dual" : "mono";
+    set({ accent, paletteMode: derivedMode });
+    try {
+      await invokeSetPaletteMode(derivedMode);
+    } catch {
+      /* backend wiring optional in tests / older builds */
+    }
+  },
+
+  setPaletteMode: async (mode) => {
+    try {
+      await invokeSetPaletteMode(mode);
+    } catch {
+      /* swallow — frontend can still drive the picker UI */
+    }
+    set({ paletteMode: mode });
   },
 
   setAppIcon: async (icon) => {

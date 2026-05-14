@@ -299,3 +299,15 @@ export function getCurrency(): Promise<string> {
 export function setCurrency(currency: string): Promise<void> {
   return invoke<void>("set_currency", { currency });
 }
+
+// -----------------------------------------------------------------------------
+// Phase 13: palette mode (mono / dual)
+// -----------------------------------------------------------------------------
+
+export function getPaletteMode(): Promise<string> {
+  return invoke<string>("get_palette_mode");
+}
+
+export function setPaletteMode(mode: string): Promise<void> {
+  return invoke<void>("set_palette_mode", { mode });
+}

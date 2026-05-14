@@ -95,8 +95,16 @@ export type FontSizePref = "sm" | "md" | "lg";
 /** Density preference. */
 export type DensityPref = "compact" | "comfortable";
 
-/** Accent color identifier (maps to an HSL hue in the frontend). */
+/**
+ * Accent palette identifier.
+ *
+ * The original "Apple-style" hues (blue/indigo/…) from Phase 11 are still
+ * accepted by the backend for backwards compatibility, but the UI now picks
+ * from the Mono + Dual palette set inspired by the Trcker reference. See
+ * `src/lib/accent.ts` for the canonical list of palette specs.
+ */
 export type AccentColor =
+  // Legacy hues (still accepted by the backend)
   | "blue"
   | "indigo"
   | "violet"
@@ -106,7 +114,24 @@ export type AccentColor =
   | "yellow"
   | "green"
   | "teal"
-  | "graphite";
+  | "graphite"
+  // Mono palettes (Phase 13)
+  | "aurora"
+  | "trcker"
+  | "love"
+  | "halloween"
+  // Dual palettes (Phase 13)
+  | "czech"
+  | "aurora-boreal"
+  | "sakura-night"
+  | "cyber-lime"
+  | "nordic-fjord";
+
+/**
+ * Color palette mode — Mono (single primary) or Dual (primary + secondary).
+ * Defaults to "mono" with an "aurora" accent.
+ */
+export type PaletteMode = "mono" | "dual";
 
 /** Supported currency codes. */
 export type Currency = "CZK" | "EUR" | "USD" | "GBP" | "PLN" | "CHF";
