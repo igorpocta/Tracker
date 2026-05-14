@@ -3,7 +3,10 @@ pub mod commands;
 pub mod config;
 pub mod jira;
 pub mod keychain;
+pub mod popover;
 pub mod state;
+pub mod tray;
+pub mod tray_ticker;
 
 use tauri::Manager;
 
@@ -37,6 +40,15 @@ pub fn run() {
             }
 
             app.manage(state);
+
+            // Tray icon + background tooltip ticker. Both run unconditionally;
+            // if the user has no Jira configured the tray simply sits idle.
+            let handle = app.handle().clone();
+            if let Err(e) = crate::tray::setup(&handle) {
+                tracing::warn!("tray setup failed: {e}");
+            }
+            crate::tray_ticker::spawn(handle);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
