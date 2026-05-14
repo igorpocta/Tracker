@@ -124,6 +124,8 @@ pub fn record_local_stop(
         author_account_id: None,
         source: "local".to_string(),
         updated_at_jira: None,
+        pending_delete_at: None,
+        tombstoned_at: None,
     };
     let id = cache::worklogs::record(db, &row).map_err(|e| e.to_string())?;
     row.id = Some(id);

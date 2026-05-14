@@ -4,6 +4,8 @@ use rusqlite::Connection;
 const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("../../migrations/0001_init.sql")),
     (2, include_str!("../../migrations/0002_worklog_authority.sql")),
+    (3, include_str!("../../migrations/0003_worklog_tombstone.sql")),
+    (4, include_str!("../../migrations/0004_audit_log.sql")),
 ];
 
 pub fn run(db: &Db) -> Result<(), DbError> {

@@ -169,6 +169,8 @@ fn jira_worklog_to_row(wl: &JiraWorklog, issue_key: &str, started_ts: i64) -> Wo
         author_account_id: Some(wl.author.account_id.clone()),
         source: "jira".to_string(),
         updated_at_jira: updated_ts,
+        pending_delete_at: None,
+        tombstoned_at: None,
     }
 }
 

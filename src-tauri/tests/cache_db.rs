@@ -298,7 +298,7 @@ fn migration_runner_applies_v1_then_v2_on_existing_db() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2]);
+    assert_eq!(versions, vec![1, 2, 3, 4]);
 }
 
 #[test]

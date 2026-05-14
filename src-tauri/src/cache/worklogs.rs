@@ -28,6 +28,15 @@ pub struct WorklogRow {
     pub source: String,
     /// Jira's `updated` timestamp (Unix seconds) for entries pulled from Jira.
     pub updated_at_jira: Option<i64>,
+    /// Phase 15: Unix seconds set when the user clicks trash on a worklog. A
+    /// background task waits 5s before actually firing the Jira DELETE; the
+    /// frontend optimistically hides the row in the meantime. Cleared by the
+    /// undo flow.
+    pub pending_delete_at: Option<i64>,
+    /// Phase 15: Unix seconds set after a worklog has been deleted in Jira
+    /// (either by us or detected via mark-and-sweep). Rows with this set are
+    /// hidden from the default `for_date_range` query but kept for audit.
+    pub tombstoned_at: Option<i64>,
 }
 
 /// Insert a new locally-created worklog. The row is appended; no dedup is
@@ -148,8 +157,11 @@ pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
     let mut stmt = conn.prepare(
         "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at
-         FROM recent_worklogs ORDER BY logged_at DESC LIMIT ?1",
+                comment, jira_worklog_id, author_account_id, source, updated_at,
+                pending_delete_at, tombstoned_at
+         FROM recent_worklogs
+         WHERE tombstoned_at IS NULL
+         ORDER BY logged_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], row_to_worklog)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -158,6 +170,9 @@ pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
 /// Worklogs with `started_at` in `[from_unix_s, to_unix_s]`, ordered most
 /// recent first. If `author_account_id` is `Some(_)`, restricts to that author
 /// (typically the current user). `None` returns all authors.
+///
+/// **Excludes tombstoned rows by default** (Phase 15). Use
+/// [`for_date_range_including_tombstoned`] for forensic / debug queries.
 pub fn for_date_range(
     db: &Db,
     from_unix_s: i64,
@@ -169,7 +184,55 @@ pub fn for_date_range(
         Some(account) => {
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at
+                        comment, jira_worklog_id, author_account_id, source, updated_at,
+                        pending_delete_at, tombstoned_at
+                 FROM recent_worklogs
+                 WHERE started_at BETWEEN ?1 AND ?2
+                   AND author_account_id = ?3
+                   AND tombstoned_at IS NULL
+                 ORDER BY started_at DESC",
+            )?;
+            let mapped = stmt.query_map(
+                rusqlite::params![from_unix_s, to_unix_s, account],
+                row_to_worklog,
+            )?;
+            mapped.collect::<Result<Vec<_>, _>>()?
+        }
+        None => {
+            let mut stmt = conn.prepare(
+                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
+                        comment, jira_worklog_id, author_account_id, source, updated_at,
+                        pending_delete_at, tombstoned_at
+                 FROM recent_worklogs
+                 WHERE started_at BETWEEN ?1 AND ?2
+                   AND tombstoned_at IS NULL
+                 ORDER BY started_at DESC",
+            )?;
+            let mapped = stmt.query_map(
+                rusqlite::params![from_unix_s, to_unix_s],
+                row_to_worklog,
+            )?;
+            mapped.collect::<Result<Vec<_>, _>>()?
+        }
+    };
+    Ok(rows)
+}
+
+/// Diagnostic / audit variant of [`for_date_range`] that includes tombstoned
+/// rows. Used by the mark-and-sweep logic and any future audit UI.
+pub fn for_date_range_including_tombstoned(
+    db: &Db,
+    from_unix_s: i64,
+    to_unix_s: i64,
+    author_account_id: Option<&str>,
+) -> Result<Vec<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let rows: Vec<WorklogRow> = match author_account_id {
+        Some(account) => {
+            let mut stmt = conn.prepare(
+                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
+                        comment, jira_worklog_id, author_account_id, source, updated_at,
+                        pending_delete_at, tombstoned_at
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                    AND author_account_id = ?3
@@ -184,7 +247,8 @@ pub fn for_date_range(
         None => {
             let mut stmt = conn.prepare(
                 "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at
+                        comment, jira_worklog_id, author_account_id, source, updated_at,
+                        pending_delete_at, tombstoned_at
                  FROM recent_worklogs
                  WHERE started_at BETWEEN ?1 AND ?2
                  ORDER BY started_at DESC",
@@ -199,7 +263,8 @@ pub fn for_date_range(
     Ok(rows)
 }
 
-/// Sum of `duration_s` for worklogs in `[from, to]` (optionally filtered by author).
+/// Sum of `duration_s` for worklogs in `[from, to]` (optionally filtered by
+/// author). Tombstoned rows are excluded.
 pub fn total_seconds_for_range(
     db: &Db,
     from_unix_s: i64,
@@ -210,18 +275,229 @@ pub fn total_seconds_for_range(
     let total: i64 = match author_account_id {
         Some(account) => conn.query_row(
             "SELECT COALESCE(SUM(duration_s), 0) FROM recent_worklogs
-             WHERE started_at BETWEEN ?1 AND ?2 AND author_account_id = ?3",
+             WHERE started_at BETWEEN ?1 AND ?2
+               AND author_account_id = ?3
+               AND tombstoned_at IS NULL",
             rusqlite::params![from_unix_s, to_unix_s, account],
             |r| r.get(0),
         )?,
         None => conn.query_row(
             "SELECT COALESCE(SUM(duration_s), 0) FROM recent_worklogs
-             WHERE started_at BETWEEN ?1 AND ?2",
+             WHERE started_at BETWEEN ?1 AND ?2
+               AND tombstoned_at IS NULL",
             rusqlite::params![from_unix_s, to_unix_s],
             |r| r.get(0),
         )?,
     };
     Ok(total)
+}
+
+// -----------------------------------------------------------------------------
+// Phase 15: lookups + mutations used by the two-way sync commands.
+// -----------------------------------------------------------------------------
+
+/// Look up a row by its local rowid. Returns `None` if the row was hard-deleted
+/// (tombstoned rows are still returned — callers need them for audit / undo).
+pub fn get_by_id(db: &Db, id: i64) -> Result<Option<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
+                comment, jira_worklog_id, author_account_id, source, updated_at,
+                pending_delete_at, tombstoned_at
+         FROM recent_worklogs WHERE id = ?1",
+    )?;
+    match stmt.query_row([id], row_to_worklog) {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Look up a row by its Jira worklog id. Returns `None` if there is no such
+/// row locally (e.g. the row was hard-deleted, or never synced).
+pub fn get_by_jira_id(db: &Db, jira_id: &str) -> Result<Option<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
+                comment, jira_worklog_id, author_account_id, source, updated_at,
+                pending_delete_at, tombstoned_at
+         FROM recent_worklogs WHERE jira_worklog_id = ?1",
+    )?;
+    match stmt.query_row([jira_id], row_to_worklog) {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Update the mutable fields (issue_key, duration_s, started_at, comment) on a
+/// local row. Used by the `update_worklog` and `move_worklog` Tauri commands.
+pub fn update_fields(
+    db: &Db,
+    id: i64,
+    issue_key: &str,
+    issue_id: Option<&str>,
+    summary: Option<&str>,
+    duration_s: i64,
+    started_at: i64,
+    comment: Option<&str>,
+    updated_at_jira: Option<i64>,
+) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "UPDATE recent_worklogs SET
+            issue_key = ?2,
+            issue_id = ?3,
+            summary = ?4,
+            duration_s = ?5,
+            started_at = ?6,
+            comment = ?7,
+            updated_at = ?8
+         WHERE id = ?1",
+        rusqlite::params![
+            id,
+            issue_key,
+            issue_id,
+            summary,
+            duration_s,
+            started_at,
+            comment,
+            updated_at_jira,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Mark a row as pending-delete. The frontend optimistically hides the row,
+/// then 5 seconds later a background task either commits the delete (calling
+/// `Jira DELETE` and setting `tombstoned_at`) or — if the user pressed undo,
+/// clearing `pending_delete_at` — does nothing.
+pub fn mark_pending_delete(db: &Db, id: i64, now_unix_s: i64) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "UPDATE recent_worklogs SET pending_delete_at = ?2 WHERE id = ?1",
+        rusqlite::params![id, now_unix_s],
+    )?;
+    Ok(())
+}
+
+/// Clear the `pending_delete_at` column (user pressed undo, or background
+/// task already fired the delete).
+pub fn clear_pending_delete(db: &Db, id: i64) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "UPDATE recent_worklogs SET pending_delete_at = NULL WHERE id = ?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Mark a row as tombstoned (deleted in Jira). The row is retained for ~30
+/// days as a forensic audit trail; `purge_old_tombstoned` will hard-delete it
+/// on the next sync after the retention window.
+pub fn mark_tombstoned(db: &Db, id: i64, now_unix_s: i64) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "UPDATE recent_worklogs SET
+            tombstoned_at = ?2,
+            pending_delete_at = NULL
+         WHERE id = ?1",
+        rusqlite::params![id, now_unix_s],
+    )?;
+    Ok(())
+}
+
+/// Mark a row tombstoned by Jira worklog id. Convenience wrapper for the
+/// mark-and-sweep code path in `worklog_sync`.
+pub fn mark_tombstoned_by_jira_id(
+    db: &Db,
+    jira_id: &str,
+    now_unix_s: i64,
+) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute(
+        "UPDATE recent_worklogs SET
+            tombstoned_at = ?2,
+            pending_delete_at = NULL
+         WHERE jira_worklog_id = ?1
+           AND tombstoned_at IS NULL",
+        rusqlite::params![jira_id, now_unix_s],
+    )?;
+    Ok(())
+}
+
+/// Hard-delete rows whose `tombstoned_at` is older than `older_than_unix_s`.
+/// Returns the number of rows actually removed.
+pub fn purge_old_tombstoned(db: &Db, older_than_unix_s: i64) -> Result<usize, DbError> {
+    let conn = db.pool().get()?;
+    let n = conn.execute(
+        "DELETE FROM recent_worklogs
+         WHERE tombstoned_at IS NOT NULL
+           AND tombstoned_at < ?1",
+        [older_than_unix_s],
+    )?;
+    Ok(n)
+}
+
+/// Hard-delete a single row. Used by `move_worklog` after a successful
+/// composite operation to discard the old row entirely.
+pub fn delete_row(db: &Db, id: i64) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute("DELETE FROM recent_worklogs WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// Return all rows currently in pending-delete state (used by startup recovery
+/// to fire deletes that didn't get committed before the app crashed).
+pub fn pending_deletes_older_than(
+    db: &Db,
+    older_than_unix_s: i64,
+) -> Result<Vec<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
+                comment, jira_worklog_id, author_account_id, source, updated_at,
+                pending_delete_at, tombstoned_at
+         FROM recent_worklogs
+         WHERE pending_delete_at IS NOT NULL
+           AND pending_delete_at < ?1
+           AND tombstoned_at IS NULL
+         ORDER BY pending_delete_at ASC",
+    )?;
+    let mapped = stmt.query_map([older_than_unix_s], row_to_worklog)?;
+    mapped.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Return all `jira_worklog_id` values for `source='jira'` rows whose
+/// `started_at` falls inside the given range, for the given author. Used by
+/// the mark-and-sweep pass: anything in this set that the next Jira fetch
+/// did NOT return is presumed deleted upstream.
+pub fn jira_ids_in_range(
+    db: &Db,
+    from_unix_s: i64,
+    to_unix_s: i64,
+    author_account_id: &str,
+) -> Result<Vec<String>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(
+        "SELECT jira_worklog_id FROM recent_worklogs
+         WHERE source = 'jira'
+           AND tombstoned_at IS NULL
+           AND jira_worklog_id IS NOT NULL
+           AND started_at BETWEEN ?1 AND ?2
+           AND author_account_id = ?3",
+    )?;
+    let mapped = stmt.query_map(
+        rusqlite::params![from_unix_s, to_unix_s, author_account_id],
+        |r| r.get::<_, Option<String>>(0),
+    )?;
+    let mut out = Vec::new();
+    for v in mapped {
+        if let Some(s) = v? {
+            out.push(s);
+        }
+    }
+    Ok(out)
 }
 
 fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
@@ -238,5 +514,7 @@ fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
         author_account_id: r.get(9)?,
         source: r.get(10)?,
         updated_at_jira: r.get(11)?,
+        pending_delete_at: r.get(12)?,
+        tombstoned_at: r.get(13)?,
     })
 }
