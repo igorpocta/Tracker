@@ -18,6 +18,7 @@ import {
   getAccentColor,
   getCurrency,
   getDailyGoal,
+  getDayTimelineVisible,
   getDensity,
   getFontSize,
   getHourlyRate,
@@ -27,6 +28,7 @@ import {
   setAppIcon as invokeSetAppIcon,
   setCurrency as invokeSetCurrency,
   setDailyGoal as invokeSetDailyGoal,
+  setDayTimelineVisible as invokeSetDayTimelineVisible,
   setDensity as invokeSetDensity,
   setFontSize as invokeSetFontSize,
   setHourlyRate as invokeSetHourlyRate,
@@ -52,6 +54,7 @@ export const DEFAULT_DENSITY: DensityPref = "comfortable";
 export const DEFAULT_ACCENT: AccentColor = DEFAULT_PALETTE_ID as AccentColor;
 export const DEFAULT_PALETTE_MODE: PaletteMode = "mono";
 export const DEFAULT_CURRENCY: Currency = "CZK";
+export const DEFAULT_DAY_TIMELINE_VISIBLE = true;
 
 /** Widget time display format. */
 export type WidgetFormat = "HH:MM:SS" | "Hh Mm" | "0.0h";
@@ -78,6 +81,8 @@ export interface PrefsStoreState {
   accent: AccentColor;
   /** Mono vs Dual palette mode. */
   paletteMode: PaletteMode;
+  /** Whether to render the DayTimeline on the Time Log route. */
+  dayTimelineVisible: boolean;
   /** True until the first hydrate completes — used to avoid flicker. */
   hydrated: boolean;
   error: string | null;
@@ -94,6 +99,7 @@ export interface PrefsStoreActions {
   setDensity: (density: DensityPref) => Promise<void>;
   setAccent: (accent: AccentColor) => Promise<void>;
   setPaletteMode: (mode: PaletteMode) => Promise<void>;
+  setDayTimelineVisible: (visible: boolean) => Promise<void>;
   setAppIcon: (icon: string) => Promise<void>;
 }
 
@@ -222,6 +228,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   density: DEFAULT_DENSITY,
   accent: DEFAULT_ACCENT,
   paletteMode: DEFAULT_PALETTE_MODE,
+  dayTimelineVisible: DEFAULT_DAY_TIMELINE_VISIBLE,
   hydrated: false,
   error: null,
 
@@ -236,6 +243,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         accentRaw,
         currencyRaw,
         paletteModeRaw,
+        dayTimelineVisible,
       ] = await Promise.all([
         getDailyGoal(),
         getHourlyRate(),
@@ -245,6 +253,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         getAccentColor().catch(() => DEFAULT_ACCENT as string),
         getCurrency().catch(() => DEFAULT_CURRENCY as string),
         getPaletteMode().catch(() => DEFAULT_PALETTE_MODE as string),
+        getDayTimelineVisible().catch(() => DEFAULT_DAY_TIMELINE_VISIBLE),
       ]);
       const accent: AccentColor = isAccentId(accentRaw)
         ? accentRaw
@@ -273,6 +282,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         accent,
         currency,
         paletteMode,
+        dayTimelineVisible,
         hydrated: true,
         error: null,
       });
@@ -346,6 +356,15 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
       /* swallow — frontend can still drive the picker UI */
     }
     set({ paletteMode: mode });
+  },
+
+  setDayTimelineVisible: async (visible) => {
+    try {
+      await invokeSetDayTimelineVisible(visible);
+    } catch {
+      /* swallow — best-effort; the UI state is still authoritative */
+    }
+    set({ dayTimelineVisible: visible });
   },
 
   setAppIcon: async (icon) => {

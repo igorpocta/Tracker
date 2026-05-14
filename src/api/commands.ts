@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   ActiveTimerState,
+  CacheStats,
   DensityPref,
   FontSizePref,
   IssueRow,
@@ -129,6 +130,11 @@ export function getSuggestedIssues(limit?: number): Promise<IssueRow[]> {
 /** `refresh_cache(): number` — pulls latest issues from Jira; returns count. */
 export function refreshCache(): Promise<number> {
   return invoke<number>("refresh_cache");
+}
+
+/** `get_cache_stats(): CacheStats` — counts of cached issues + worklogs. */
+export function getCacheStats(): Promise<CacheStats> {
+  return invoke<CacheStats>("get_cache_stats");
 }
 
 // -----------------------------------------------------------------------------
@@ -310,4 +316,16 @@ export function getPaletteMode(): Promise<string> {
 
 export function setPaletteMode(mode: string): Promise<void> {
   return invoke<void>("set_palette_mode", { mode });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 14: day timeline visibility
+// -----------------------------------------------------------------------------
+
+export function getDayTimelineVisible(): Promise<boolean> {
+  return invoke<boolean>("get_day_timeline_visible");
+}
+
+export function setDayTimelineVisible(visible: boolean): Promise<void> {
+  return invoke<void>("set_day_timeline_visible", { visible });
 }

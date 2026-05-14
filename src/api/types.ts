@@ -141,3 +141,9 @@ export interface RefreshAllResult {
   issues: number;
   worklogs: number;
 }
+
+/** Result of `get_cache_stats` — counts of records currently in the local cache. */
+export interface CacheStats {
+  issues: number;
+  worklogs_local: number;
+}
