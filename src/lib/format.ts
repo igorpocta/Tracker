@@ -1,0 +1,103 @@
+/**
+ * Small set of duration / time formatters shared across the main app.
+ *
+ * All helpers are pure functions over numbers; they have no React or Tauri
+ * dependency so they're trivial to unit-test from Vitest.
+ */
+
+/** Pad a non-negative integer to at least 2 digits with leading zeros. */
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+/**
+ * Format a duration (in **seconds**) as `HH:MM:SS`. Negative values are
+ * clamped to 0. The hours component is not truncated to 2 digits — a
+ * marathon timer reading `123:45:06` is unusual but legitimate.
+ */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00:00";
+  const s = Math.floor(seconds);
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(secs)}`;
+}
+
+/**
+ * Short human-readable duration: `2h 15m`, `15m`, `45s`. Useful for the
+ * worklog history rows where `HH:MM:SS` precision would be noisy.
+ */
+export function formatDurationShort(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  const s = Math.floor(seconds);
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (minutes > 0) return `${minutes}m`;
+  return `${s}s`;
+}
+
+/** Format hours like `7.5h` with one decimal, trimming trailing zero. */
+export function formatHours(hours: number): string {
+  if (!Number.isFinite(hours) || hours <= 0) return "0h";
+  const rounded = Math.round(hours * 10) / 10;
+  // Strip trailing `.0`.
+  const s = Number.isInteger(rounded) ? `${rounded}` : `${rounded.toFixed(1)}`;
+  return `${s}h`;
+}
+
+/**
+ * Relative time-ago. Operates on either a Date or a unix-epoch number (we
+ * try to detect seconds vs. milliseconds automatically: anything < 1e12 is
+ * treated as seconds). Always rounds to the nearest unit.
+ */
+export function formatRelativeTime(
+  value: Date | number,
+  now: Date = new Date(),
+): string {
+  const past =
+    value instanceof Date
+      ? value
+      : new Date(value < 1e12 ? value * 1000 : value);
+  const diffMs = now.getTime() - past.getTime();
+  if (diffMs < 0) return "just now";
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 45) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(days / 365);
+  return `${years}y ago`;
+}
+
+/** Format a timestamp as a `HH:MM` clock time in the user's local timezone. */
+export function formatClockTime(value: Date | number): string {
+  const d =
+    value instanceof Date
+      ? value
+      : new Date(value < 1e12 ? value * 1000 : value);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/**
+ * Returns true iff `valueSeconds` (unix epoch in seconds) falls within
+ * today's calendar day in the supplied (or system) timezone.
+ */
+export function isToday(valueSeconds: number, now: Date = new Date()): boolean {
+  const d = new Date(valueSeconds * 1000);
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
