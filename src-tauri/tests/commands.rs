@@ -376,7 +376,8 @@ async fn test_jira_connection_inner_rejects_bogus_url() {
 fn fresh_state() -> (TempDir, AppState) {
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("t.db")).unwrap();
-    (dir, AppState::new(db))
+    let app_data_dir = dir.path().to_path_buf();
+    (dir, AppState::new(db, app_data_dir))
 }
 
 #[test]

@@ -1,8 +1,8 @@
 //! On-disk configuration for the Tracker app.
 //!
 //! The Jira API token is intentionally **not** stored here — it lives in the
-//! OS keychain and is retrieved through [`crate::keychain::load_jira_token`]
-//! at use sites.
+//! file-based secret store (`secret.toml` inside the app data dir) and is
+//! retrieved through [`crate::keychain::load_jira_token`] at use sites.
 
 use std::fs;
 use std::io;

@@ -11,7 +11,7 @@ use crate::state::AppState;
 
 /// Returns `true` if we have everything required to talk to Jira: an in-memory
 /// `JiraConfig`, an in-memory `JiraClient`, and (implicitly, since the client
-/// is only built when both exist) a keychain token.
+/// is only built when both exist) a Jira API token in the secret file.
 #[tauri::command]
 pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let has_cfg = state.jira_config.read().unwrap().is_some();
@@ -27,8 +27,8 @@ pub struct SaveConfigArgs {
     pub token: String,
 }
 
-/// Persist the supplied Jira configuration to disk + keychain and rebuild the
-/// in-memory client. Emits a `config-changed` event on success.
+/// Persist the supplied Jira configuration to disk + secret file and rebuild
+/// the in-memory client. Emits a `config-changed` event on success.
 #[tauri::command]
 pub async fn save_config(
     app: tauri::AppHandle,
@@ -41,7 +41,8 @@ pub async fn save_config(
         .map_err(|e| e.to_string())?
         .join("config.toml");
     config::save_to_path(&path, &args.config).map_err(|e| e.to_string())?;
-    crate::keychain::save_jira_token(&args.token).map_err(|e| e.to_string())?;
+    crate::keychain::save_jira_token(&state.app_data_dir, &args.token)
+        .map_err(|e| e.to_string())?;
 
     *state.jira_config.write().unwrap() = Some(args.config);
     state.try_build_client().map_err(|e| e.to_string())?;
@@ -117,17 +118,17 @@ pub async fn test_jira_connection(
 //
 // `update_config_inner` and `sign_out_inner` are factored as Tauri-free
 // helpers so unit tests can drive them with a tempdir-backed config path
-// (and inject closures around the keychain calls, which would otherwise
-// require macOS keychain UI access in CI).
+// (and inject closures around the secret-store calls so tests don't need to
+// agree on a particular on-disk location).
 // -----------------------------------------------------------------------------
 
 /// Pure helper for [`update_config`]: writes `config.toml`, optionally pushes
-/// `new_token` into the keychain (via `save_token`), and rebuilds the in-memory
-/// [`JiraClient`] from `state`.
+/// `new_token` into the secret file (via `save_token`), and rebuilds the
+/// in-memory [`JiraClient`] from `state`.
 ///
 /// `save_token` is a closure rather than a direct call to
-/// [`crate::keychain::save_jira_token`] so tests can run without touching the
-/// real OS keychain.
+/// [`crate::keychain::save_jira_token`] so tests can run without depending on
+/// a particular secret-file location.
 pub fn update_config_inner<F>(
     state: &AppState,
     config_path: &Path,
@@ -143,7 +144,7 @@ where
         save_token(tok)?;
     }
     *state.jira_config.write().unwrap() = Some(new_cfg);
-    // try_build_client picks up the (possibly new) token from the keychain.
+    // try_build_client picks up the (possibly new) token from the secret file.
     state.try_build_client().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -185,7 +186,7 @@ pub async fn get_current_config(
     Ok(state.jira_config_cloned())
 }
 
-/// Update the persisted Jira config and (optionally) the keychain token.
+/// Update the persisted Jira config and (optionally) the on-disk token.
 ///
 /// The frontend can omit `new_token` if only the URL or email is changing
 /// (the existing token is still valid). Emits `config-changed` on success.
@@ -198,13 +199,14 @@ pub async fn update_config(
 ) -> Result<(), String> {
     let path = config_path_for(&app)?;
     update_config_inner(&state, &path, new_cfg, new_token, |tok| {
-        crate::keychain::save_jira_token(tok).map_err(|e| e.to_string())
+        crate::keychain::save_jira_token(&state.app_data_dir, tok)
+            .map_err(|e| e.to_string())
     })?;
     let _ = app.emit("config-changed", ());
     Ok(())
 }
 
-/// Clear the Jira config + keychain token and reset the in-memory state.
+/// Clear the Jira config + on-disk token and reset the in-memory state.
 ///
 /// Emits `config-changed` and tells the main window to navigate back to setup.
 #[tauri::command]
@@ -214,7 +216,8 @@ pub async fn sign_out(
 ) -> Result<(), String> {
     let path = config_path_for(&app)?;
     sign_out_inner(&state, &path, || {
-        crate::keychain::clear_jira_token().map_err(|e| e.to_string())
+        crate::keychain::clear_jira_token(&state.app_data_dir)
+            .map_err(|e| e.to_string())
     })?;
     let _ = app.emit("config-changed", ());
     let _ = app.emit("main-window:navigate", "setup");

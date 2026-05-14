@@ -31,7 +31,8 @@ fn fresh_state() -> (tauri::App<tauri::test::MockRuntime>, TempDir) {
     let app = tauri::test::mock_app();
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("t.db")).unwrap();
-    let state = AppState::new(db);
+    let app_data_dir = dir.path().to_path_buf();
+    let state = AppState::new(db, app_data_dir);
     app.handle().manage(state);
     (app, dir)
 }

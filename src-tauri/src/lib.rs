@@ -28,7 +28,7 @@ pub fn run() {
 
             let db_path = app_data_dir.join("tracker.db");
             let db = cache::Db::open(&db_path).expect("open db");
-            let state = AppState::new(db);
+            let state = AppState::new(db, app_data_dir.clone());
 
             // Best-effort: load on-disk config and rebuild the Jira client.
             // Missing/invalid config is fine — the setup wizard will create it.
