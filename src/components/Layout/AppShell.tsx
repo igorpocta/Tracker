@@ -51,6 +51,7 @@ import { StopDialog } from "../Timer/TimerControls";
 import { CommandBar } from "./CommandBar";
 import { IconSidebar } from "./IconSidebar";
 import { StartTrackingBar } from "./StartTrackingBar";
+import { SyncBanner } from "./SyncBanner";
 
 /** Number of days of worklog history we pull on startup / manual refresh. */
 const REFRESH_WINDOW_DAYS = 30;
@@ -333,8 +334,19 @@ export function AppShell() {
 
       <div className="flex-1 min-w-0 flex">
         <div className="flex-1 min-w-0 flex flex-col">
+          {!isSettings && <SyncBanner />}
           {!isSettings && (
-            <div className="px-6 pt-4 pb-2">
+            // Phase 18B — Item 20: top toolbar sits on the same `--bg-app`
+            // as the route body so there's no visible seam between the
+            // tracking bar and the content below it. The single hairline at
+            // the bottom hints at the boundary without being a hard divider.
+            <div
+              className="px-6 pt-4 pb-3"
+              style={{
+                background: "var(--bg-app)",
+                borderBottom: "1px solid var(--border-subtle)",
+              }}
+            >
               <StartTrackingBar
                 onPickIssue={handlePickIssue}
                 onStop={active ? () => setStopOpen(true) : undefined}

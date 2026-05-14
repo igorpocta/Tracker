@@ -20,8 +20,9 @@ import { clsx } from "clsx";
 import { MessageSquare, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { searchIssuesCache } from "../../api/commands";
+import { listFavorites, searchIssuesCache } from "../../api/commands";
 import type { ActiveTimerState } from "../../api/types";
+import { FavoriteStar } from "../Favorites/FavoriteStar";
 import { useNow } from "../../hooks/useNow";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
@@ -93,7 +94,30 @@ function IdleBar({
     enabled: debounced.length > 0,
   });
 
-  const results = q.data ?? [];
+  // Phase 18B — Item 26: favorites are surfaced at the top of the dropdown.
+  const favoritesQ = useQuery({
+    queryKey: ["favorites"],
+    queryFn: listFavorites,
+    staleTime: 30_000,
+  });
+  const favorites = favoritesQ.data ?? [];
+  const favoriteKeys = new Set(favorites.map((f) => f.issue_key));
+
+  // Merge: favorites first (matched against the query if any), then the rest
+  // of the search results, de-duplicated.
+  const baseResults = q.data ?? [];
+  const filteredFavorites = debounced
+    ? favorites.filter(
+        (f) =>
+          f.issue_key.toLowerCase().includes(debounced.toLowerCase()) ||
+          (f.summary ?? "").toLowerCase().includes(debounced.toLowerCase()),
+      )
+    : favorites;
+  const merged = [
+    ...filteredFavorites,
+    ...baseResults.filter((r) => !favoriteKeys.has(r.issue_key)),
+  ];
+  const results = merged;
 
   // Close the dropdown on outside click.
   useEffect(() => {
@@ -142,7 +166,7 @@ function IdleBar({
             setOpen(true);
             setHighlight(0);
           }}
-          onFocus={() => setOpen(query.length > 0)}
+          onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               setOpen(false);
@@ -172,13 +196,15 @@ function IdleBar({
           {clock}
         </span>
 
-        {open && debounced.length > 0 && (
+        {open && (debounced.length > 0 || filteredFavorites.length > 0) && (
           <SearchDropdown
             results={results}
+            favoriteKeys={favoriteKeys}
             highlight={highlight}
             onPick={handlePick}
             onHover={setHighlight}
-            loading={q.isFetching && results.length === 0}
+            loading={q.isFetching && results.length === 0 && debounced.length > 0}
+            showingOnlyFavorites={debounced.length === 0}
           />
         )}
       </div>
@@ -251,16 +277,20 @@ function IdleBar({
 
 function SearchDropdown({
   results,
+  favoriteKeys,
   highlight,
   onPick,
   onHover,
   loading,
+  showingOnlyFavorites,
 }: {
   results: import("../../api/types").IssueRow[];
+  favoriteKeys: Set<string>;
   highlight: number;
   onPick: (key: string) => void;
   onHover: (idx: number) => void;
   loading: boolean;
+  showingOnlyFavorites: boolean;
 }) {
   return (
     <div
@@ -270,6 +300,11 @@ function SearchDropdown({
                  bg-[var(--bg-surface)] shadow-[var(--shadow-md)]
                  max-h-[420px] overflow-y-auto"
     >
+      {showingOnlyFavorites && results.length > 0 && (
+        <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+          ★ Oblíbené
+        </div>
+      )}
       {loading && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
           Vyhledávání…
@@ -280,34 +315,40 @@ function SearchDropdown({
           Žádné odpovídající úkoly.
         </div>
       )}
-      {results.map((iss, idx) => (
-        <button
-          key={iss.issue_key}
-          type="button"
-          role="option"
-          aria-selected={idx === highlight}
-          onMouseEnter={() => onHover(idx)}
-          onMouseDown={(e) => {
-            // Use mousedown so the click registers before the outside-click
-            // listener fires on the input losing focus.
-            e.preventDefault();
-            onPick(iss.issue_key);
-          }}
-          className={clsx(
-            "w-full text-left flex items-center gap-2 px-3 py-2 text-xs",
-            idx === highlight
-              ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
-              : "text-[var(--text-secondary)]",
-          )}
-        >
-          <span className="font-mono uppercase text-[11px] text-[var(--text-tertiary)] w-20 shrink-0">
-            {iss.issue_key}
-          </span>
-          <span className="truncate flex-1 text-[var(--text-primary)]">
-            {iss.summary || "(načítá se…)"}
-          </span>
-        </button>
-      ))}
+      {results.map((iss, idx) => {
+        const isFav = favoriteKeys.has(iss.issue_key);
+        return (
+          <div
+            key={iss.issue_key}
+            role="option"
+            aria-selected={idx === highlight}
+            onMouseEnter={() => onHover(idx)}
+            className={clsx(
+              "w-full flex items-center gap-2 px-3 py-2 text-xs",
+              idx === highlight
+                ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
+                : "text-[var(--text-secondary)]",
+            )}
+          >
+            <FavoriteStar issueKey={iss.issue_key} initial={isFav} size={12} />
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onPick(iss.issue_key);
+              }}
+              className="flex-1 min-w-0 text-left flex items-center gap-2"
+            >
+              <span className="font-mono uppercase text-[11px] text-[var(--text-tertiary)] w-20 shrink-0">
+                {iss.issue_key}
+              </span>
+              <span className="truncate flex-1 text-[var(--text-primary)]">
+                {iss.summary || "(načítá se…)"}
+              </span>
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

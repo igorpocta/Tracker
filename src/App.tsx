@@ -67,9 +67,10 @@ export default function App() {
   }, []);
 
   if (initialRoute === null) {
-    // Tiny pre-boot splash; the IPC call is fast enough that this rarely
-    // flashes, but better than rendering the wrong screen for one frame.
-    return <div aria-hidden className="min-h-screen" />;
+    // Phase 18B — Item 19: centered loading splash so the brief boot
+    // window doesn't flash an empty viewport. Spinner uses the accent so
+    // hot-reloading colors are visible even pre-hydration.
+    return <BootSplash />;
   }
 
   return (
@@ -95,6 +96,45 @@ export default function App() {
         </MemoryRouter>
       </QueryClientProvider>
     </ErrorBoundary>
+  );
+}
+
+/**
+ * Phase 18B — Item 19: centred Tracker boot splash.
+ *
+ * We can't render an arbitrarily-themed surface because the prefs store
+ * hasn't loaded yet — so we lean on the CSS variables that are already set
+ * by `index.css` for the default theme. Falling back gracefully here keeps
+ * the layout calm even if hydration hangs for a beat.
+ */
+function BootSplash() {
+  return (
+    <div
+      aria-busy
+      className="min-h-screen w-full flex flex-col items-center justify-center gap-3"
+      style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+    >
+      <div
+        className="text-[44px] leading-none italic font-semibold select-none"
+        style={{
+          color: "var(--accent)",
+          fontFamily: "var(--font-script), serif",
+        }}
+      >
+        Tracker.
+      </div>
+      <div className="flex items-center gap-2 text-[var(--text-tertiary)] text-xs">
+        <span
+          className="inline-block w-3 h-3 rounded-full animate-spin"
+          style={{
+            border: "2px solid var(--accent-soft)",
+            borderTopColor: "var(--accent)",
+          }}
+          aria-hidden
+        />
+        Načítání…
+      </div>
+    </div>
   );
 }
 

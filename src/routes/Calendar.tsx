@@ -35,6 +35,12 @@ import {
 } from "../lib/dates";
 import { formatDurationShort, formatHours } from "../lib/format";
 
+// Phase 18B — Item 29: short month names used in the Yearly view.
+const MONTHS_SHORT = [
+  "Led", "Úno", "Bře", "Dub", "Kvě", "Čvn",
+  "Čvc", "Srp", "Zář", "Říj", "Lis", "Pro",
+];
+
 const MONTHS = [
   "Leden",
   "Únor",
@@ -56,6 +62,59 @@ export default function Calendar() {
   const [month, setMonth] = useState(today.getMonth());
   const [view, setView] = useState<"monthly" | "yearly">("monthly");
 
+  return (
+    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">
+            Přehled kalendáře
+          </h1>
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "monthly", label: "Měsíční" },
+              { value: "yearly", label: "Roční" },
+            ]}
+          />
+          {view === "monthly" ? (
+            <YearMonthPickers
+              year={year}
+              month={month}
+              onYearChange={setYear}
+              onMonthChange={setMonth}
+            />
+          ) : (
+            <YearPicker year={year} onYearChange={setYear} />
+          )}
+        </div>
+      </div>
+
+      {view === "monthly" ? (
+        <MonthlyView year={year} month={month} today={today} />
+      ) : (
+        <YearlyView
+          year={year}
+          today={today}
+          onPickMonth={(m) => {
+            setMonth(m);
+            setView("monthly");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MonthlyView({
+  year,
+  month,
+  today,
+}: {
+  year: number;
+  month: number;
+  today: Date;
+}) {
   const monthStart = useMemo(
     () => startOfMonth(new Date(year, month, 1)),
     [year, month],
@@ -74,37 +133,15 @@ export default function Calendar() {
   const dayTotals = useMemo(() => totalsByDay(rows), [rows]);
   const monthTotal = rows.reduce((a, r) => a + r.duration_s, 0);
 
-  // Build the calendar cells: pad leading days from the previous month with
-  // empty placeholders so the grid starts on Monday.
   const monthDays: Date[] = [];
   for (let i = 0; i < monthEnd.getDate(); i++) {
     monthDays.push(addDays(monthStart, i));
   }
-  // JS getDay: Sunday=0. We want Monday=0.
   const leadingBlanks = (monthStart.getDay() + 6) % 7;
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Přehled kalendáře
-          </h1>
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "monthly", label: "Měsíční" },
-              { value: "yearly", label: "Roční" },
-            ]}
-          />
-          <YearMonthPickers
-            year={year}
-            month={month}
-            onYearChange={setYear}
-            onMonthChange={setMonth}
-          />
-        </div>
+    <>
+      <div className="flex items-baseline justify-end">
         <div className="text-right">
           <div className="text-xl font-semibold text-[var(--accent)] tabular-nums">
             {monthTotal > 0 ? formatDurationShort(monthTotal) : "0m"}
@@ -114,8 +151,6 @@ export default function Calendar() {
           </div>
         </div>
       </div>
-
-      {/* Weekday header */}
       <div className="grid grid-cols-7 gap-2 px-1">
         {["PO", "ÚT", "ST", "ČT", "PÁ", "SO", "NE"].map((d) => (
           <div
@@ -144,7 +179,182 @@ export default function Calendar() {
           );
         })}
       </div>
+    </>
+  );
+}
+
+/**
+ * Phase 18B — Item 29: yearly view.
+ *
+ * 12 mini-calendars laid out 3×4. Each cell colors itself proportional to
+ * the hours logged that day; clicking a month header jumps to its Monthly
+ * view.
+ */
+function YearlyView({
+  year,
+  today,
+  onPickMonth,
+}: {
+  year: number;
+  today: Date;
+  onPickMonth: (month: number) => void;
+}) {
+  const yearStart = useMemo(() => new Date(year, 0, 1), [year]);
+  const yearEnd = useMemo(() => new Date(year, 11, 31), [year]);
+
+  const fromUnix = dayStartUnixS(yearStart);
+  const toUnix = dayEndUnixS(yearEnd);
+
+  const q = useQuery({
+    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryFn: () => getWorklogsForRange(fromUnix, toUnix),
+  });
+
+  const rows = q.data ?? [];
+  const dayTotals = useMemo(() => totalsByDay(rows), [rows]);
+  const yearTotal = rows.reduce((a, r) => a + r.duration_s, 0);
+
+  return (
+    <>
+      <div className="flex items-baseline justify-end">
+        <div className="text-right">
+          <div className="text-xl font-semibold text-[var(--accent)] tabular-nums">
+            {yearTotal > 0 ? formatDurationShort(yearTotal) : "0m"}
+          </div>
+          <div className="text-[11px] text-[var(--text-tertiary)]">
+            Celkem za rok {year}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {Array.from({ length: 12 }, (_, m) => (
+          <MiniMonth
+            key={`${year}-${m}`}
+            year={year}
+            month={m}
+            today={today}
+            dayTotals={dayTotals}
+            onPick={() => onPickMonth(m)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function MiniMonth({
+  year,
+  month,
+  today,
+  dayTotals,
+  onPick,
+}: {
+  year: number;
+  month: number;
+  today: Date;
+  dayTotals: Map<string, number>;
+  onPick: () => void;
+}) {
+  const monthStart = startOfMonth(new Date(year, month, 1));
+  const monthEnd = endOfMonth(monthStart);
+  const leadingBlanks = (monthStart.getDay() + 6) % 7;
+  const days: Date[] = [];
+  for (let i = 0; i < monthEnd.getDate(); i++) {
+    days.push(addDays(monthStart, i));
+  }
+  const monthSeconds = days.reduce(
+    (a, d) => a + (dayTotals.get(formatKey(d)) ?? 0),
+    0,
+  );
+
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
+                    bg-[var(--bg-surface)] p-3">
+      <button
+        type="button"
+        onClick={onPick}
+        className="w-full flex items-baseline justify-between mb-2 group"
+      >
+        <span className="text-sm font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors duration-150">
+          {MONTHS_SHORT[month]}
+        </span>
+        <span className="text-[10px] font-mono tabular-nums text-[var(--text-tertiary)]">
+          {monthSeconds > 0 ? formatDurationShort(monthSeconds) : "—"}
+        </span>
+      </button>
+      <div className="grid grid-cols-7 gap-[2px]">
+        {["P", "Ú", "S", "Č", "P", "S", "N"].map((d, i) => (
+          <div
+            key={`w-${i}`}
+            className="text-[9px] text-center text-[var(--text-tertiary)] mb-0.5"
+          >
+            {d}
+          </div>
+        ))}
+        {Array.from({ length: leadingBlanks }).map((_, i) => (
+          <div key={`b-${i}`} className="h-4" />
+        ))}
+        {days.map((d) => {
+          const seconds = dayTotals.get(formatKey(d)) ?? 0;
+          const hours = seconds / 3600;
+          const fill = Math.min(1, hours / 8);
+          const isToday = isSameDay(d, today);
+          return (
+            <div
+              key={d.toISOString()}
+              className={clsx(
+                "h-4 rounded-[2px] flex items-center justify-center",
+                "text-[8px] font-mono tabular-nums",
+                isToday && "ring-1 ring-[var(--accent)]",
+              )}
+              style={{
+                background:
+                  fill > 0
+                    ? `color-mix(in srgb, var(--accent) ${Math.round(
+                        15 + fill * 65,
+                      )}%, var(--bg-surface))`
+                    : "transparent",
+                color:
+                  fill > 0.5
+                    ? "var(--accent-text, var(--text-primary))"
+                    : "var(--text-tertiary)",
+              }}
+              title={`${d.getDate()}. ${month + 1}. — ${formatDurationShort(seconds)}`}
+            >
+              {d.getDate()}
+            </div>
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function YearPicker({
+  year,
+  onYearChange,
+}: {
+  year: number;
+  onYearChange: (y: number) => void;
+}) {
+  const years = useMemo(() => {
+    const now = new Date().getFullYear();
+    return Array.from({ length: 6 }, (_, i) => now - 3 + i);
+  }, []);
+  return (
+    <select
+      value={year}
+      onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
+      className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
+                 cursor-pointer focus:outline-none"
+      aria-label="Rok"
+    >
+      {years.map((y) => (
+        <option key={y} value={y}>
+          {y}
+        </option>
+      ))}
+    </select>
   );
 }
 

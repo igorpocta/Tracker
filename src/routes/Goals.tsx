@@ -30,7 +30,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { getWorklogsForRange } from "../api/commands";
+import { GoalsPrediction } from "../components/Goals/GoalsPrediction";
+import { useCalendarMask, isWorkingDayLocal } from "../hooks/useCalendarMask";
 import {
+  addDays,
   dayEndUnixS,
   dayStartUnixS,
   endOfMonth,
@@ -88,9 +91,29 @@ export default function Goals() {
     .filter((r) => isSameDay(new Date(r.started_at * 1000), today))
     .reduce((a, r) => a + r.duration_s, 0);
 
-  const workingDaysInMonth = countWorkingDays(monthStart, monthEnd);
-  const workingDaysElapsed = countWorkingDays(monthStart, today);
-  const remainingWorkingDays = workingDaysInMonth - workingDaysElapsed;
+  // Phase 18B — Item 3: prefer the user-configured working-week mask +
+  // non-working-day calendar when counting working days. Falls back to the
+  // legacy Mon–Fri assumption if the data hasn't loaded yet.
+  const { mask, nonWorking } = useCalendarMask(monthStart, monthEnd);
+
+  const workingDaysInMonth = useMemo(
+    () => countWorkingDaysMasked(monthStart, monthEnd, mask, nonWorking),
+    [monthStart, monthEnd, mask, nonWorking],
+  );
+  const workingDaysElapsed = useMemo(
+    () => countWorkingDaysMasked(monthStart, today, mask, nonWorking),
+    [monthStart, today, mask, nonWorking],
+  );
+  const remainingWorkingDays = Math.max(
+    0,
+    workingDaysInMonth - workingDaysElapsed,
+  );
+  // Strictly future working days (today is already counted in elapsed).
+  const futureWorkingDays = useMemo(() => {
+    const tomorrow = addDays(today, 1);
+    if (tomorrow > monthEnd) return 0;
+    return countWorkingDaysMasked(tomorrow, monthEnd, mask, nonWorking);
+  }, [today, monthEnd, mask, nonWorking]);
 
   const monthGoalSeconds = workingDaysInMonth * dailyGoalSeconds;
   const expectedByTodaySeconds = workingDaysElapsed * dailyGoalSeconds;
@@ -138,6 +161,14 @@ export default function Goals() {
         goal={monthGoalSeconds}
         valueLabel={`cíl: ${workingDaysInMonth * dailyGoalHours}h`}
         percent={monthPct}
+      />
+
+      {/* Phase 18B — Item 3: month-end prediction card. */}
+      <GoalsPrediction
+        actualSeconds={monthSeconds}
+        monthlyGoalSeconds={monthGoalSeconds}
+        workingDaysElapsed={workingDaysElapsed}
+        workingDaysRemaining={futureWorkingDays}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -261,6 +292,28 @@ export function countWorkingDays(from: Date, to: Date): number {
   while (d <= to) {
     const dow = d.getDay();
     if (dow !== 0 && dow !== 6) n++;
+    d.setDate(d.getDate() + 1);
+  }
+  return n;
+}
+
+/**
+ * Phase 18B — Item 3: count working days in `[from, to]` inclusive using the
+ * user's working-week mask + non-working-day calendar. Falls back to Mon–Fri
+ * when the mask is unavailable.
+ */
+function countWorkingDaysMasked(
+  from: Date,
+  to: Date,
+  mask: number,
+  nonWorking: Set<string>,
+): number {
+  if (to < from) return 0;
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  let n = 0;
+  while (d <= to) {
+    if (isWorkingDayLocal(d, mask, nonWorking)) n++;
     d.setDate(d.getDate() + 1);
   }
   return n;

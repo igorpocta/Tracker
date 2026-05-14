@@ -20,7 +20,7 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, MessageSquare, Plus, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
 import {
@@ -65,6 +65,9 @@ export default function TimeLog() {
 
   /** Rows the user just clicked "delete" on — optimistically hidden. */
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  /** Phase 18B — Item 31: row id flashed by the day-timeline click. */
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const [from, to] = useMemo(
@@ -206,7 +209,22 @@ export default function TimeLog() {
       </div>
 
       {/* Day timeline (optional, user pref) ----------------------------- */}
-      {dayTimelineVisible && <DayTimeline rows={rows} day={from} />}
+      {dayTimelineVisible && (
+        <DayTimeline
+          rows={rows}
+          day={from}
+          onSelect={(row) => {
+            const key = String(row.id ?? row.jira_worklog_id ?? row.started_at);
+            setHighlightId(key);
+            rowRefs.current[key]?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+            // Clear highlight after a short flash.
+            window.setTimeout(() => setHighlightId(null), 1500);
+          }}
+        />
+      )}
 
       {/* Worklog rows ---------------------------------------------------- */}
       <div className="flex flex-col gap-1">
@@ -223,14 +241,21 @@ export default function TimeLog() {
         )}
         {[...rows]
           .sort((a, b) => b.started_at - a.started_at)
-          .map((r) => (
-            <WorklogRow
-              key={r.id ?? `${r.issue_key}-${r.started_at}`}
-              row={r}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-            />
-          ))}
+          .map((r) => {
+            const key = String(r.id ?? r.jira_worklog_id ?? r.started_at);
+            return (
+              <WorklogRow
+                key={r.id ?? `${r.issue_key}-${r.started_at}`}
+                row={r}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+                highlighted={highlightId === key}
+                refCallback={(el) => {
+                  rowRefs.current[key] = el;
+                }}
+              />
+            );
+          })}
       </div>
 
       <div className="flex justify-end">
@@ -292,9 +317,18 @@ interface WorklogRowProps {
     },
   ) => Promise<void>;
   onDelete: (row: ApiWorklogRow) => void;
+  /** Phase 18B — Item 31: flash the row when the user picks it from the timeline. */
+  highlighted?: boolean;
+  refCallback?: (el: HTMLDivElement | null) => void;
 }
 
-function WorklogRow({ row, onUpdate, onDelete }: WorklogRowProps) {
+function WorklogRow({
+  row,
+  onUpdate,
+  onDelete,
+  highlighted,
+  refCallback,
+}: WorklogRowProps) {
   const started = new Date(row.started_at * 1000);
   const ended = new Date((row.started_at + row.duration_s) * 1000);
 
@@ -346,9 +380,17 @@ function WorklogRow({ row, onUpdate, onDelete }: WorklogRowProps) {
 
   return (
     <div
+      ref={refCallback}
       className="flex items-center gap-3 h-12 px-3 rounded-[var(--radius-md)]
-                 bg-[var(--bg-surface)] border border-[var(--border-subtle)]
-                 hover:bg-[var(--bg-hover)] transition-colors duration-150"
+                 bg-[var(--bg-surface)] border transition-colors duration-300"
+      style={{
+        borderColor: highlighted
+          ? "var(--accent)"
+          : "var(--border-subtle)",
+        background: highlighted
+          ? "var(--accent-soft)"
+          : "var(--bg-surface)",
+      }}
     >
       <IssuePill issueKey={row.issue_key} />
       {editing === "comment" ? (
