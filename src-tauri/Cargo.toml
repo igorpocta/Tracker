@@ -18,8 +18,50 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = [] }
+# Tauri core (keep, add features)
+tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
+tauri-plugin-store = "2.4"
+tauri-plugin-deep-link = "2.4"
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+# HTTP / Jira API
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+url = "2.5"
+
+# Local HTTP server
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+hyper = "1"
+
+# Keychain
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization (keep existing)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors
+thiserror = "1"
+anyhow = "1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+tokio = { version = "1", features = ["test-util", "macros"] }
