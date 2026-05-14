@@ -1,17 +1,15 @@
 /**
- * Today route — the default landing view.
+ * Today route — hero timer + unified search + today's worklog list.
  *
  * Sections:
- *   1. Big timer card (running/idle) with the current issue.
- *   2. Quick-start panel: search box + Recent / Suggested issues.
- *   3. Today's worklog list (from `get_worklogs_for_range`).
- *   4. Daily goal progress + estimated earnings.
- *
- * All data is sourced from the backend; we re-invalidate on the
- * `worklog-saved` and `auto-sync-complete` events (wired up in `AppShell`).
+ *   1. Hero timer card with big accent numerals when running.
+ *   2. Daily goal bar + estimated earnings (when hourly rate is set).
+ *   3. Unified search panel — single search bar; "Suggested" and "Recent"
+ *      fall back when no query is entered.
+ *   4. Today's worklog list.
  */
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Play, Square } from "lucide-react";
+import { Pencil, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
@@ -33,11 +31,8 @@ import { SearchInput } from "../components/Issues/SearchInput";
 import { Timer } from "../components/Timer/Timer";
 import { WorklogList } from "../components/Worklog/WorklogList";
 import { useNow } from "../hooks/useNow";
-import {
-  todayEndUnixS,
-  todayStartUnixS,
-} from "../lib/dates";
-import { isToday as isTodayCheck } from "../lib/format";
+import { todayEndUnixS, todayStartUnixS } from "../lib/dates";
+import { formatMoney, isToday as isTodayCheck } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 import { elapsedSeconds, useTimerStore } from "../stores/timerStore";
 
@@ -68,6 +63,7 @@ export default function Today() {
   const todayRange = useMemo(() => {
     const reference = new Date(now);
     return [todayStartUnixS(reference), todayEndUnixS(reference)] as const;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Math.floor(now / 60_000)]);
 
   const todayWorklogsQ = useQuery({
@@ -114,24 +110,24 @@ export default function Today() {
 
   // ---- render --------------------------------------------------------------
   return (
-    <div className="p-6 flex flex-col gap-5 max-w-6xl mx-auto w-full">
-      {/* Timer card -------------------------------------------------------- */}
+    <div className="p-8 flex flex-col gap-6 max-w-5xl mx-auto w-full">
+      {/* Hero timer ------------------------------------------------------- */}
       <Card padding="lg">
         <div className="flex items-center justify-between gap-6 flex-wrap">
           <div className="flex flex-col gap-1 min-w-0">
-            <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+            <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               {active ? "Tracking" : "Idle"}
             </span>
-            <Timer className="text-6xl" />
-            <span className="font-mono text-xs text-neutral-400 mt-1 truncate">
-              {active ? active.issue_key : "Pick an issue to start a timer"}
+            <Timer className="text-[64px] md:text-[72px]" />
+            <span className="font-mono text-xs text-[var(--text-secondary)] mt-1 truncate">
+              {active ? active.issue_key : "Pick an issue below to start"}
             </span>
           </div>
           <div className="flex flex-col items-end gap-2">
             {active ? (
               <Button
                 variant="danger"
-                size="md"
+                size="lg"
                 onClick={ctx.openStopDialog}
                 disabled={timerBusy}
               >
@@ -143,8 +139,8 @@ export default function Today() {
                 Stop & save
               </Button>
             ) : (
-              <span className="text-xs text-neutral-500">
-                Use the list below to start a timer.
+              <span className="text-xs text-[var(--text-tertiary)]">
+                Search or pick an issue below.
               </span>
             )}
           </div>
@@ -155,8 +151,8 @@ export default function Today() {
       <Card padding="md">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-[240px] max-w-md">
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h2 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
                 Daily goal
               </h2>
               <IconButton
@@ -171,13 +167,13 @@ export default function Today() {
               goalSeconds={dailyGoalSeconds}
             />
             {hourlyRate > 0 && (
-              <p className="text-xs text-neutral-400 mt-2">
-                Estimated value:{" "}
-                <span className="text-neutral-100 font-medium">
-                  {formatMoney(todayEarnings)} {currency}
+              <p className="text-xs text-[var(--text-tertiary)] mt-3">
+                Earned today:{" "}
+                <span className="text-[var(--text-primary)] font-medium">
+                  {formatMoney(todayEarnings, currency)}
                 </span>{" "}
-                <span className="text-neutral-500">
-                  ({hourlyRate}/h)
+                <span className="text-[var(--text-tertiary)]">
+                  ({formatMoney(hourlyRate, currency)}/h)
                 </span>
               </p>
             )}
@@ -193,13 +189,17 @@ export default function Today() {
         )}
       </Card>
 
-      {/* Quick-start panel ----------------------------------------------- */}
+      {/* Unified search -------------------------------------------------- */}
       <Card padding="md">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-3">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-3">
           Quick start
         </h2>
-        <div className="mb-3">
-          <SearchInput value={search} onChange={setSearch} placeholder="Search issues by key or summary…" />
+        <div className="mb-4">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search issues by key or summary…"
+          />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {debounced ? (
@@ -234,21 +234,17 @@ export default function Today() {
             </>
           )}
         </div>
-        <p className="mt-2 text-[11px] text-neutral-500 flex items-center gap-1">
-          <Play className="w-3 h-3" aria-hidden />
-          Click any issue to start a timer immediately.
-        </p>
       </Card>
 
       {/* Today's worklogs ------------------------------------------------ */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-neutral-800/70 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold">Today</h2>
-            <p className="text-[11px] text-neutral-500">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Today</h2>
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
               {todayWorklogsQ.data?.length ?? 0} entries ·{" "}
-              <span className="text-neutral-300">
-                {formatTotal(todaySeconds)} total
+              <span className="text-[var(--text-secondary)] font-mono tabular-nums">
+                {formatTotal(todaySeconds)}
               </span>
             </p>
           </div>
@@ -263,15 +259,6 @@ export default function Today() {
       </Card>
     </div>
   );
-}
-
-function formatMoney(value: number): string {
-  if (!Number.isFinite(value)) return "—";
-  const rounded = Math.round(value * 100) / 100;
-  return rounded.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  });
 }
 
 function formatTotal(seconds: number): string {

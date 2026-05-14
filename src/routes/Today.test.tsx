@@ -93,7 +93,7 @@ describe("Today route", () => {
   it("renders the empty timer face by default", async () => {
     renderToday();
     expect(await screen.findByText("--:--:--")).toBeInTheDocument();
-    expect(screen.getByText(/Pick an issue/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pick an issue below to start/i)).toBeInTheDocument();
   });
 
   it("loads recent issues into the quick-start panel", async () => {

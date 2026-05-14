@@ -67,7 +67,7 @@ export default function History() {
   const canGoNext = addDays(selected, 1).getTime() <= today.getTime();
 
   return (
-    <div className="p-6 flex flex-col gap-4 max-w-6xl mx-auto w-full">
+    <div className="p-8 flex flex-col gap-5 max-w-6xl mx-auto w-full">
       <Card padding="md">
         <WeekSparkline
           rows={allQ.data ?? []}
@@ -87,14 +87,14 @@ export default function History() {
         </Card>
 
         <Card padding="none" className="col-span-12 md:col-span-8 lg:col-span-9">
-          <div className="px-4 py-3 border-b border-neutral-800/70 flex items-center justify-between gap-3 flex-wrap">
+          <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
                 {formatLongDayLabel(selected)}
               </h2>
-              <p className="text-[11px] text-neutral-500">
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
                 {dayRows.length} entries ·{" "}
-                <span className="text-neutral-300 font-mono tabular-nums">
+                <span className="text-[var(--text-secondary)] font-mono tabular-nums">
                   {dayTotal > 0 ? formatDurationShort(dayTotal) : "0m"} total
                 </span>
               </p>
