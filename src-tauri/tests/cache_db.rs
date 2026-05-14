@@ -1,5 +1,6 @@
 use tempfile::TempDir;
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
+use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::Db;
 
 fn fresh_db() -> (TempDir, Db) {
@@ -127,4 +128,28 @@ fn search_matches_summary_substring_case_insensitive() {
     let hits = search(&db, "LOGIN", 10).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].issue_key, "A-1");
+}
+
+#[test]
+fn timer_singleton_overwrites_on_start() {
+    let (_d, db) = fresh_db();
+    timer_start(&db, "A-1", 1_000).unwrap();
+    timer_start(&db, "B-2", 2_000).unwrap();
+    let t = timer_get(&db).unwrap().unwrap();
+    assert_eq!(t.issue_key, "B-2");
+    assert_eq!(t.started_at, 2_000);
+}
+
+#[test]
+fn timer_stop_clears_state() {
+    let (_d, db) = fresh_db();
+    timer_start(&db, "A-1", 1).unwrap();
+    timer_stop(&db).unwrap();
+    assert!(timer_get(&db).unwrap().is_none());
+}
+
+#[test]
+fn timer_get_returns_none_when_no_timer() {
+    let (_d, db) = fresh_db();
+    assert!(timer_get(&db).unwrap().is_none());
 }
