@@ -91,6 +91,28 @@ export interface AuditEntry {
   after_json?: string | null;
   success: boolean;
   error?: string | null;
+  /** Phase 16 — id of the audit row that triggered this entry (restore/revert/retry). */
+  source_audit_id?: number | null;
+}
+
+/** Discriminated set of op kinds we recognize. Unknown strings fall through. */
+export type AuditOp =
+  | "create"
+  | "update"
+  | "delete"
+  | "move"
+  | "sync_tombstone"
+  | "undo"
+  | "restore"
+  | "revert"
+  | "retry";
+
+/** Filter args accepted by `getAuditLog`. All fields are optional. */
+export interface AuditLogFilter {
+  limit?: number;
+  beforeId?: number | null;
+  ops?: string[] | null;
+  onlyFailed?: boolean | null;
 }
 
 /** Mirrors `src-tauri/src/commands/timer.rs::ActiveTimerState`. */

@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ActiveTimerState,
   AuditEntry,
+  AuditLogFilter,
   CacheStats,
   DensityPref,
   FontSizePref,
@@ -341,9 +342,58 @@ export function moveWorklog(args: {
   });
 }
 
-/** Read the most recent `limit` audit entries (newest first). */
-export function getAuditLog(limit?: number): Promise<AuditEntry[]> {
-  return invoke<AuditEntry[]>("get_audit_log", { limit: limit ?? null });
+/**
+ * Read audit entries newest-first. Supports pagination (`beforeId`) and
+ * filtering (`ops` to restrict to specific operations, `onlyFailed` for
+ * troubleshooting). Defaults: limit 50, no filter.
+ */
+export function getAuditLog(filter?: AuditLogFilter): Promise<AuditEntry[]> {
+  return invoke<AuditEntry[]>("get_audit_log", {
+    limit: filter?.limit ?? null,
+    beforeId: filter?.beforeId ?? null,
+    ops: filter?.ops ?? null,
+    onlyFailed: filter?.onlyFailed ?? null,
+  });
+}
+
+/**
+ * Phase 16 — re-create a worklog deleted in `delete` / `sync_tombstone` audit
+ * entries. Returns the new `WorklogRow` (with a fresh `jira_worklog_id`).
+ *
+ * Note: Jira does not support resurrecting by id — this POSTs a brand-new
+ * worklog. The original deleted id stays gone; the audit log preserves the
+ * linkage via `source_audit_id`.
+ */
+export function restoreDeletedWorklog(auditId: number): Promise<WorklogRow> {
+  return invoke<WorklogRow>("restore_deleted_worklog", { auditId });
+}
+
+/**
+ * Phase 16 — push an `update` audit's `before_json` snapshot back to Jira as
+ * a fresh PUT, effectively reverting the change. Errors if the worklog has
+ * been deleted in Jira since the original update.
+ */
+export function revertWorklogUpdate(auditId: number): Promise<WorklogRow> {
+  return invoke<WorklogRow>("revert_worklog_update", { auditId });
+}
+
+/**
+ * Phase 16 — replay a failed audit action with its captured arguments. The
+ * exact request depends on the original op (create / update / delete).
+ * Returns a small JSON blob describing the outcome.
+ */
+export function retryFailedAuditAction(
+  auditId: number,
+): Promise<{ op?: string; worklog_id?: string }> {
+  return invoke<{ op?: string; worklog_id?: string }>(
+    "retry_failed_audit_action",
+    { auditId },
+  );
+}
+
+/** Hard-delete audit entries older than `olderThanDays` days. Returns count. */
+export function purgeAuditLog(olderThanDays: number): Promise<number> {
+  return invoke<number>("purge_audit_log", { olderThanDays });
 }
 
 // -----------------------------------------------------------------------------
