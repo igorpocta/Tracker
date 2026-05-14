@@ -28,13 +28,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { hasConfig, refreshAll, refreshCache, startTimer } from "../../api/commands";
+import {
+  createManualWorklog,
+  hasConfig,
+  refreshAll,
+  refreshCache,
+  startTimer,
+} from "../../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { useTimerStore } from "../../stores/timerStore";
 import { AddEntryPanel } from "../Entry/AddEntryPanel";
-import { Toaster, type Toast, type ToastVariant } from "../common/Toast";
+import {
+  Toaster,
+  type Toast,
+  type ToastUndoAction,
+  type ToastVariant,
+} from "../common/Toast";
 import { StopDialog } from "../Timer/TimerControls";
 import { CommandBar } from "./CommandBar";
 import { IconSidebar } from "./IconSidebar";
@@ -44,7 +55,11 @@ import { StartTrackingBar } from "./StartTrackingBar";
 const REFRESH_WINDOW_DAYS = 30;
 
 export interface ShellOutletContext {
-  pushToast: (variant: ToastVariant, message: string) => void;
+  pushToast: (
+    variant: ToastVariant,
+    message: string,
+    opts?: { undo?: ToastUndoAction; ttlMs?: number },
+  ) => void;
   openStopDialog: () => void;
   openAddEntry: () => void;
 }
@@ -93,10 +108,20 @@ export function AppShell() {
   // ---- toast notifications -------------------------------------------------
   const toastIdRef = useRef(1);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = useCallback((variant: ToastVariant, message: string) => {
-    const id = toastIdRef.current++;
-    setToasts((prev) => [...prev, { id, variant, message }]);
-  }, []);
+  const pushToast = useCallback(
+    (
+      variant: ToastVariant,
+      message: string,
+      opts?: { undo?: ToastUndoAction; ttlMs?: number },
+    ) => {
+      const id = toastIdRef.current++;
+      setToasts((prev) => [
+        ...prev,
+        { id, variant, message, undo: opts?.undo, ttlMs: opts?.ttlMs },
+      ]);
+    },
+    [],
+  );
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -121,6 +146,19 @@ export function AppShell() {
     [pushToast, queryClient],
   );
   useTauriEvent<WorklogRow>("worklog-saved", onWorklogSaved);
+
+  // Phase 15 — mutation events. All four invalidate the same query keys so the
+  // visible Tímové Log refreshes immediately.
+  const invalidateWorklogQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+    queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+  }, [queryClient]);
+  useTauriEvent<WorklogRow>("worklog-created", invalidateWorklogQueries);
+  useTauriEvent<WorklogRow>("worklog-updated", invalidateWorklogQueries);
+  useTauriEvent<WorklogRow>("worklog-deleted", invalidateWorklogQueries);
+  useTauriEvent<WorklogRow>("worklog-undo-deleted", invalidateWorklogQueries);
+  useTauriEvent<string>("worklog-delete-committed", invalidateWorklogQueries);
+  useTauriEvent<WorklogRow>("worklog-moved", invalidateWorklogQueries);
 
   const onWorklogError = useCallback(
     (err: unknown) => {
@@ -304,11 +342,35 @@ export function AppShell() {
         <AddEntryPanel
           open={addEntryOpen}
           onClose={() => setAddEntryOpen(false)}
-          onSave={async () => {
-            pushToast(
-              "info",
-              "Ruční záznamy se zatím neukládají — pouze náhled UI.",
+          onSave={async (entry) => {
+            // Compose a wall-clock Date from the date + start time string.
+            const [hh, mm] = entry.startTime.split(":").map((s) => parseInt(s, 10));
+            const [eh, em] = entry.endTime.split(":").map((s) => parseInt(s, 10));
+            const [y, mo, d] = entry.dateIso.split("-").map((s) => parseInt(s, 10));
+            const startedAt = new Date(y, mo - 1, d, hh, mm, 0);
+            const endedAt = new Date(y, mo - 1, d, eh, em, 0);
+            const durationSeconds = Math.max(
+              0,
+              Math.round((endedAt.getTime() - startedAt.getTime()) / 1000),
             );
+            try {
+              await createManualWorklog({
+                issueKey: entry.issueKey,
+                startedAtMs: startedAt.getTime(),
+                durationSeconds,
+                comment: entry.comment.length > 0 ? entry.comment : null,
+              });
+              pushToast(
+                "success",
+                `Záznam přidán na ${entry.issueKey}.`,
+              );
+              queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+              queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+            } catch (e) {
+              const msg = typeof e === "string" ? e : "Záznam se nepodařilo uložit";
+              pushToast("error", msg);
+              throw e; // Re-throw so the panel keeps the form open.
+            }
           }}
         />
       </div>

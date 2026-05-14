@@ -11,16 +11,25 @@
  *   ┌─ DEV-792  Portál – Synchronizace…   14. 5. 2026  15:46 – 16:01  15m ┐
  *   …
  *
- * The DayTimeline is rendered only when the user keeps it visible
- * (Nastavení → Obecné → Časová osa dne). The pref is now backend-backed
- * and read from the prefs store.
+ * Phase 15 — every row now supports:
+ *   - Inline edit of start time, end time and duration (click → edit → blur).
+ *   - Inline edit of the comment.
+ *   - Soft-delete via the trash icon: the row is optimistically hidden and
+ *     a "Vrátit" undo toast appears for 5 seconds. After 5s the backend
+ *     fires the real Jira DELETE.
  */
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
-import { getWorklogsForRange } from "../api/commands";
+import {
+  deleteWorklog,
+  getWorklogsForRange,
+  undoDeleteWorklog,
+  updateWorklog,
+} from "../api/commands";
+import type { WorklogRow as ApiWorklogRow } from "../api/types";
 import type { ShellOutletContext } from "../components/Layout/AppShell";
 import { IssuePill } from "../components/common/IssuePill";
 import { DayTimeline } from "../components/Timer/DayTimeline";
@@ -44,8 +53,12 @@ const PERIOD_LABEL: Record<Period, string> = {
 
 export default function TimeLog() {
   const ctx = useOutletContext<ShellOutletContext>();
+  const queryClient = useQueryClient();
   const [period, setPeriod] = useState<Period>("today");
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
+
+  /** Rows the user just clicked "delete" on — optimistically hidden. */
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
   const [from, to] = useMemo(() => periodRange(period), [period]);
 
@@ -57,8 +70,96 @@ export default function TimeLog() {
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
-  const rows = worklogsQ.data ?? [];
+  const rows = (worklogsQ.data ?? []).filter(
+    (r) => !r.jira_worklog_id || !hiddenIds.has(r.jira_worklog_id),
+  );
   const totalSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
+
+  const handleDelete = useCallback(
+    async (row: ApiWorklogRow) => {
+      const jiraId = row.jira_worklog_id;
+      if (!jiraId) {
+        ctx.pushToast("error", "Tento záznam ještě nebyl synchronizován do Jiry.");
+        return;
+      }
+      // Optimistic hide.
+      setHiddenIds((prev) => {
+        const next = new Set(prev);
+        next.add(jiraId);
+        return next;
+      });
+      try {
+        await deleteWorklog(jiraId, row.issue_key);
+      } catch (e) {
+        // Failure to even mark pending → un-hide + show error.
+        setHiddenIds((prev) => {
+          const next = new Set(prev);
+          next.delete(jiraId);
+          return next;
+        });
+        ctx.pushToast(
+          "error",
+          typeof e === "string" ? e : "Záznam se nepodařilo smazat",
+        );
+        return;
+      }
+      // Show undo toast with 5s grace window.
+      ctx.pushToast("info", "Záznam smazán", {
+        ttlMs: 5000,
+        undo: {
+          label: "Vrátit",
+          action: async () => {
+            try {
+              await undoDeleteWorklog(jiraId);
+            } catch {
+              /* swallow */
+            } finally {
+              setHiddenIds((prev) => {
+                const next = new Set(prev);
+                next.delete(jiraId);
+                return next;
+              });
+              queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+            }
+          },
+        },
+      });
+    },
+    [ctx, queryClient],
+  );
+
+  const handleUpdate = useCallback(
+    async (
+      row: ApiWorklogRow,
+      patch: {
+        startedAtMs?: number;
+        durationSeconds?: number;
+        comment?: string | null;
+      },
+    ) => {
+      const jiraId = row.jira_worklog_id;
+      if (!jiraId) {
+        ctx.pushToast("error", "Tento záznam ještě nebyl synchronizován do Jiry.");
+        return;
+      }
+      try {
+        await updateWorklog({
+          worklogId: jiraId,
+          issueKey: row.issue_key,
+          newStartedAtMs: patch.startedAtMs ?? null,
+          newDurationSeconds: patch.durationSeconds ?? null,
+          newComment: patch.comment ?? null,
+        });
+        queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+      } catch (e) {
+        ctx.pushToast(
+          "error",
+          typeof e === "string" ? e : "Záznam se nepodařilo aktualizovat",
+        );
+      }
+    },
+    [ctx, queryClient],
+  );
 
   return (
     <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
@@ -102,7 +203,12 @@ export default function TimeLog() {
         {[...rows]
           .sort((a, b) => b.started_at - a.started_at)
           .map((r) => (
-            <WorklogRow key={r.id ?? `${r.issue_key}-${r.started_at}`} row={r} />
+            <WorklogRow
+              key={r.id ?? `${r.issue_key}-${r.started_at}`}
+              row={r}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+            />
           ))}
       </div>
 
@@ -113,7 +219,7 @@ export default function TimeLog() {
           className="inline-flex items-center gap-1.5 px-3.5 h-9
                      rounded-[var(--radius-md)] text-[13px] font-medium
                      bg-[var(--accent)] text-[var(--accent-text)]
-                     hover:bg-[var(--accent-hover)]
+                     hover:bg-[var(--bg-hover)]
                      transition-colors duration-150"
         >
           <Plus className="w-3.5 h-3.5" aria-hidden />
@@ -154,13 +260,68 @@ function PeriodSelector({
   );
 }
 
-function WorklogRow({
-  row,
-}: {
-  row: import("../api/types").WorklogRow;
-}) {
+interface WorklogRowProps {
+  row: ApiWorklogRow;
+  onUpdate: (
+    row: ApiWorklogRow,
+    patch: {
+      startedAtMs?: number;
+      durationSeconds?: number;
+      comment?: string | null;
+    },
+  ) => Promise<void>;
+  onDelete: (row: ApiWorklogRow) => void;
+}
+
+function WorklogRow({ row, onUpdate, onDelete }: WorklogRowProps) {
   const started = new Date(row.started_at * 1000);
   const ended = new Date((row.started_at + row.duration_s) * 1000);
+
+  const [editing, setEditing] = useState<"start" | "end" | "duration" | "comment" | null>(
+    null,
+  );
+  const [draftStart, setDraftStart] = useState(formatHHMM(started));
+  const [draftEnd, setDraftEnd] = useState(formatHHMM(ended));
+  const [draftDuration, setDraftDuration] = useState(formatDurationShort(row.duration_s));
+  const [draftComment, setDraftComment] = useState(row.comment ?? "");
+
+  // When `row` changes (after a successful update) re-sync drafts.
+  useMemo(() => {
+    setDraftStart(formatHHMM(started));
+    setDraftEnd(formatHHMM(ended));
+    setDraftDuration(formatDurationShort(row.duration_s));
+    setDraftComment(row.comment ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.started_at, row.duration_s, row.comment]);
+
+  const commitStart = async () => {
+    setEditing(null);
+    const newDt = combineDateAndTime(started, draftStart);
+    if (!newDt || newDt.getTime() === started.getTime()) return;
+    await onUpdate(row, { startedAtMs: newDt.getTime() });
+  };
+
+  const commitEnd = async () => {
+    setEditing(null);
+    const newEnd = combineDateAndTime(started, draftEnd);
+    if (!newEnd) return;
+    const newDur = Math.max(0, Math.round((newEnd.getTime() - started.getTime()) / 1000));
+    if (newDur === row.duration_s) return;
+    await onUpdate(row, { durationSeconds: newDur });
+  };
+
+  const commitDuration = async () => {
+    setEditing(null);
+    const seconds = parseDurationToSeconds(draftDuration);
+    if (seconds === null || seconds === row.duration_s) return;
+    await onUpdate(row, { durationSeconds: seconds });
+  };
+
+  const commitComment = async () => {
+    setEditing(null);
+    if (draftComment === (row.comment ?? "")) return;
+    await onUpdate(row, { comment: draftComment.length > 0 ? draftComment : null });
+  };
 
   return (
     <div
@@ -169,32 +330,141 @@ function WorklogRow({
                  hover:bg-[var(--bg-hover)] transition-colors duration-150"
     >
       <IssuePill issueKey={row.issue_key} />
-      <span className="flex-1 min-w-0 truncate text-xs text-[var(--text-primary)]">
-        {row.summary || "(bez popisu)"}
-      </span>
+      {editing === "comment" ? (
+        <input
+          type="text"
+          autoFocus
+          value={draftComment}
+          onChange={(e) => setDraftComment(e.target.value)}
+          onBlur={commitComment}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") {
+              setDraftComment(row.comment ?? "");
+              setEditing(null);
+            }
+          }}
+          placeholder="Komentář"
+          className="flex-1 min-w-0 text-xs bg-transparent border border-[var(--border-subtle)]
+                     rounded-[var(--radius-sm)] px-2 h-7 focus:outline-none
+                     focus:border-[var(--border-default)]"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing("comment")}
+          className="flex-1 min-w-0 truncate text-xs text-left text-[var(--text-primary)]
+                     hover:underline decoration-dotted underline-offset-4"
+          title="Upravit komentář"
+        >
+          <span className="inline-flex items-center gap-1">
+            {row.summary || "(bez popisu)"}
+            {row.comment && (
+              <MessageSquare
+                className="w-3 h-3 text-[var(--text-tertiary)]"
+                aria-hidden
+              />
+            )}
+          </span>
+        </button>
+      )}
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
                        px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
                        inline-flex items-center">
         {formatDateCs(started)}
       </span>
-      <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
-                       px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
-                       inline-flex items-center">
-        {formatHHMM(started)}
-      </span>
+      {editing === "start" ? (
+        <input
+          type="time"
+          autoFocus
+          value={draftStart}
+          onChange={(e) => setDraftStart(e.target.value)}
+          onBlur={commitStart}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") {
+              setDraftStart(formatHHMM(started));
+              setEditing(null);
+            }
+          }}
+          className={editCellCls}
+          aria-label="Začátek"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing("start")}
+          className={readCellCls}
+          title="Upravit začátek"
+        >
+          {formatHHMM(started)}
+        </button>
+      )}
       <span aria-hidden className="text-[var(--text-tertiary)]">–</span>
-      <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
-                       px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
-                       inline-flex items-center">
-        {formatHHMM(ended)}
-      </span>
-      <span className="font-mono tabular-nums text-[11px] text-[var(--text-primary)] shrink-0 w-16 text-right">
-        {formatDurationShort(row.duration_s)}
-      </span>
+      {editing === "end" ? (
+        <input
+          type="time"
+          autoFocus
+          value={draftEnd}
+          onChange={(e) => setDraftEnd(e.target.value)}
+          onBlur={commitEnd}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") {
+              setDraftEnd(formatHHMM(ended));
+              setEditing(null);
+            }
+          }}
+          className={editCellCls}
+          aria-label="Konec"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing("end")}
+          className={readCellCls}
+          title="Upravit konec"
+        >
+          {formatHHMM(ended)}
+        </button>
+      )}
+      {editing === "duration" ? (
+        <input
+          type="text"
+          autoFocus
+          value={draftDuration}
+          onChange={(e) => setDraftDuration(e.target.value)}
+          onBlur={commitDuration}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") {
+              setDraftDuration(formatDurationShort(row.duration_s));
+              setEditing(null);
+            }
+          }}
+          placeholder="1h 30m"
+          className="font-mono tabular-nums text-[11px] shrink-0 w-16 text-right
+                     bg-transparent border border-[var(--border-subtle)]
+                     rounded-[var(--radius-sm)] px-1 h-7 focus:outline-none
+                     focus:border-[var(--border-default)]"
+          aria-label="Trvání"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing("duration")}
+          className="font-mono tabular-nums text-[11px] text-[var(--text-primary)] shrink-0
+                     w-16 text-right hover:underline decoration-dotted underline-offset-4"
+          title="Upravit trvání"
+        >
+          {formatDurationShort(row.duration_s)}
+        </button>
+      )}
       <button
         type="button"
         aria-label={`Smazat záznam ${row.issue_key}`}
         title="Smazat"
+        onClick={() => onDelete(row)}
         className="text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
       >
         <Trash2 className="w-3.5 h-3.5" aria-hidden />
@@ -202,6 +472,17 @@ function WorklogRow({
     </div>
   );
 }
+
+const readCellCls =
+  "font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0 " +
+  "px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] " +
+  "inline-flex items-center hover:bg-[var(--bg-hover)] " +
+  "transition-colors duration-150";
+
+const editCellCls =
+  "font-mono tabular-nums text-[11px] shrink-0 " +
+  "px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-default)] " +
+  "bg-transparent focus:outline-none";
 
 function periodRange(p: Period): [Date, Date] {
   const today = startOfDay(new Date());
@@ -217,4 +498,56 @@ function periodRange(p: Period): [Date, Date] {
 
 function formatHHMM(d: Date): string {
   return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
+}
+
+/**
+ * Combine the date part of `baseDate` with a `HH:MM` time string into a fresh
+ * `Date`. Returns `null` if the time string is invalid.
+ */
+function combineDateAndTime(baseDate: Date, hhmm: string): Date | null {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(hhmm);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+  return new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate(),
+    h,
+    mm,
+    0,
+    0,
+  );
+}
+
+/**
+ * Parse a free-form duration string (`"1h 30m"`, `"90m"`, `"2h"`, `"45"`) into
+ * seconds. Returns `null` if no recognizable parts are present.
+ */
+export function parseDurationToSeconds(s: string): number | null {
+  const trimmed = s.trim().toLowerCase();
+  if (!trimmed) return null;
+  let total = 0;
+  let matched = false;
+  const hrRe = /(\d+(?:[.,]\d+)?)\s*h/g;
+  const minRe = /(\d+(?:[.,]\d+)?)\s*m/g;
+  for (const m of trimmed.matchAll(hrRe)) {
+    total += parseFloat(m[1].replace(",", ".")) * 3600;
+    matched = true;
+  }
+  for (const m of trimmed.matchAll(minRe)) {
+    total += parseFloat(m[1].replace(",", ".")) * 60;
+    matched = true;
+  }
+  if (!matched) {
+    // Bare integer = minutes (common shorthand).
+    const bare = parseInt(trimmed, 10);
+    if (Number.isFinite(bare)) {
+      total = bare * 60;
+      matched = true;
+    }
+  }
+  if (!matched) return null;
+  return Math.round(total);
 }
