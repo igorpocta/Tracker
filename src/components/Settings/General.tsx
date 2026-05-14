@@ -11,8 +11,12 @@
  * `localStorage` until we have a real need to sync them across windows.
  */
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
+import { purgeAuditLog } from "../../api/commands";
 import { usePrefsStore } from "../../stores/prefsStore";
+import { Button } from "../common/Button";
+import { ConfirmButton } from "../common/ConfirmButton";
 
 const LS_TIME_INPUT_KEY = "tracker.timeInput";
 const LS_REINDEX_KEY = "tracker.reindexInterval";
@@ -31,9 +35,12 @@ const REINDEX_LABEL: Record<ReindexInterval, string> = {
 export default function General() {
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
   const setDayTimelineVisible = usePrefsStore((s) => s.setDayTimelineVisible);
+  const navigate = useNavigate();
 
   const [timeInput, setTimeInput] = useState<TimeInputStyle>("end");
   const [reindex, setReindex] = useState<ReindexInterval>("1h");
+  const [purgeDays, setPurgeDays] = useState(90);
+  const [purgeStatus, setPurgeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -137,8 +144,78 @@ export default function General() {
           <kbd className="font-mono px-1 rounded bg-[var(--bg-hover)]">⌘I</kbd>.
         </p>
       </Section>
+
+      <Section
+        title="Historie změn"
+        description="Každá akce s worklogem (vytvoření, úprava, smazání, přesun) se ukládá do lokální historie. Z historie lze obnovit smazaný záznam zpět do Jiry nebo vrátit nedávnou úpravu."
+      >
+        <div className="flex flex-col gap-3">
+          <div>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => navigate("/audit")}
+            >
+              Otevřít historii změn
+            </Button>
+          </div>
+          <div className="flex items-end gap-2 flex-wrap">
+            <label className="flex flex-col gap-1 text-xs text-[var(--text-secondary)]">
+              <span>Vyprázdnit starší než</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={purgeDays}
+                  onChange={(e) =>
+                    setPurgeDays(Math.max(1, Number(e.target.value) || 1))
+                  }
+                  className="w-24 h-8 px-2 rounded-[var(--radius-md)] bg-transparent
+                             border border-[var(--border-subtle)] text-sm
+                             text-[var(--text-primary)] focus:outline-none
+                             focus:border-[var(--border-default)]
+                             transition-colors duration-150 tabular-nums"
+                />
+                <span className="text-xs text-[var(--text-tertiary)]">dní</span>
+              </div>
+            </label>
+            <ConfirmButton
+              label="Vyčistit"
+              confirmLabel="Vyčistit"
+              variant="danger"
+              onConfirm={async () => {
+                try {
+                  const n = await purgeAuditLog(purgeDays);
+                  setPurgeStatus(`Smazáno ${n} záznam${czechPlural(n)}.`);
+                } catch (e) {
+                  setPurgeStatus(
+                    typeof e === "string" ? e : "Vyčištění selhalo",
+                  );
+                }
+              }}
+            />
+          </div>
+          {purgeStatus && (
+            <p className="text-[11px] text-[var(--text-tertiary)]">
+              {purgeStatus}
+            </p>
+          )}
+          <p className="text-[11px] text-[var(--text-tertiary)]">
+            Smaže audit záznamy starší než zvolený počet dní. Tuto akci nelze
+            vrátit.
+          </p>
+        </div>
+      </Section>
     </div>
   );
+}
+
+/** Czech plural ending for "záznam(y/ů)" based on count. */
+function czechPlural(n: number): string {
+  if (n === 1) return "";
+  if (n >= 2 && n <= 4) return "y";
+  return "ů";
 }
 
 function Section({
