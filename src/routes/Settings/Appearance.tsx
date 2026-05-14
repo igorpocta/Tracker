@@ -1,17 +1,12 @@
 /**
  * Settings → Appearance tab.
  *
- * Three radio groups (theme, font size, density) that write through to the
- * prefs store. The store applies the values to the DOM immediately so any
- * change is visible.
- *
- * A small live "Preview" card shows how a worklog row will look with the
- * current settings.
+ * Sections: accent color swatches, theme, font size, density, plus a live
+ * worklog-row preview reflecting the current settings.
  */
-import { CheckCircle2 } from "lucide-react";
-
 import { RadioGroup } from "../../components/common/Radio";
 import { Card } from "../../components/common/Card";
+import { AccentSwatchRow } from "../../components/Settings/AccentSwatchRow";
 import { formatClockTime, formatDurationShort } from "../../lib/format";
 import {
   type DensityPref,
@@ -41,16 +36,28 @@ export default function Appearance() {
   const theme = usePrefsStore((s) => s.theme);
   const fontSize = usePrefsStore((s) => s.fontSize);
   const density = usePrefsStore((s) => s.density);
+  const accent = usePrefsStore((s) => s.accent);
   const setTheme = usePrefsStore((s) => s.setTheme);
   const setFontSize = usePrefsStore((s) => s.setFontSize);
   const setDensity = usePrefsStore((s) => s.setDensity);
+  const setAccent = usePrefsStore((s) => s.setAccent);
 
   const previewStart = Date.now() - 3600 * 1000;
   const previewEnd = Date.now();
 
   return (
-    <div className="flex flex-col gap-6 max-w-xl">
-      <Section title="Theme" description="Switch between light and dark — auto follows your OS.">
+    <div className="flex flex-col gap-7 max-w-xl">
+      <Section
+        title="Accent color"
+        description="Used for the timer, primary actions, and selection."
+      >
+        <AccentSwatchRow value={accent} onChange={(v) => void setAccent(v)} />
+      </Section>
+
+      <Section
+        title="Theme"
+        description="Switch between light and dark — auto follows your OS."
+      >
         <RadioGroup<ThemePref>
           label="Theme"
           options={THEME_OPTIONS}
@@ -59,7 +66,10 @@ export default function Appearance() {
         />
       </Section>
 
-      <Section title="Font size" description="Scales the whole UI proportionally.">
+      <Section
+        title="Font size"
+        description="Scales the whole UI proportionally."
+      >
         <RadioGroup<FontSizePref>
           label="Font size"
           options={FONT_OPTIONS}
@@ -68,7 +78,10 @@ export default function Appearance() {
         />
       </Section>
 
-      <Section title="Density" description="Compact removes padding from list rows.">
+      <Section
+        title="Density"
+        description="Compact removes padding from list rows."
+      >
         <RadioGroup<DensityPref>
           label="Density"
           options={DENSITY_OPTIONS}
@@ -77,29 +90,37 @@ export default function Appearance() {
         />
       </Section>
 
-      <Section title="Preview" description="A worklog row rendered with your current settings.">
+      <Section
+        title="Preview"
+        description="A worklog row rendered with your current settings."
+      >
         <Card padding="none">
           <ul className="flex flex-col">
-            <li className="worklog-row group rounded-md px-3 border border-transparent hover:bg-neutral-800/50 hover:border-neutral-800 flex items-start gap-3">
-              <div className="mt-1 shrink-0">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" aria-hidden />
+            <li className="worklog-row group rounded-[var(--radius-sm)] px-3 flex items-start gap-3">
+              <div className="mt-2 shrink-0">
+                <span
+                  aria-hidden
+                  className="block w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
+                />
               </div>
-              <div className="shrink-0 font-mono tabular-nums text-[11px] text-neutral-400 w-[88px] mt-0.5">
+              <div className="shrink-0 font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] w-[88px] mt-0.5">
                 {formatClockTime(previewStart)}–{formatClockTime(previewEnd)}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-[11px] text-neutral-400 shrink-0">ACME-123</span>
-                  <span className="text-xs text-neutral-200 truncate">
+                  <span className="font-mono text-[11px] uppercase text-[var(--text-secondary)] shrink-0">
+                    ACME-123
+                  </span>
+                  <span className="text-xs text-[var(--text-primary)] truncate">
                     Tracker frontend redesign
                   </span>
                 </div>
-                <p className="text-xs text-neutral-400 mt-0.5 line-clamp-2">
+                <p className="text-xs text-[var(--text-tertiary)] mt-0.5 line-clamp-2">
                   Reworked the home view into Today / History / Reports tabs.
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-mono text-xs text-neutral-100">
+                <div className="font-mono tabular-nums text-xs text-[var(--text-primary)]">
                   {formatDurationShort(3600)}
                 </div>
               </div>
@@ -121,11 +142,11 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-3">
       <div>
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
         {description && (
-          <p className="text-xs text-neutral-500 mt-0.5">{description}</p>
+          <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{description}</p>
         )}
       </div>
       {children}

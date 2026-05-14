@@ -150,7 +150,7 @@ export default function Connection() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-neutral-500">
+      <div className="flex items-center justify-center py-12 text-[var(--text-tertiary)]">
         <Spinner className="w-4 h-4 mr-2" />
         Loading connection settings…
       </div>
@@ -159,12 +159,12 @@ export default function Connection() {
 
   if (!config) {
     return (
-      <div className="text-sm text-neutral-400">
+      <div className="text-sm text-[var(--text-secondary)]">
         No connection configured.{" "}
         <button
           type="button"
           onClick={() => navigate("/setup", { replace: true })}
-          className="text-sky-400 hover:underline"
+          className="text-[var(--accent)] hover:underline"
         >
           Run setup
         </button>
@@ -173,9 +173,9 @@ export default function Connection() {
   }
 
   return (
-    <div className="flex flex-col gap-5 max-w-xl">
+    <div className="flex flex-col gap-6 max-w-xl">
       <section>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-3">
           Jira instance
         </h3>
         {mode === "edit" ? (
@@ -208,17 +208,17 @@ export default function Connection() {
           </div>
         ) : (
           <div className="flex items-start justify-between gap-3">
-            <dl className="flex flex-col gap-1.5 text-sm">
+            <dl className="flex flex-col gap-2 text-sm">
               <div>
-                <dt className="text-[10px] uppercase tracking-wider text-neutral-500">Base URL</dt>
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Base URL</dt>
                 <dd className="flex items-center gap-1.5">
-                  <span className="text-neutral-100">{config.base_url}</span>
-                  <ExternalLink className="w-3 h-3 text-neutral-500" aria-hidden />
+                  <span className="text-[var(--text-primary)]">{config.base_url}</span>
+                  <ExternalLink className="w-3 h-3 text-[var(--text-tertiary)]" aria-hidden />
                 </dd>
               </div>
               <div>
-                <dt className="text-[10px] uppercase tracking-wider text-neutral-500">Email</dt>
-                <dd className="text-neutral-100">{config.email}</dd>
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Email</dt>
+                <dd className="text-[var(--text-primary)]">{config.email}</dd>
               </div>
             </dl>
             <Button variant="ghost" size="sm" onClick={startEdit}>
@@ -230,7 +230,7 @@ export default function Connection() {
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-3">
           API token
         </h3>
         {mode === "token" ? (
@@ -263,15 +263,15 @@ export default function Connection() {
               </Button>
             </div>
             {testResult && (
-              <div className="text-xs text-emerald-300 flex items-center gap-1.5">
+              <div className="text-xs text-[var(--success)] flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5" aria-hidden />
-                Authenticated as <strong className="text-white">{testResult.displayName}</strong>
+                Authenticated as <strong className="text-[var(--text-primary)]">{testResult.displayName}</strong>
               </div>
             )}
           </div>
         ) : (
           <div className="flex items-start justify-between gap-3">
-            <p className="text-sm text-neutral-400">
+            <p className="text-sm text-[var(--text-secondary)]">
               Token is stored in the OS keychain and never displayed.
             </p>
             <Button variant="secondary" size="sm" onClick={startTokenReplace}>
@@ -282,17 +282,17 @@ export default function Connection() {
       </section>
 
       {error && (
-        <div className="text-xs text-red-400" role="alert">
+        <div className="text-xs text-[var(--danger)]" role="alert">
           {error}
         </div>
       )}
 
-      <section className="border-t border-neutral-800/70 pt-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-red-300 mb-2">
+      <section className="border-t border-[var(--border-subtle)] pt-4">
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--danger)] mb-3">
           Danger zone
         </h3>
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs text-neutral-400 max-w-sm">
+          <p className="text-xs text-[var(--text-secondary)] max-w-sm">
             Sign out clears the saved config and the API token from the OS
             keychain. You can re-run setup afterward.
           </p>
@@ -308,7 +308,9 @@ export default function Connection() {
 }
 
 const inputCls =
-  "px-2.5 py-1.5 rounded-md bg-neutral-950 border border-neutral-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 text-sm w-full";
+  "px-2.5 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)] " +
+  "focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)] " +
+  "text-sm text-[var(--text-primary)] w-full transition-colors duration-150";
 
 function Field({
   label,
@@ -319,7 +321,7 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+      <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
         {label}
       </span>
       {children}

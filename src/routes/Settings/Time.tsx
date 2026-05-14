@@ -8,14 +8,20 @@
  */
 import { useEffect, useState } from "react";
 
+import type { Currency } from "../../api/types";
 import { Button } from "../../components/common/Button";
 import { Select } from "../../components/common/Select";
 import { Spinner } from "../../components/common/Spinner";
-import {
-  type Currency,
-  usePrefsStore,
-  type WidgetFormat,
-} from "../../stores/prefsStore";
+import { usePrefsStore, type WidgetFormat } from "../../stores/prefsStore";
+
+const CURRENCY_OPTIONS = [
+  { value: "CZK", label: "CZK · Czech koruna" },
+  { value: "EUR", label: "EUR · Euro" },
+  { value: "USD", label: "USD · US dollar" },
+  { value: "GBP", label: "GBP · British pound" },
+  { value: "PLN", label: "PLN · Polish złoty" },
+  { value: "CHF", label: "CHF · Swiss franc" },
+];
 
 export default function TimeSettings() {
   const dailyGoalSeconds = usePrefsStore((s) => s.dailyGoalSeconds);
@@ -68,8 +74,13 @@ export default function TimeSettings() {
     }
   };
 
+  const inputCls =
+    "px-2.5 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)] " +
+    "focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)] " +
+    "text-sm text-[var(--text-primary)] transition-colors duration-150";
+
   return (
-    <div className="flex flex-col gap-5 max-w-xl">
+    <div className="flex flex-col gap-6 max-w-xl">
       <Section title="Daily goal" description="Number of hours you aim to log per day.">
         <div className="flex items-center gap-2">
           <input
@@ -77,37 +88,33 @@ export default function TimeSettings() {
             inputMode="decimal"
             value={hoursStr}
             onChange={(e) => setHoursStr(e.target.value)}
-            className="px-2.5 py-1.5 rounded-md bg-neutral-950 border border-neutral-800 text-sm w-24 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            className={`${inputCls} w-24`}
             aria-label="Daily goal hours"
           />
-          <span className="text-xs text-neutral-500">hours</span>
+          <span className="text-xs text-[var(--text-tertiary)]">hours</span>
         </div>
       </Section>
 
       <Section
         title="Hourly rate"
-        description="Used to estimate today's earnings in the Today view. Set to 0 to hide."
+        description="Used for earnings on the Today and Reports views. Set to 0 to hide."
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input
             type="text"
             inputMode="decimal"
             value={rateStr}
             onChange={(e) => setRateStr(e.target.value)}
-            className="px-2.5 py-1.5 rounded-md bg-neutral-950 border border-neutral-800 text-sm w-32 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            className={`${inputCls} w-32`}
             aria-label="Hourly rate"
           />
           <Select
             value={currency}
-            onChange={(e) => setCurrency(e.target.value as Currency)}
-            options={[
-              { value: "CZK", label: "CZK" },
-              { value: "EUR", label: "EUR" },
-              { value: "USD", label: "USD" },
-            ]}
+            onChange={(e) => void setCurrency(e.target.value as Currency)}
+            options={CURRENCY_OPTIONS}
             aria-label="Currency"
           />
-          <span className="text-xs text-neutral-500">/ hour</span>
+          <span className="text-xs text-[var(--text-tertiary)]">/ hour</span>
         </div>
       </Section>
 
@@ -124,16 +131,16 @@ export default function TimeSettings() {
         />
       </Section>
 
-      <div className="pt-2 flex items-center gap-2">
-        <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+      <div className="pt-2 flex items-center gap-3">
+        <Button variant="primary" size="md" onClick={handleSave} disabled={saving}>
           {saving && <Spinner className="w-3.5 h-3.5" />}
           Save changes
         </Button>
         {saved && (
-          <span className="text-xs text-emerald-300">Saved.</span>
+          <span className="text-xs text-[var(--success)]">Saved.</span>
         )}
         {error && (
-          <span className="text-xs text-red-400" role="alert">
+          <span className="text-xs text-[var(--danger)]" role="alert">
             {error}
           </span>
         )}
@@ -152,11 +159,11 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-3">
       <div>
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
         {description && (
-          <p className="text-xs text-neutral-500 mt-0.5">{description}</p>
+          <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{description}</p>
         )}
       </div>
       {children}

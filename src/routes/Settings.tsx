@@ -34,19 +34,19 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-6 flex flex-col gap-4 max-w-4xl mx-auto w-full">
+    <div className="p-8 flex flex-col gap-5 max-w-4xl mx-auto w-full">
       <header>
-        <h1 className="text-lg font-semibold">Settings</h1>
-        <p className="text-xs text-neutral-500 mt-0.5">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">Settings</h1>
+        <p className="text-xs text-[var(--text-tertiary)] mt-1">
           Connection details, appearance, time, and app info.
         </p>
       </header>
 
       <Card padding="none">
-        <div className="px-2 pt-2">
+        <div className="px-3 pt-2">
           <Tabs tabs={TABS} active={active} onChange={setActive} />
         </div>
-        <div className="p-5">
+        <div className="p-6">
           <TabPanel id="connection" active={active}>
             <Connection />
           </TabPanel>
