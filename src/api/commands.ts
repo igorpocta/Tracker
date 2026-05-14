@@ -9,10 +9,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   ActiveTimerState,
+  DensityPref,
+  FontSizePref,
   IssueRow,
   JiraConfig,
   JiraUser,
+  RefreshAllResult,
   SaveConfigArgs,
+  ThemePref,
   VisibleTicket,
   WorklogRow,
 } from "./types";
@@ -189,4 +193,89 @@ export function getCurrentVisibleTicket(): Promise<VisibleTicket | null> {
 
 export function getExtensionLastHeartbeat(): Promise<number | null> {
   return invoke<number | null>("get_extension_last_heartbeat");
+}
+
+// -----------------------------------------------------------------------------
+// Connection management (Phase 11A)
+// -----------------------------------------------------------------------------
+
+/** `get_current_config(): Option<JiraConfig>` — never includes token. */
+export function getCurrentConfig(): Promise<JiraConfig | null> {
+  return invoke<JiraConfig | null>("get_current_config");
+}
+
+/**
+ * `update_config(new_cfg, new_token?): ()` — replace base_url/email and
+ * optionally rotate the API token. Pass `null` for `newToken` to keep the
+ * existing one.
+ */
+export function updateConfig(
+  newConfig: JiraConfig,
+  newToken?: string | null,
+): Promise<void> {
+  return invoke<void>("update_config", {
+    newCfg: newConfig,
+    newToken: newToken ?? null,
+  });
+}
+
+/** `sign_out(): ()` — clears config file + keychain entry. */
+export function signOut(): Promise<void> {
+  return invoke<void>("sign_out");
+}
+
+// -----------------------------------------------------------------------------
+// Worklog data (Phase 11A)
+// -----------------------------------------------------------------------------
+
+/**
+ * `refresh_all(from_days): { issues, worklogs }` — pull latest issues and the
+ * last `from_days` of worklogs from Jira.
+ */
+export function refreshAll(fromDays: number): Promise<RefreshAllResult> {
+  return invoke<RefreshAllResult>("refresh_all", { fromDays });
+}
+
+/**
+ * `get_worklogs_for_range(from_unix_s, to_unix_s, author?): WorklogRow[]`.
+ * Author defaults to the configured email when null.
+ */
+export function getWorklogsForRange(
+  fromUnixS: number,
+  toUnixS: number,
+  author?: string | null,
+): Promise<WorklogRow[]> {
+  return invoke<WorklogRow[]>("get_worklogs_for_range", {
+    fromUnixS,
+    toUnixS,
+    author: author ?? null,
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Appearance prefs (Phase 11A)
+// -----------------------------------------------------------------------------
+
+export function getTheme(): Promise<ThemePref> {
+  return invoke<ThemePref>("get_theme");
+}
+
+export function setTheme(theme: ThemePref): Promise<void> {
+  return invoke<void>("set_theme", { theme });
+}
+
+export function getFontSize(): Promise<FontSizePref> {
+  return invoke<FontSizePref>("get_font_size");
+}
+
+export function setFontSize(size: FontSizePref): Promise<void> {
+  return invoke<void>("set_font_size", { size });
+}
+
+export function getDensity(): Promise<DensityPref> {
+  return invoke<DensityPref>("get_density");
+}
+
+export function setDensity(density: DensityPref): Promise<void> {
+  return invoke<void>("set_density", { density });
 }

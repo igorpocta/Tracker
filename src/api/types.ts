@@ -81,3 +81,22 @@ export interface VisibleTicket {
   url?: string | null;
   seen_at?: number | null;
 }
+
+// -----------------------------------------------------------------------------
+// Phase 11A backend additions
+// -----------------------------------------------------------------------------
+
+/** Theme preference. `auto` honors `prefers-color-scheme`. */
+export type ThemePref = "auto" | "light" | "dark";
+
+/** Font-size preference. */
+export type FontSizePref = "sm" | "md" | "lg";
+
+/** Density preference. */
+export type DensityPref = "compact" | "comfortable";
+
+/** Result of `refresh_all` — counts of records pulled from Jira. */
+export interface RefreshAllResult {
+  issues: number;
+  worklogs: number;
+}
