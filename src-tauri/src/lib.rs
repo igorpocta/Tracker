@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod jira;
 pub mod keychain;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
