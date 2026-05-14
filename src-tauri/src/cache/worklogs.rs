@@ -137,6 +137,13 @@ pub fn upsert_from_jira(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
     }
 }
 
+/// Total number of worklog rows currently in the local cache.
+pub fn count(db: &Db) -> Result<i64, DbError> {
+    let conn = db.pool().get()?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM recent_worklogs", [], |r| r.get(0))?;
+    Ok(n)
+}
+
 pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
     let mut stmt = conn.prepare(

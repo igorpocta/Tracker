@@ -119,6 +119,13 @@ pub fn suggested(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+/// Total number of issues currently cached.
+pub fn count(db: &Db) -> Result<i64, DbError> {
+    let conn = db.pool().get()?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM issues", [], |r| r.get(0))?;
+    Ok(n)
+}
+
 pub fn search(db: &Db, query: &str, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let q = format!("%{}%", query.to_lowercase());
