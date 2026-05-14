@@ -15,3 +15,16 @@ fn low_level_set_get_delete_roundtrip() {
     tracker_lib::keychain::delete(svc, key).unwrap();
     assert!(tracker_lib::keychain::get(svc, key).unwrap().is_none());
 }
+
+#[test]
+#[ignore = "requires OS keychain access; run with --include-ignored locally"]
+fn jira_token_helpers_roundtrip() {
+    // Use a unique test service constant to avoid collision with user's real token.
+    // Since the helpers use the production constants, ensure we clear first/last.
+    tracker_lib::keychain::clear_jira_token().unwrap();
+    tracker_lib::keychain::save_jira_token("abc-123").unwrap();
+    let got = tracker_lib::keychain::load_jira_token().unwrap();
+    assert_eq!(got.as_deref(), Some("abc-123"));
+    tracker_lib::keychain::clear_jira_token().unwrap();
+    assert!(tracker_lib::keychain::load_jira_token().unwrap().is_none());
+}
