@@ -1,20 +1,39 @@
 //! Application-wide shared state for Tauri commands.
 //!
-//! Holds the open SQLite database connection pool plus the currently loaded
-//! [`JiraConfig`] / [`JiraClient`]. Both are wrapped in `RwLock` because we
-//! rebuild the client when the user updates credentials, but we do not want to
-//! make `Db` itself locked (it's already a connection pool).
+//! Holds the open SQLite database connection pool plus the active set of
+//! [`Connection`] instances (one live HTTP client per configured account) and
+//! a few in-process recorders (e.g. user-activity).
 //!
-//! Since Phase 17 the on-disk secret store lives at `app_data_dir/secret.toml`,
-//! so [`AppState`] also carries `app_data_dir` to give command handlers a
-//! single place to read it from without re-querying the [`tauri::AppHandle`].
+//! Phase 18A: replaced the single-connection model with a list. Legacy fields
+//! `jira_config` / `jira_client` are retained as thin shims pointing at the
+//! FIRST Jira connection so the existing commands (`save_config`,
+//! `test_jira_connection`, etc.) continue to work while the frontend transitions
+//! to the multi-connection API.
 
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-use crate::cache::Db;
+use crate::cache::{self, activity::ActivityRecorder, Db};
+use crate::commands::connections::JiraConnectionConfig;
 use crate::config::JiraConfig;
 use crate::jira::JiraClient;
+
+/// Discriminated provider clients. Currently only Jira; future variants
+/// (Toggl, Clockify, Freelo, …) will be added here.
+#[derive(Debug, Clone)]
+pub enum ProviderClient {
+    Jira(JiraClient),
+}
+
+/// An "active" connection: the row from the DB plus a built HTTP client.
+#[derive(Debug, Clone)]
+pub struct ActiveConnection {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+    pub enabled: bool,
+    pub client: ProviderClient,
+}
 
 /// Tauri-managed state shared across all command invocations.
 pub struct AppState {
@@ -23,33 +42,100 @@ pub struct AppState {
     /// Application data directory — used to resolve the on-disk secret file
     /// (`secret.toml`) and any other per-install assets.
     pub app_data_dir: PathBuf,
-    /// Last-known Jira configuration loaded from disk, if any.
+    /// Multi-connection: one [`ActiveConnection`] per row in `connections`
+    /// that has a usable token. Hydrated at startup via
+    /// [`hydrate_connections`] and re-hydrated whenever the connection set
+    /// changes (add/update/remove).
+    pub connections: RwLock<Vec<ActiveConnection>>,
+    /// In-process state for the user-activity feature.
+    pub activity_recorder: ActivityRecorder,
+
+    // ----- Legacy single-Jira shims (Phase 17 → 18A bridge) -------------------
+    /// Last-known Jira configuration loaded from disk, if any. Phase 18A:
+    /// derived from the first Jira connection; kept here for the old commands.
     pub jira_config: RwLock<Option<JiraConfig>>,
-    /// Live HTTP client. Present iff both config and the on-disk token resolved.
+    /// Live HTTP client. Phase 18A: a clone of the first connection's client.
     pub jira_client: RwLock<Option<JiraClient>>,
 }
 
 impl AppState {
-    /// Create a new [`AppState`] wrapping the given DB and remembering the
-    /// `app_data_dir` (used to locate `secret.toml`). The Jira client is
-    /// initially unset; call [`AppState::try_build_client`] after loading
-    /// config to materialise it.
     pub fn new(db: Db, app_data_dir: PathBuf) -> Self {
         Self {
             db,
             app_data_dir,
+            connections: RwLock::new(Vec::new()),
+            activity_recorder: ActivityRecorder::new(),
             jira_config: RwLock::new(None),
             jira_client: RwLock::new(None),
         }
     }
 
-    /// Try to build a fresh [`JiraClient`] from the current `jira_config`
-    /// and the on-disk Jira API token.
+    /// Rebuild the in-memory [`ActiveConnection`] list from the DB + secret
+    /// file. Skips rows that have no token (the UI surfaces the missing token
+    /// separately via `has_token: false` on the DTO).
     ///
-    /// Returns `Ok(true)` if a client was built and stored, `Ok(false)` if any
-    /// prerequisite (config or token) was missing — in which case any
-    /// previously stored client is cleared. Returns `Err` on secret-store /
-    /// HTTP build failures.
+    /// Also refreshes the legacy `jira_config` / `jira_client` shims using
+    /// the first enabled Jira connection.
+    pub fn hydrate_connections(&self) -> Result<(), anyhow::Error> {
+        let rows = cache::connections::list(&self.db)?;
+        let mut built = Vec::new();
+        for row in rows {
+            if !row.enabled {
+                continue;
+            }
+            match row.provider.as_str() {
+                "jira" => {
+                    let cfg: JiraConnectionConfig =
+                        serde_json::from_str(&row.config_json).unwrap_or_default();
+                    let key = cache::connections::token_key(row.id);
+                    let token = match crate::keychain::get(
+                        &self.app_data_dir,
+                        crate::keychain::KEYCHAIN_SERVICE,
+                        &key,
+                    )? {
+                        Some(t) => t,
+                        None => continue, // no token yet — skip
+                    };
+                    let client =
+                        JiraClient::new(cfg.base_url.clone(), cfg.email.clone(), token)?;
+                    built.push(ActiveConnection {
+                        id: row.id,
+                        kind: row.provider.clone(),
+                        name: row.name.clone(),
+                        enabled: row.enabled,
+                        client: ProviderClient::Jira(client),
+                    });
+                }
+                _ => continue, // unknown provider
+            }
+        }
+
+        // Refresh legacy shims from the first Jira connection (if any).
+        let first_jira = built.iter().find(|c| c.kind == "jira");
+        if let Some(c) = first_jira {
+            let ProviderClient::Jira(client) = &c.client;
+            *self.jira_client.write().unwrap() = Some(client.clone());
+            // Best-effort derive a JiraConfig from the persisted JSON.
+            let row = cache::connections::get_by_id(&self.db, c.id)?.unwrap();
+            if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(&row.config_json) {
+                *self.jira_config.write().unwrap() = Some(JiraConfig {
+                    base_url: cfg.base_url,
+                    email: cfg.email,
+                });
+            }
+        } else {
+            *self.jira_client.write().unwrap() = None;
+            *self.jira_config.write().unwrap() = None;
+        }
+
+        *self.connections.write().unwrap() = built;
+        Ok(())
+    }
+
+    /// Try to build a fresh [`JiraClient`] from the legacy `jira_config` and
+    /// on-disk token. Retained for backwards compatibility with the old
+    /// `save_config`/`update_config` commands; new code paths go through
+    /// [`hydrate_connections`].
     pub fn try_build_client(&self) -> Result<bool, anyhow::Error> {
         let cfg = self.jira_config.read().unwrap().clone();
         let token = crate::keychain::load_jira_token(&self.app_data_dir)?;
@@ -66,12 +152,10 @@ impl AppState {
         }
     }
 
-    /// Return a cheap clone of the current [`JiraClient`], if any.
     pub fn jira_client_cloned(&self) -> Option<JiraClient> {
         self.jira_client.read().unwrap().clone()
     }
 
-    /// Return a clone of the current [`JiraConfig`], if any.
     pub fn jira_config_cloned(&self) -> Option<JiraConfig> {
         self.jira_config.read().unwrap().clone()
     }

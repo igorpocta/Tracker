@@ -29,6 +29,11 @@ pub struct SaveConfigArgs {
 
 /// Persist the supplied Jira configuration to disk + secret file and rebuild
 /// the in-memory client. Emits a `config-changed` event on success.
+///
+/// Phase 18A: also dual-writes into the multi-connection model so the new
+/// frontend code paths can find the freshly-configured Jira account
+/// immediately. If a connection named "Jira" already exists, it's updated;
+/// otherwise a new row is created.
 #[tauri::command]
 pub async fn save_config(
     app: tauri::AppHandle,
@@ -44,10 +49,67 @@ pub async fn save_config(
     crate::keychain::save_jira_token(&state.app_data_dir, &args.token)
         .map_err(|e| e.to_string())?;
 
-    *state.jira_config.write().unwrap() = Some(args.config);
+    *state.jira_config.write().unwrap() = Some(args.config.clone());
     state.try_build_client().map_err(|e| e.to_string())?;
 
+    // Phase 18A: upsert into `connections` so the new APIs see this account.
+    upsert_legacy_jira_connection(&state, &args.config, &args.token)?;
+    let _ = state.hydrate_connections();
+
     let _ = app.emit("config-changed", ());
+    let _ = app.emit("connections-changed", ());
+    Ok(())
+}
+
+fn upsert_legacy_jira_connection(
+    state: &AppState,
+    cfg: &JiraConfig,
+    token: &str,
+) -> Result<(), String> {
+    use crate::cache;
+    use crate::commands::connections::JiraConnectionConfig;
+
+    let rows = cache::connections::list(&state.db).map_err(|e| e.to_string())?;
+    let jira_cfg = JiraConnectionConfig {
+        base_url: cfg.base_url.clone(),
+        email: cfg.email.clone(),
+        sync_jql: None,
+        my_issues_jql: None,
+    };
+    let cfg_json = serde_json::to_string(&jira_cfg)
+        .unwrap_or_else(|_| "{}".to_string());
+
+    let target_id = if let Some(row) = rows.iter().find(|r| r.provider == "jira") {
+        cache::connections::update_fields(
+            &state.db,
+            row.id,
+            None,
+            Some(true),
+            Some(&cfg_json),
+        )
+        .map_err(|e| e.to_string())?;
+        row.id
+    } else {
+        cache::connections::insert(
+            &state.db,
+            cache::connections::NewConnection {
+                provider: "jira",
+                name: "Jira",
+                enabled: true,
+                config_json: &cfg_json,
+            },
+        )
+        .map_err(|e| e.to_string())?
+    };
+
+    let key = cache::connections::token_key(target_id);
+    crate::keychain::set(
+        &state.app_data_dir,
+        crate::keychain::KEYCHAIN_SERVICE,
+        &key,
+        token,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

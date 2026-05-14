@@ -10,11 +10,15 @@
 //!    [`crate::state::AppState`] and forwards to the inner function, mapping
 //!    any error to `String` (Tauri requires the error type to be `Serialize`).
 
+pub mod activity;
 pub mod browser;
+pub mod calendar;
 pub mod config;
+pub mod connections;
 pub mod issues;
 pub mod misc;
 pub mod prefs;
+pub mod rounding;
 pub mod timer;
 pub mod tray;
 pub mod worklog;
