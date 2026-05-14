@@ -132,8 +132,8 @@ fn audit_failure(
     worklog_id: Option<&str>,
     before: Option<&WorklogRow>,
     err: &str,
-) {
-    let _ = cache::audit::record(
+) -> i64 {
+    cache::audit::record(
         db,
         cache::audit::AuditEvent {
             occurred_at: Utc::now().timestamp(),
@@ -144,8 +144,10 @@ fn audit_failure(
             after: None,
             success: false,
             error: Some(err),
+            source_audit_id: None,
         },
-    );
+    )
+    .unwrap_or(0)
 }
 
 fn audit_success(
@@ -155,8 +157,8 @@ fn audit_success(
     worklog_id: Option<&str>,
     before: Option<&WorklogRow>,
     after: Option<&WorklogRow>,
-) {
-    let _ = cache::audit::record(
+) -> i64 {
+    cache::audit::record(
         db,
         cache::audit::AuditEvent {
             occurred_at: Utc::now().timestamp(),
@@ -167,8 +169,10 @@ fn audit_success(
             after,
             success: true,
             error: None,
+            source_audit_id: None,
         },
-    );
+    )
+    .unwrap_or(0)
 }
 
 /// Create a new worklog manually (the AddEntry panel) and push it to Jira.
@@ -555,14 +559,145 @@ pub struct MoveWorklogResultDto {
     pub original_still_exists: bool,
 }
 
-/// Return the most recent `limit` audit entries (newest first).
+/// Return audit entries newest-first, with optional pagination + filters.
+///
+/// - `limit`: max rows to return (defaults to 50).
+/// - `before_id`: when paginating, pass the last `id` from the previous page.
+/// - `ops`: restrict to specific op kinds (e.g. `["delete", "update"]`).
+/// - `only_failed`: when true, only return rows where `success = 0`.
 #[tauri::command]
 pub async fn get_audit_log(
     state: tauri::State<'_, AppState>,
     limit: Option<u32>,
+    before_id: Option<i64>,
+    ops: Option<Vec<String>>,
+    only_failed: Option<bool>,
 ) -> Result<Vec<cache::audit::AuditEntry>, String> {
-    cache::audit::recent(&state.db, limit.unwrap_or(100))
-        .map_err(|e| e.to_string())
+    cache::audit::list(
+        &state.db,
+        limit.unwrap_or(50),
+        before_id,
+        ops.as_deref(),
+        only_failed.unwrap_or(false),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Phase 16 — purge audit rows older than `older_than_days` days. Returns the
+/// number of rows actually deleted.
+#[tauri::command]
+pub async fn purge_audit_log(
+    state: tauri::State<'_, AppState>,
+    older_than_days: u32,
+) -> Result<u32, String> {
+    let cutoff = Utc::now().timestamp() - (older_than_days as i64) * 86_400;
+    let n = cache::audit::purge_older_than(&state.db, cutoff)
+        .map_err(|e| e.to_string())?;
+    Ok(n as u32)
+}
+
+// -----------------------------------------------------------------------------
+// Phase 16 reconstruction commands
+//
+// The heavy lifting (Jira I/O, snapshot parsing, audit linkage) lives in
+// `jira::reconstruct`; these wrappers just look up the `JiraClient` from
+// application state and translate the typed errors into UI strings.
+// -----------------------------------------------------------------------------
+
+fn reconstruct_err_to_string(e: jira::reconstruct::ReconstructError) -> String {
+    match e {
+        jira::reconstruct::ReconstructError::Jira(je) => format!("Jira: {je}"),
+        other => other.to_string(),
+    }
+}
+
+/// Phase 16 — re-create a worklog in Jira from a previous audit entry's
+/// `before_json` snapshot.
+///
+/// Accepts audit entries of op = `delete` (we explicitly soft-deleted via the
+/// Trcker UI) or `sync_tombstone` (the row was detected as deleted in Jira by
+/// the mark-and-sweep pass). Both carry the full pre-deletion `WorklogRow`
+/// snapshot, which has everything we need to POST a fresh worklog:
+/// `issue_key`, `started_at`, `duration_s`, `comment`.
+///
+/// Note: the new worklog gets a fresh `jira_worklog_id`. The original deleted
+/// id stays gone — Jira does not support resurrecting by id, only POSTing a
+/// new replacement. The audit entry's `source_audit_id` preserves the link
+/// back to the original delete so the UI can show "Obnoveno" badge against
+/// the right history row.
+#[tauri::command]
+pub async fn restore_deleted_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    audit_id: i64,
+) -> Result<WorklogRow, String> {
+    let client = state
+        .jira_client_cloned()
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    let saved = jira::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
+        .await
+        .map_err(reconstruct_err_to_string)?;
+    let _ = app.emit("worklog-created", &saved);
+    Ok(saved)
+}
+
+/// Phase 16 — revert an `update` by pushing the old `before_json` values back
+/// to Jira as a fresh update.
+///
+/// Returns an error if the worklog has been deleted in Jira since the update
+/// happened — there's nothing to update in that case (the user should use
+/// "Obnovit v Jira" against the delete audit entry instead).
+#[tauri::command]
+pub async fn revert_worklog_update(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    audit_id: i64,
+) -> Result<WorklogRow, String> {
+    let client = state
+        .jira_client_cloned()
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    let after = jira::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
+        .await
+        .map_err(reconstruct_err_to_string)?;
+    let _ = app.emit("worklog-updated", &after);
+    Ok(after)
+}
+
+/// Phase 16 — replay a previously-failed audit action.
+///
+/// The strategy depends on the original op:
+/// - `create` → POST a new worklog using the `after_json` snapshot.
+/// - `update` → PUT using `after_json`.
+/// - `delete` / `sync_tombstone` → re-issue the Jira DELETE.
+/// - other ops → return an error.
+///
+/// Records a new audit entry with op = `retry` linked to the source.
+#[tauri::command]
+pub async fn retry_failed_audit_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    audit_id: i64,
+) -> Result<serde_json::Value, String> {
+    let client = state
+        .jira_client_cloned()
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    let result = jira::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
+        .await
+        .map_err(reconstruct_err_to_string)?;
+    // Emit the corresponding event so the UI invalidates the right queries.
+    match result.get("op").and_then(|v| v.as_str()) {
+        Some("create") => {
+            let _ = app.emit("worklog-created", &result);
+        }
+        Some("update") => {
+            let _ = app.emit("worklog-updated", &result);
+        }
+        Some("delete") => {
+            let _ = app.emit("worklog-delete-committed", &result);
+        }
+        _ => {}
+    }
+    Ok(result)
 }
 
 /// Background task body: commit a pending delete if it's still pending.
