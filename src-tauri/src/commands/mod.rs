@@ -15,6 +15,7 @@ pub mod browser;
 pub mod calendar;
 pub mod config;
 pub mod connections;
+pub mod favorites;
 pub mod issues;
 pub mod misc;
 pub mod prefs;

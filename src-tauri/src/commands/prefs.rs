@@ -52,6 +52,10 @@ pub const ALLOWED_CURRENCIES: &[&str] =
     &["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
 /// Default day timeline visibility — visible.
 pub const DEFAULT_DAY_TIMELINE_VISIBLE: bool = true;
+/// Phase 18B — Item 22: default visibility of the Reports earnings card.
+/// `true` means the value is visible by default; `false` keeps it masked
+/// with the eye-toggle to reveal.
+pub const DEFAULT_EARNINGS_VISIBLE: bool = true;
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -64,6 +68,10 @@ const KEY_ACCENT: &str = "accent_color";
 const KEY_CURRENCY: &str = "currency";
 const KEY_PALETTE_MODE: &str = "palette_mode";
 const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
+const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
+/// Phase 18B — Item 12: ISO date (YYYY-MM-DD) of the last time we fired the
+/// "daily goal reached" notification. Used to dedupe.
+pub const KEY_TODAY_GOAL_NOTIFIED_AT: &str = "today_goal_notified_at";
 
 // -----------------------------------------------------------------------------
 // Inner (Tauri-free) helpers.
@@ -233,6 +241,24 @@ pub fn get_day_timeline_visible_inner(db: &Db) -> Result<bool, String> {
 pub fn set_day_timeline_visible_inner(db: &Db, visible: bool) -> Result<(), String> {
     let v = if visible { "true" } else { "false" };
     cache::settings::set(db, KEY_DAY_TIMELINE_VISIBLE, v).map_err(|e| e.to_string())
+}
+
+// ----- Earnings visibility (Phase 18B — Item 22) -----
+
+pub fn get_earnings_visible_inner(db: &Db) -> Result<bool, String> {
+    match cache::settings::get(db, KEY_EARNINGS_VISIBLE).map_err(|e| e.to_string())? {
+        Some(v) => match v.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Ok(DEFAULT_EARNINGS_VISIBLE),
+        },
+        None => Ok(DEFAULT_EARNINGS_VISIBLE),
+    }
+}
+
+pub fn set_earnings_visible_inner(db: &Db, visible: bool) -> Result<(), String> {
+    let v = if visible { "true" } else { "false" };
+    cache::settings::set(db, KEY_EARNINGS_VISIBLE, v).map_err(|e| e.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -414,6 +440,26 @@ pub async fn set_day_timeline_visible(
 ) -> Result<(), String> {
     set_day_timeline_visible_inner(&state.db, visible)?;
     let _ = app.emit("prefs-changed", "day_timeline_visible");
+    Ok(())
+}
+
+// ----- Earnings visibility (Phase 18B — Item 22) -----
+
+#[tauri::command]
+pub async fn get_earnings_visible(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    get_earnings_visible_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_earnings_visible(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    visible: bool,
+) -> Result<(), String> {
+    set_earnings_visible_inner(&state.db, visible)?;
+    let _ = app.emit("prefs-changed", "earnings_visible");
     Ok(())
 }
 

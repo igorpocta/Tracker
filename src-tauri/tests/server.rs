@@ -166,7 +166,7 @@ async fn timer_state_returns_running_timer() {
     let (app, _dir) = fresh_state();
     {
         let app_state = app.state::<AppState>();
-        start_timer_inner(&app_state.db, "ACME-7", 1_000).unwrap();
+        start_timer_inner(&app_state.db, "ACME-7", 1_000, None).unwrap();
     }
 
     let state = fresh_server_state(&app);
@@ -192,7 +192,7 @@ async fn active_ticket_returns_issue_key() {
     let (app, _dir) = fresh_state();
     {
         let app_state = app.state::<AppState>();
-        start_timer_inner(&app_state.db, "ACME-9", 1_000).unwrap();
+        start_timer_inner(&app_state.db, "ACME-9", 1_000, None).unwrap();
     }
 
     let state = fresh_server_state(&app);

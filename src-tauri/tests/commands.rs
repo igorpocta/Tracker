@@ -60,7 +60,7 @@ fn start_then_get_returns_running_timer_with_elapsed() {
     let (_dir, db) = fresh_db();
 
     // Start at t=100_000 ms (100 s).
-    let state = start_timer_inner(&db, "ACME-1", 100_000).unwrap();
+    let state = start_timer_inner(&db, "ACME-1", 100_000, None).unwrap();
     assert_eq!(state.issue_key, "ACME-1");
     assert_eq!(state.started_at, 100_000);
     assert_eq!(state.elapsed_seconds, 0);
@@ -75,8 +75,8 @@ fn start_then_get_returns_running_timer_with_elapsed() {
 #[test]
 fn start_timer_replaces_previous_row() {
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 1_000).unwrap();
-    start_timer_inner(&db, "ACME-2", 5_000).unwrap();
+    start_timer_inner(&db, "ACME-1", 1_000, None).unwrap();
+    start_timer_inner(&db, "ACME-2", 5_000, None).unwrap();
     let t = timer::get(&db).unwrap().unwrap();
     assert_eq!(t.issue_key, "ACME-2");
     assert_eq!(t.started_at, 5);
@@ -85,7 +85,7 @@ fn start_timer_replaces_previous_row() {
 #[test]
 fn update_timer_start_changes_the_started_at_in_place() {
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 1_000).unwrap();
+    start_timer_inner(&db, "ACME-1", 1_000, None).unwrap();
     let updated = update_timer_start_inner(&db, 500, 1_500).unwrap();
     assert_eq!(updated.issue_key, "ACME-1");
     assert_eq!(updated.started_at, 0);
@@ -103,10 +103,11 @@ fn update_timer_start_errors_when_no_timer_running() {
 fn record_local_stop_writes_worklog_and_clears_timer() {
     let (_dir, db) = fresh_db();
     issue_upsert(&db, &issue("ACME-1", "fix the bug", 0)).unwrap();
-    start_timer_inner(&db, "ACME-1", 0).unwrap();
+    start_timer_inner(&db, "ACME-1", 0, None).unwrap();
     let timer_state = ActiveTimer {
         issue_key: "ACME-1".into(),
         started_at: 0,
+        comment: None,
     };
 
     let row = record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1"), None).unwrap();
@@ -132,6 +133,7 @@ fn record_local_stop_clamps_negative_duration_to_zero() {
     let timer_state = ActiveTimer {
         issue_key: "ACME-1".into(),
         started_at: 100,
+        comment: None,
     };
     // now < started_at → duration would be negative; we expect 0.
     let row = record_local_stop(&db, &timer_state, 0, None, None, None).unwrap();
@@ -299,6 +301,7 @@ fn suggested_issues_returns_only_issues_with_worklogs() {
     let timer_state = ActiveTimer {
         issue_key: "A-1".into(),
         started_at: 0,
+        comment: None,
     };
     record_local_stop(&db, &timer_state, 60_000, None, None, None).unwrap();
 

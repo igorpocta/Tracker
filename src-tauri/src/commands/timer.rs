@@ -5,12 +5,13 @@
 //! Tauri-facing API accepts and returns **milliseconds** because that's what
 //! JavaScript's `Date.now()` natively produces.
 
-use chrono::{TimeZone, Utc};
+use chrono::{Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+use tauri_plugin_notification::NotificationExt;
 
 use crate::cache::{self, timer::ActiveTimer, worklogs::WorklogRow, Db};
-use crate::commands::rounding;
+use crate::commands::{prefs, rounding};
 use crate::state::AppState;
 
 /// Snapshot of a running timer as the frontend wants to see it.
@@ -22,6 +23,9 @@ pub struct ActiveTimerState {
     pub started_at: i64,
     /// Elapsed seconds at the moment the snapshot was taken.
     pub elapsed_seconds: i64,
+    /// Phase 18B — Item 6: in-progress comment (null when blank).
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 impl ActiveTimerState {
@@ -32,6 +36,7 @@ impl ActiveTimerState {
             issue_key: t.issue_key.clone(),
             started_at: started_at_ms,
             elapsed_seconds,
+            comment: t.comment.clone(),
         }
     }
 }
@@ -53,19 +58,29 @@ pub fn get_timer_state_inner(db: &Db, now_ms: i64) -> Result<Option<ActiveTimerS
 /// Phase 18A — Item 4: `issue_key` may be empty (or whitespace), in which case
 /// the timer is "unassigned" and the UI surfaces a red ⚠ banner until the user
 /// picks an issue. An unassigned timer stops into a `pending_assignment` row.
+///
+/// Phase 18B — Item 6: an optional starting `comment` is persisted so it can
+/// be used when the timer is stopped (unless the StopDialog overrides it).
 pub fn start_timer_inner(
     db: &Db,
     issue_key: &str,
     started_at_ms: i64,
+    comment: Option<&str>,
 ) -> Result<ActiveTimerState, String> {
     // Normalise: trim whitespace; truly empty key is allowed (unassigned).
     let issue_key = issue_key.trim();
     let started_at_s = started_at_ms / 1000;
-    cache::timer::start(db, issue_key, started_at_s).map_err(|e| e.to_string())?;
+    let comment_norm = comment
+        .map(|c| c.trim())
+        .filter(|c| !c.is_empty())
+        .map(|c| c.to_string());
+    cache::timer::start_with_comment(db, issue_key, started_at_s, comment_norm.as_deref())
+        .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState {
         issue_key: issue_key.to_string(),
         started_at: started_at_s.saturating_mul(1000),
         elapsed_seconds: 0,
+        comment: comment_norm,
     })
 }
 
@@ -83,11 +98,44 @@ pub fn assign_active_timer_inner(
     let current = cache::timer::get(db)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no active timer".to_string())?;
-    cache::timer::start(db, issue_key, current.started_at).map_err(|e| e.to_string())?;
+    // Preserve the in-flight comment when assigning an issue.
+    cache::timer::start_with_comment(
+        db,
+        issue_key,
+        current.started_at,
+        current.comment.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
         &ActiveTimer {
             issue_key: issue_key.to_string(),
             started_at: current.started_at,
+            comment: current.comment,
+        },
+        now_ms,
+    ))
+}
+
+/// Phase 18B — Item 6: update the comment on the currently-running timer
+/// without otherwise modifying the state.
+pub fn update_timer_comment_inner(
+    db: &Db,
+    comment: Option<&str>,
+    now_ms: i64,
+) -> Result<ActiveTimerState, String> {
+    let current = cache::timer::get(db)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no active timer".to_string())?;
+    let comment_norm = comment
+        .map(|c| c.trim())
+        .filter(|c| !c.is_empty())
+        .map(|c| c.to_string());
+    cache::timer::set_comment(db, comment_norm.as_deref()).map_err(|e| e.to_string())?;
+    Ok(ActiveTimerState::from_timer(
+        &ActiveTimer {
+            issue_key: current.issue_key,
+            started_at: current.started_at,
+            comment: comment_norm,
         },
         now_ms,
     ))
@@ -103,11 +151,18 @@ pub fn update_timer_start_inner(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no active timer".to_string())?;
     let started_at_s = started_at_ms / 1000;
-    cache::timer::start(db, &current.issue_key, started_at_s).map_err(|e| e.to_string())?;
+    cache::timer::start_with_comment(
+        db,
+        &current.issue_key,
+        started_at_s,
+        current.comment.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
         &ActiveTimer {
             issue_key: current.issue_key,
             started_at: started_at_s,
+            comment: current.comment,
         },
         now_ms,
     ))
@@ -193,6 +248,7 @@ pub async fn start_timer(
     state: tauri::State<'_, AppState>,
     issue_key: Option<String>,
     started_at_ms: Option<i64>,
+    comment: Option<String>,
 ) -> Result<ActiveTimerState, String> {
     // Phase 18A — Item 10: ALWAYS use server-side now() as the timer start
     // unless the user explicitly passed an override (e.g. backdating via
@@ -201,7 +257,7 @@ pub async fn start_timer(
     // every minute — producing a ~58s drift between wall clock and timer.
     let started = started_at_ms.unwrap_or_else(now_ms);
     let issue_key = issue_key.unwrap_or_default();
-    let res = start_timer_inner(&state.db, &issue_key, started)?;
+    let res = start_timer_inner(&state.db, &issue_key, started, comment.as_deref())?;
     let _ = app.emit("timer-started", &res);
     Ok(res)
 }
@@ -215,6 +271,18 @@ pub async fn assign_active_timer(
     issue_key: String,
 ) -> Result<ActiveTimerState, String> {
     let res = assign_active_timer_inner(&state.db, &issue_key, now_ms())?;
+    let _ = app.emit("timer-updated", &res);
+    Ok(res)
+}
+
+/// Phase 18B — Item 6: update the in-progress comment on the running timer.
+#[tauri::command]
+pub async fn update_timer_comment(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    comment: Option<String>,
+) -> Result<ActiveTimerState, String> {
+    let res = update_timer_comment_inner(&state.db, comment.as_deref(), now_ms())?;
     let _ = app.emit("timer-updated", &res);
     Ok(res)
 }
@@ -259,6 +327,14 @@ pub async fn stop_timer_inner(
     // pushed to Jira; we save locally with `pending_assignment = 1`.
     let is_unassigned = timer.issue_key.is_empty();
 
+    // Phase 18B — Item 6: fall back to the timer's in-flight comment when the
+    // StopDialog didn't provide an override.
+    let effective_comment: Option<String> = match (comment.as_deref(), timer.comment.as_deref()) {
+        (Some(c), _) if !c.trim().is_empty() => Some(c.to_string()),
+        (_, Some(c)) if !c.trim().is_empty() => Some(c.to_string()),
+        _ => None,
+    };
+
     // Talk to Jira if possible (and we have an issue key).
     let jira_worklog_id = if is_unassigned {
         None
@@ -272,7 +348,7 @@ pub async fn stop_timer_inner(
                 &timer.issue_key,
                 started_dt,
                 duration_s,
-                comment.as_deref(),
+                effective_comment.as_deref(),
             )
             .await
         {
@@ -291,11 +367,66 @@ pub async fn stop_timer_inner(
         &state.db,
         &timer,
         now,
-        comment.as_deref(),
+        effective_comment.as_deref(),
         jira_worklog_id.as_deref(),
         Some(duration_s),
     )?;
     let _ = app.emit("worklog-saved", &row);
     let _ = app.emit("timer-stopped", &row);
+
+    // Phase 18B — Item 12: fire an OS notification when today's total just
+    // crossed the daily goal for the first time today.
+    maybe_notify_daily_goal_reached(&app, &state.db);
+
     Ok(Some(row))
+}
+
+/// Phase 18B — Item 12: best-effort "you've hit your daily goal" notification.
+///
+/// Fires at most once per local calendar day. The dedupe state lives in
+/// `app_settings` (key: `today_goal_notified_at`).
+fn maybe_notify_daily_goal_reached(app: &tauri::AppHandle, db: &Db) {
+    // Snapshot today's local-day range, expressed in unix seconds.
+    let now_local = Local::now();
+    let today = now_local.date_naive();
+    let start_local = today.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let from = match Local.from_local_datetime(&start_local).single() {
+        Some(d) => d.timestamp(),
+        None => return,
+    };
+    let to = from + 86_400;
+
+    let total = match cache::worklogs::total_seconds_for_range(db, from, to - 1, None) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+
+    let goal = match prefs::get_daily_goal_inner(db) {
+        Ok(g) if g > 0 => g,
+        _ => return,
+    };
+
+    if total < goal {
+        return;
+    }
+
+    // Dedupe via the settings key.
+    let today_iso = today.format("%Y-%m-%d").to_string();
+    match cache::settings::get(db, prefs::KEY_TODAY_GOAL_NOTIFIED_AT) {
+        Ok(Some(v)) if v == today_iso => return,
+        _ => {}
+    }
+    if cache::settings::set(db, prefs::KEY_TODAY_GOAL_NOTIFIED_AT, &today_iso).is_err() {
+        return;
+    }
+
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let body = format!("🎉 Dnešní cíl splněn! Dnes máš {hours}h {minutes}m.");
+    let _ = app
+        .notification()
+        .builder()
+        .title("Tracker")
+        .body(&body)
+        .show();
 }

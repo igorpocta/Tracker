@@ -11,6 +11,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (7, include_str!("../../migrations/0007_calendar.sql")),
     (8, include_str!("../../migrations/0008_activity.sql")),
     (9, include_str!("../../migrations/0009_pending_assignment.sql")),
+    (10, include_str!("../../migrations/0010_active_timer_comment.sql")),
+    (11, include_str!("../../migrations/0011_favorites.sql")),
 ];
 
 pub fn run(db: &Db) -> Result<(), DbError> {

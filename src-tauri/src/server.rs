@@ -283,7 +283,7 @@ async fn start_timer_handler<R: Runtime>(
         None => return err_response(StatusCode::INTERNAL_SERVER_ERROR, "app state missing"),
     };
     let started_at = req.started_at_ms.unwrap_or_else(now_ms);
-    match start_timer_inner(&app_state.db, &req.issue_key, started_at) {
+    match start_timer_inner(&app_state.db, &req.issue_key, started_at, None) {
         Ok(snap) => {
             use tauri::Emitter;
             let _ = state.app.emit("timer-started", &snap);

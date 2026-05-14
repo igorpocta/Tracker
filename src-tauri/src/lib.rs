@@ -24,6 +24,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -142,8 +143,27 @@ pub fn run() {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 let state = auto_handle.state::<AppState>();
                 let active = state.connections.read().unwrap().clone();
-                for active_conn in active {
+                let total = active.len();
+                // Phase 18B — Item 19: emit progress so the UI can show a
+                // banner with "Synchronizuji s Jira…".
+                let _ = auto_handle.emit(
+                    "auto-sync-progress",
+                    serde_json::json!({
+                        "phase": "starting",
+                        "current": 0,
+                        "total": total,
+                    }),
+                );
+                for (idx, active_conn) in active.into_iter().enumerate() {
                     let ProviderClient::Jira(client) = active_conn.client;
+                    let _ = auto_handle.emit(
+                        "auto-sync-progress",
+                        serde_json::json!({
+                            "phase": "issues",
+                            "current": idx,
+                            "total": total,
+                        }),
+                    );
                     let _ = jira::sync_issues_from_jira(&client, &state.db).await;
 
                     let me = match client.myself().await {
@@ -152,6 +172,14 @@ pub fn run() {
                     };
                     let today = chrono::Local::now().date_naive();
                     let from = today - chrono::Duration::days(30);
+                    let _ = auto_handle.emit(
+                        "auto-sync-progress",
+                        serde_json::json!({
+                            "phase": "worklogs",
+                            "current": idx,
+                            "total": total,
+                        }),
+                    );
                     let _ = jira::worklog_sync::sync_worklogs_for_range(
                         &client,
                         &state.db,
@@ -210,7 +238,13 @@ pub fn run() {
             commands::timer::start_timer,
             commands::timer::stop_timer_inner,
             commands::timer::update_timer_start,
+            commands::timer::update_timer_comment,
             commands::timer::assign_active_timer,
+            // Favorites (Phase 18B — Item 26)
+            commands::favorites::list_favorites,
+            commands::favorites::add_favorite,
+            commands::favorites::remove_favorite,
+            commands::favorites::is_favorite,
             // Issues
             commands::issues::search_issues_cache,
             commands::issues::get_recent_issues,
@@ -257,6 +291,8 @@ pub fn run() {
             commands::prefs::set_palette_mode,
             commands::prefs::get_day_timeline_visible,
             commands::prefs::set_day_timeline_visible,
+            commands::prefs::get_earnings_visible,
+            commands::prefs::set_earnings_visible,
             // Rounding (Phase 18A — Item 27)
             commands::rounding::get_rounding_mode,
             commands::rounding::set_rounding_mode,
