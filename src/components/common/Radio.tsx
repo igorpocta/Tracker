@@ -36,7 +36,10 @@ export function RadioGroup<T extends string = string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={clsx("inline-flex flex-wrap gap-1 p-1 rounded-lg bg-neutral-950 border border-neutral-800", className)}
+      className={clsx(
+        "inline-flex flex-wrap gap-0.5 p-0.5 rounded-[var(--radius-md)] bg-[var(--bg-app)] border border-[var(--border-subtle)]",
+        className,
+      )}
     >
       {options.map((opt) => {
         const checked = opt.value === value;
@@ -48,10 +51,10 @@ export function RadioGroup<T extends string = string>({
             aria-checked={checked}
             onClick={() => onChange(opt.value)}
             className={clsx(
-              "rounded-md px-2.5 py-1 text-xs transition-colors flex flex-col items-start gap-0.5 text-left",
+              "rounded-[var(--radius-sm)] px-2.5 py-1 text-xs transition-colors duration-150 flex flex-col items-start gap-0.5 text-left",
               checked
-                ? "bg-sky-600 text-white shadow-sm"
-                : "text-neutral-300 hover:bg-neutral-800",
+                ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
             )}
           >
             <span className="font-medium">{opt.label}</span>
@@ -59,7 +62,7 @@ export function RadioGroup<T extends string = string>({
               <span
                 className={clsx(
                   "text-[10px]",
-                  checked ? "text-sky-100" : "text-neutral-500",
+                  checked ? "text-[var(--text-tertiary)]" : "text-[var(--text-tertiary)]",
                 )}
               >
                 {opt.hint}

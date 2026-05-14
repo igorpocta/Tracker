@@ -26,10 +26,12 @@ export function IconButton({
       // eslint-disable-next-line react/button-has-type
       type={type}
       className={clsx(
-        "inline-flex items-center justify-center rounded-md w-8 h-8 transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center rounded-[var(--radius-md)] w-8 h-8",
+        "transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
+        "outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]",
         filled
-          ? "bg-neutral-800 hover:bg-neutral-700 text-neutral-100"
-          : "text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800",
+          ? "bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] text-[var(--text-primary)]"
+          : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
         className,
       )}
       {...rest}

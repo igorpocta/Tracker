@@ -1,8 +1,5 @@
 /**
  * Tiny in-house toast: a top-right floating pill that auto-dismisses.
- *
- * We deliberately avoid pulling in a full toast library — Phase 6 only
- * needs success/error confirmation for worklog saves.
  */
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import { useEffect } from "react";
@@ -51,33 +48,30 @@ function ToastItem({
       : toast.variant === "error"
         ? AlertCircle
         : CheckCircle2;
-  const tone =
+
+  const iconColor =
     toast.variant === "success"
-      ? "border-emerald-700/40 bg-emerald-900/30 text-emerald-100"
+      ? "text-[var(--success)]"
       : toast.variant === "error"
-        ? "border-red-700/40 bg-red-900/30 text-red-100"
-        : "border-neutral-800 bg-neutral-900 text-neutral-100";
+        ? "text-[var(--danger)]"
+        : "text-[var(--text-secondary)]";
 
   return (
     <div
       role="status"
-      className={`inline-flex items-start gap-2 px-3 py-2 rounded-lg border shadow-lg ${tone}`}
+      className="inline-flex items-start gap-2 px-3 py-2 rounded-[var(--radius-md)]
+                 bg-[var(--bg-elevated)] border border-[var(--border-default)]
+                 text-[var(--text-primary)] shadow-[var(--shadow-md)]"
     >
       <Icon
-        className={`w-4 h-4 shrink-0 mt-0.5 ${
-          toast.variant === "success"
-            ? "text-emerald-400"
-            : toast.variant === "error"
-              ? "text-red-400"
-              : "text-neutral-300"
-        }`}
+        className={`w-4 h-4 shrink-0 mt-0.5 ${iconColor}`}
         aria-hidden
       />
       <span className="text-xs flex-1">{toast.message}</span>
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
-        className="text-neutral-400 hover:text-white"
+        className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
         aria-label="Dismiss"
       >
         <X className="w-3.5 h-3.5" aria-hidden />

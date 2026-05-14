@@ -1,17 +1,20 @@
 /**
- * Plain styled button used across the main app.
+ * Standard button — token-driven, no hardcoded color literals.
  *
- * Three visual variants:
- * - `primary` — the "Stop & save", "Start" call-to-action button.
- * - `secondary` — neutral cancel / dismiss buttons.
- * - `danger` — destructive operations (red). Currently unused but defined
- *   so the rest of the app can rely on a single button component.
+ * Variants:
+ * - `primary` — accent fill + accent-text. The single bright element in a view.
+ * - `secondary` — transparent + border + primary text. The neutral default.
+ * - `danger` — danger-tinted, used for destructive ops only.
+ * - `ghost` — no border, no fill, just hoverable text.
+ *
+ * Heights are fixed (28 / 32 / 36 px) so rows of buttons align cleanly with
+ * other 32px-tall controls (inputs, selects).
  */
 import { clsx } from "clsx";
 import type { ButtonHTMLAttributes } from "react";
 
 export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
-export type ButtonSize = "sm" | "md";
+export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -20,18 +23,26 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    "bg-sky-600 hover:bg-sky-500 text-white disabled:bg-neutral-800 disabled:text-neutral-500",
+    "bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)] " +
+    "disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] " +
+    "focus-visible:ring-[var(--accent-ring)]",
   secondary:
-    "bg-neutral-800 hover:bg-neutral-700 text-neutral-100 disabled:bg-neutral-900 disabled:text-neutral-600",
+    "bg-transparent border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] " +
+    "disabled:text-[var(--text-disabled)] disabled:border-[var(--border-subtle)] " +
+    "focus-visible:ring-[var(--accent-ring)]",
   danger:
-    "bg-red-600 hover:bg-red-500 text-white disabled:bg-neutral-800 disabled:text-neutral-500",
+    "bg-[var(--danger)] hover:brightness-110 text-white " +
+    "disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:hover:brightness-100",
   ghost:
-    "bg-transparent hover:bg-neutral-800 text-neutral-200 disabled:text-neutral-600",
+    "bg-transparent hover:bg-[var(--bg-hover)] text-[var(--text-primary)] " +
+    "disabled:text-[var(--text-disabled)] " +
+    "focus-visible:ring-[var(--accent-ring)]",
 };
 
 const sizes: Record<ButtonSize, string> = {
-  sm: "px-2.5 py-1 text-xs",
-  md: "px-3.5 py-2 text-sm",
+  sm: "h-7 px-2.5 text-xs",
+  md: "h-8 px-3 text-xs",
+  lg: "h-9 px-4 text-sm",
 };
 
 export function Button({
@@ -48,7 +59,10 @@ export function Button({
       type={type}
       disabled={disabled}
       className={clsx(
-        "rounded-md font-medium transition-colors disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5",
+        "rounded-[var(--radius-md)] font-medium transition-colors duration-150",
+        "inline-flex items-center justify-center gap-1.5",
+        "disabled:cursor-not-allowed",
+        "outline-none focus-visible:ring-2 ring-offset-0",
         variants[variant],
         sizes[size],
         className,

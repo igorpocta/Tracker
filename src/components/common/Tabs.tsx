@@ -2,8 +2,7 @@
  * Minimal tab strip + content container.
  *
  * Controlled component — the parent owns the active tab id. The strip
- * renders horizontally; ids are arbitrary strings (we don't lean on
- * route URLs because Settings tabs are inside a single route).
+ * renders horizontally; active tab gets an accent underline (not a fill).
  */
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
@@ -27,7 +26,7 @@ export function Tabs({ tabs, active, onChange, className }: TabsProps) {
     <div
       role="tablist"
       className={clsx(
-        "flex items-center gap-1 border-b border-neutral-800/70",
+        "flex items-center gap-1 border-b border-[var(--border-subtle)]",
         className,
       )}
     >
@@ -43,10 +42,10 @@ export function Tabs({ tabs, active, onChange, className }: TabsProps) {
           onClick={() => onChange(t.id)}
           onKeyDown={(e) => handleTabKey(e, tabs, active, onChange)}
           className={clsx(
-            "inline-flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 -mb-[1px] transition-colors",
+            "inline-flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 -mb-[1px] transition-colors duration-150",
             active === t.id
-              ? "border-sky-500 text-white"
-              : "border-transparent text-neutral-400 hover:text-neutral-100",
+              ? "border-[var(--accent)] text-[var(--text-primary)]"
+              : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
           )}
         >
           {t.icon}

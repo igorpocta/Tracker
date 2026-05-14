@@ -1,8 +1,8 @@
 /**
  * Native `<select>` wrapped with our app styling.
  *
- * For Tracker MVP we deliberately use the OS-native dropdown — building a
- * custom listbox with full keyboard support is a yak we don't need shaving.
+ * Building a custom listbox is rarely worth the accessibility work — the
+ * OS-native dropdown reads better and integrates with platform conventions.
  */
 import { clsx } from "clsx";
 import { ChevronDown } from "lucide-react";
@@ -24,9 +24,10 @@ export function Select({ options, className, ...rest }: SelectProps) {
       <select
         {...rest}
         className={clsx(
-          "appearance-none pl-2.5 pr-7 py-1.5 rounded-md bg-neutral-950 border border-neutral-800",
-          "text-xs text-neutral-100 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500",
-          "cursor-pointer",
+          "appearance-none pl-2.5 pr-7 h-8 rounded-[var(--radius-md)]",
+          "bg-transparent border border-[var(--border-default)] text-xs text-[var(--text-primary)]",
+          "focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-ring)]",
+          "cursor-pointer transition-colors duration-150",
         )}
       >
         {options.map((o) => (
@@ -37,7 +38,7 @@ export function Select({ options, className, ...rest }: SelectProps) {
       </select>
       <ChevronDown
         aria-hidden
-        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500 pointer-events-none"
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none"
       />
     </div>
   );

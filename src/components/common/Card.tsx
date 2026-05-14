@@ -1,14 +1,15 @@
 /**
- * Generic neutral card with a subtle border + dark background.
+ * Neutral surface card. Used for every "panel" in the app — Today's timer,
+ * Reports summary cards, Settings sections, etc.
  *
- * Used as the building block for most "panels" in the app — Today's timer
- * card, Reports summary cards, Settings sections, etc.
+ * Surfaces follow the dark/light token system. A hairline border anchors
+ * the card without competing visually with its content.
  */
 import { clsx } from "clsx";
 import type { HTMLAttributes, ReactNode } from "react";
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  /** Optional header content rendered above `children` with a small bottom border. */
+  /** Optional header content rendered above `children` with a subtle bottom border. */
   header?: ReactNode;
   /** Tweaks the inner padding — `none` is useful when the body is its own list. */
   padding?: "none" | "sm" | "md" | "lg";
@@ -31,13 +32,14 @@ export function Card({
   return (
     <div
       className={clsx(
-        "rounded-xl border border-neutral-800/80 bg-neutral-900/60 shadow-sm",
+        "rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]",
+        "shadow-[var(--shadow-sm)]",
         className,
       )}
       {...rest}
     >
       {header && (
-        <div className="px-4 py-2.5 border-b border-neutral-800/70 text-xs text-neutral-300 flex items-center gap-2">
+        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] flex items-center gap-2">
           {header}
         </div>
       )}

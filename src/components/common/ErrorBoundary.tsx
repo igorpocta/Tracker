@@ -62,16 +62,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <div
         role="alert"
-        className="min-h-screen flex items-center justify-center p-6 bg-[#0f0f0f] text-neutral-100"
+        className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-app)] text-[var(--text-primary)]"
       >
-        <div className="max-w-md w-full bg-neutral-900/80 border border-neutral-800 rounded-lg p-6 shadow-lg">
+        <div className="max-w-md w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 shadow-[var(--shadow-md)]">
           <h1 className="text-lg font-semibold mb-2">Something went wrong</h1>
-          <p className="text-sm text-neutral-400 mb-4">
+          <p className="text-sm text-[var(--text-secondary)] mb-4">
             Tracker hit an unexpected error and couldn't continue. Reloading
             the window will usually fix it.
           </p>
           {error.message && (
-            <pre className="text-xs text-neutral-500 bg-black/40 rounded p-3 mb-4 overflow-auto max-h-32">
+            <pre className="text-xs text-[var(--text-tertiary)] bg-[var(--bg-app)] rounded-[var(--radius-sm)] p-3 mb-4 overflow-auto max-h-32 border border-[var(--border-subtle)]">
               {error.message}
             </pre>
           )}
@@ -79,14 +79,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <button
               type="button"
               onClick={this.reset}
-              className="px-3 py-1.5 text-xs rounded border border-neutral-700 hover:bg-neutral-800"
+              className="h-8 px-3 text-xs rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
             >
               Try again
             </button>
             <button
               type="button"
               onClick={this.reload}
-              className="px-3 py-1.5 text-xs rounded bg-sky-600 hover:bg-sky-500 text-white"
+              className="h-8 px-3 text-xs rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)]"
             >
               Reload
             </button>
