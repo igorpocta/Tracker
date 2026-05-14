@@ -72,7 +72,7 @@ function ToastItem({
         type="button"
         onClick={() => onDismiss(toast.id)}
         className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-        aria-label="Dismiss"
+        aria-label="Zavřít"
       >
         <X className="w-3.5 h-3.5" aria-hidden />
       </button>

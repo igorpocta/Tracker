@@ -44,17 +44,17 @@ import {
   startOfPreviousMonth,
   startOfWeek,
 } from "../lib/dates";
-import { formatDurationShort, formatMoney } from "../lib/format";
+import { formatDateCs, formatDateCsShort, formatDurationShort, formatMoney } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
 type Period = "this-week" | "last-week" | "this-month" | "last-month" | "last-30";
 
 const PERIOD_LABEL: Record<Period, string> = {
-  "this-week": "This week",
-  "last-week": "Last week",
-  "this-month": "This month",
-  "last-month": "Last month",
-  "last-30": "Last 30 days",
+  "this-week": "Tento týden",
+  "last-week": "Minulý týden",
+  "this-month": "Tento měsíc",
+  "last-month": "Minulý měsíc",
+  "last-30": "Posledních 30 dní",
 };
 
 export default function Reports() {
@@ -85,11 +85,11 @@ export default function Reports() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Reports
+            Reporty
           </h1>
           <PeriodSelector value={period} onChange={setPeriod} />
           <span className="text-xs font-mono text-[var(--text-tertiary)]">
-            {formatDateShort(from)} → {formatDateShort(to)}
+            {formatDateCs(from)} → {formatDateCs(to)}
           </span>
         </div>
         <button
@@ -102,13 +102,13 @@ export default function Reports() {
                      transition-colors duration-150"
         >
           <Download className="w-3.5 h-3.5" aria-hidden />
-          Export XLSX
+          Exportovat XLSX
         </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <BigStatCard
-          label="Total time"
+          label="Celkový čas"
           value={
             totalSeconds > 0 ? (
               <span className="text-[var(--accent)]">
@@ -119,8 +119,8 @@ export default function Reports() {
             )
           }
         />
-        <BigStatCard label="Days worked" value={`${daysWorked}`} />
-        <BigStatCard label="Issues touched" value={`${issuesTouched}`} />
+        <BigStatCard label="Odpracovaných dní" value={`${daysWorked}`} />
+        <BigStatCard label="Dotčených úkolů" value={`${issuesTouched}`} />
         <EarningsCard
           earnings={earnings}
           currency={currency}
@@ -153,7 +153,7 @@ function PeriodSelector({
         onChange={(e) => onChange(e.target.value as Period)}
         className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                    cursor-pointer focus:outline-none pr-4"
-        aria-label="Period"
+        aria-label="Období"
       >
         {(["this-week", "last-week", "this-month", "last-month", "last-30"] as Period[]).map((p) => (
           <option key={p} value={p}>
@@ -199,12 +199,12 @@ function EarningsCard({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-4 relative">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] text-[var(--text-tertiary)]">Earnings</div>
+        <div className="text-[11px] text-[var(--text-tertiary)]">Výdělek</div>
         {enabled && (
           <button
             type="button"
             onClick={() => setRevealed((v) => !v)}
-            aria-label={revealed ? "Hide earnings" : "Reveal earnings"}
+            aria-label={revealed ? "Skrýt výdělek" : "Zobrazit výdělek"}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]
                        transition-colors duration-150"
           >
@@ -252,7 +252,7 @@ function DailyHoursChart({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Daily hours
+        Hodiny za den
       </h3>
       <div className="flex gap-4 h-[260px]">
         <div className="flex flex-col justify-between text-[10px] text-[var(--text-tertiary)] tabular-nums py-1">
@@ -278,7 +278,7 @@ function DailyHoursChart({
                 <div
                   key={d.toISOString()}
                   className="flex-1 relative"
-                  title={`${formatDateShort(d)} · ${formatDurationShort(seconds)}`}
+                  title={`${formatDateCs(d)} · ${formatDurationShort(seconds)}`}
                 >
                   <div
                     className="absolute left-0 right-0 bottom-0 rounded-t-[2px]"
@@ -301,7 +301,7 @@ function DailyHoursChart({
                 key={`label-${d.toISOString()}`}
                 className="flex-1 text-[9px] text-[var(--text-tertiary)] text-center tabular-nums"
               >
-                {idx % 2 === 0 ? formatDateShortNoYear(d) : ""}
+                {idx % 2 === 0 ? formatDateCsShort(d) : ""}
               </div>
             ))}
           </div>
@@ -318,24 +318,24 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Issues breakdown
+        Rozpad úkolů
       </h3>
       <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 gap-y-1 text-xs items-center">
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
-          Issue
+          Úkol
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
-          Summary
+          Popis
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1 text-right">
-          Total
+          Celkem
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1 text-right">
-          Last logged
+          Naposledy zaznamenáno
         </div>
         {aggregated.length === 0 && (
           <div className="col-span-4 py-4 text-center text-[var(--text-tertiary)]">
-            Nothing here yet.
+            Zatím prázdné.
           </div>
         )}
         {aggregated.map((a) => (
@@ -344,13 +344,13 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
               <IssuePill issueKey={a.issueKey} />
             </div>
             <div className="truncate text-[var(--text-secondary)]">
-              {a.summary || "(no summary)"}
+              {a.summary || "(bez popisu)"}
             </div>
             <div className="text-right font-mono tabular-nums text-[var(--text-primary)]">
               {formatDurationShort(a.totalSeconds)}
             </div>
             <div className="text-right font-mono tabular-nums text-[var(--text-tertiary)]">
-              {formatDateShort(new Date(a.lastLoggedUnixS * 1000))}
+              {formatDateCs(new Date(a.lastLoggedUnixS * 1000))}
             </div>
           </div>
         ))}
@@ -445,13 +445,6 @@ function formatKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-function formatDateShort(d: Date): string {
-  return `${`${d.getDate()}`.padStart(2, "0")}/${`${d.getMonth() + 1}`.padStart(2, "0")}/${d.getFullYear()}`;
-}
-
-function formatDateShortNoYear(d: Date): string {
-  return `${`${d.getDate()}`.padStart(2, "0")}/${`${d.getMonth() + 1}`.padStart(2, "0")}`;
-}
 
 /**
  * Export the supplied worklog rows as a CSV download. Despite the button
@@ -459,14 +452,14 @@ function formatDateShortNoYear(d: Date): string {
  * adding a real XLSX writer dependency for one button is poor leverage.
  */
 function exportXlsx(rows: WorklogRow[], from: Date, to: Date): void {
-  const headers = ["Issue", "Summary", "Date", "Start", "End", "Duration (min)", "Comment"];
+  const headers = ["Úkol", "Popis", "Datum", "Začátek", "Konec", "Trvání (min)", "Komentář"];
   const body = rows.map((r) => {
     const start = new Date(r.started_at * 1000);
     const end = new Date((r.started_at + r.duration_s) * 1000);
     return [
       r.issue_key,
       r.summary ?? "",
-      formatDateShort(start),
+      formatDateCs(start),
       `${`${start.getHours()}`.padStart(2, "0")}:${`${start.getMinutes()}`.padStart(2, "0")}`,
       `${`${end.getHours()}`.padStart(2, "0")}:${`${end.getMinutes()}`.padStart(2, "0")}`,
       `${Math.round(r.duration_s / 60)}`,

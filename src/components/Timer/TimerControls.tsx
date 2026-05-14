@@ -65,7 +65,7 @@ export function StopDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Stop timer"
+      aria-label="Zastavit časomíru"
       className="fixed inset-0 z-50 bg-[var(--bg-overlay)] backdrop-blur-sm flex items-center justify-center p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !busy) onClose();
@@ -73,7 +73,7 @@ export function StopDialog({
     >
       <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-md p-5 flex flex-col gap-4">
         <header>
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">Stop & save worklog</h2>
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Zastavit a uložit záznam</h2>
           <p className="text-xs text-[var(--text-secondary)] mt-0.5">
             <span className="font-mono">{active.issue_key}</span>
           </p>
@@ -85,7 +85,7 @@ export function StopDialog({
           </span>
           {startChanged && (
             <span className="text-[10px] uppercase tracking-wide text-[var(--warning)]">
-              edited
+              upraveno
             </span>
           )}
         </div>
@@ -102,7 +102,7 @@ export function StopDialog({
             onClick={() => setShowStartEditor(true)}
             className="self-start text-xs text-[var(--accent)] hover:underline underline-offset-2"
           >
-            Edit start time
+            Upravit čas začátku
           </button>
         )}
 
@@ -110,11 +110,11 @@ export function StopDialog({
 
         <footer className="flex items-center justify-end gap-2 pt-1">
           <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Cancel
+            Zrušit
           </Button>
           <Button variant="primary" onClick={handleConfirm} disabled={busy}>
             {busy && <Spinner className="w-3.5 h-3.5" />}
-            Stop & save
+            Zastavit a uložit
           </Button>
         </footer>
       </div>

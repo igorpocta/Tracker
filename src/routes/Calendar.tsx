@@ -36,18 +36,18 @@ import {
 import { formatDurationShort, formatHours } from "../lib/format";
 
 const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "Leden",
+  "Únor",
+  "Březen",
+  "Duben",
+  "Květen",
+  "Červen",
+  "Červenec",
+  "Srpen",
+  "Září",
+  "Říjen",
+  "Listopad",
+  "Prosinec",
 ];
 
 export default function Calendar() {
@@ -88,14 +88,14 @@ export default function Calendar() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Calendar overview
+            Přehled kalendáře
           </h1>
           <Segmented
             value={view}
             onChange={setView}
             options={[
-              { value: "monthly", label: "Monthly" },
-              { value: "yearly", label: "Yearly" },
+              { value: "monthly", label: "Měsíční" },
+              { value: "yearly", label: "Roční" },
             ]}
           />
           <YearMonthPickers
@@ -110,14 +110,14 @@ export default function Calendar() {
             {monthTotal > 0 ? formatDurationShort(monthTotal) : "0m"}
           </div>
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Month total
+            Celkem za měsíc
           </div>
         </div>
       </div>
 
       {/* Weekday header */}
       <div className="grid grid-cols-7 gap-2 px-1">
-        {["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((d) => (
+        {["PO", "ÚT", "ST", "ČT", "PÁ", "SO", "NE"].map((d) => (
           <div
             key={d}
             className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]"
@@ -250,7 +250,7 @@ function YearMonthPickers({
         value={year}
         onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
         className="appearance-none bg-transparent border-none cursor-pointer focus:outline-none"
-        aria-label="Year"
+        aria-label="Rok"
       >
         {years.map((y) => (
           <option key={y} value={y}>
@@ -262,7 +262,7 @@ function YearMonthPickers({
         value={month}
         onChange={(e) => onMonthChange(parseInt(e.target.value, 10))}
         className="appearance-none bg-transparent border-none cursor-pointer focus:outline-none"
-        aria-label="Month"
+        aria-label="Měsíc"
       >
         {MONTHS.map((m, i) => (
           <option key={m} value={i}>

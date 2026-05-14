@@ -65,10 +65,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-app)] text-[var(--text-primary)]"
       >
         <div className="max-w-md w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 shadow-[var(--shadow-md)]">
-          <h1 className="text-lg font-semibold mb-2">Something went wrong</h1>
+          <h1 className="text-lg font-semibold mb-2">Něco se nepovedlo</h1>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
-            Tracker hit an unexpected error and couldn't continue. Reloading
-            the window will usually fix it.
+            Tracker narazil na neočekávanou chybu a nemůže pokračovat.
+            Načtení okna obvykle pomůže.
           </p>
           {error.message && (
             <pre className="text-xs text-[var(--text-tertiary)] bg-[var(--bg-app)] rounded-[var(--radius-sm)] p-3 mb-4 overflow-auto max-h-32 border border-[var(--border-subtle)]">
@@ -81,14 +81,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               onClick={this.reset}
               className="h-8 px-3 text-xs rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
             >
-              Try again
+              Zkusit znovu
             </button>
             <button
               type="button"
               onClick={this.reload}
               className="h-8 px-3 text-xs rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)]"
             >
-              Reload
+              Načíst znovu
             </button>
           </div>
         </div>

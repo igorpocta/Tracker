@@ -36,9 +36,9 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>,
     );
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText(/Something went wrong/i)).toBeInTheDocument();
+    expect(screen.getByText(/něco se nepovedlo/i)).toBeInTheDocument();
     expect(screen.getByText(/kaboom!/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /načíst znovu/i })).toBeInTheDocument();
   });
 
   it("uses the custom fallback when provided", () => {

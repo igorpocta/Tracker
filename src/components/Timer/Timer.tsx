@@ -31,7 +31,7 @@ export function Timer({ className }: TimerProps) {
         className,
       )}
       aria-live="polite"
-      aria-label={running ? `Elapsed time ${formatDuration(elapsed)}` : "Timer not running"}
+      aria-label={running ? `Uplynulý čas ${formatDuration(elapsed)}` : "Časomíra neběží"}
     >
       {running ? formatDuration(elapsed) : "--:--:--"}
     </div>

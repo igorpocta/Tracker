@@ -29,8 +29,8 @@ export interface ConfirmButtonProps {
 
 export function ConfirmButton({
   label,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel = "Potvrdit",
+  cancelLabel = "Zrušit",
   onConfirm,
   variant = "danger",
   disabled = false,

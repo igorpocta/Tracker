@@ -42,28 +42,28 @@ import { formatDurationShort } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
 const MONTHS_LONG = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "leden",
+  "únor",
+  "březen",
+  "duben",
+  "květen",
+  "červen",
+  "červenec",
+  "srpen",
+  "září",
+  "říjen",
+  "listopad",
+  "prosinec",
 ];
 
 const WEEKDAYS_LONG = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
+  "Neděle",
+  "Pondělí",
+  "Úterý",
+  "Středa",
+  "Čtvrtek",
+  "Pátek",
+  "Sobota",
 ];
 
 export default function Goals() {
@@ -104,11 +104,11 @@ export default function Goals() {
       <div className="flex items-start justify-between gap-4 flex-wrap pt-2">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Goals
+            Cíle
           </h1>
           <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
             {MONTHS_LONG[today.getMonth()]} {today.getFullYear()} ·{" "}
-            {dailyGoalHours}h daily goal
+            denní cíl {dailyGoalHours}h
           </p>
         </div>
         <div
@@ -116,46 +116,46 @@ export default function Goals() {
                      border border-[var(--border-subtle)]
                      text-[11px] text-[var(--text-tertiary)]"
         >
-          {workingDaysElapsed} / {workingDaysInMonth} work days elapsed
+          {workingDaysElapsed} / {workingDaysInMonth} prac. dní uplynulo
         </div>
       </div>
 
       <ProgressCard
-        title="Today"
-        subtitle={`${WEEKDAYS_LONG[today.getDay()]}, ${today.getDate()} ${
+        title="Dnes"
+        subtitle={`${WEEKDAYS_LONG[today.getDay()]}, ${today.getDate()}. ${
           MONTHS_LONG[today.getMonth()]
         }`}
         value={todaySeconds}
         goal={dailyGoalSeconds}
-        valueLabel={`goal: ${dailyGoalHours}h`}
+        valueLabel={`cíl: ${dailyGoalHours}h`}
         percent={todayPct}
       />
 
       <ProgressCard
-        title="This month"
-        subtitle={`${workingDaysInMonth} working days · ${dailyGoalHours}h each = ${workingDaysInMonth * dailyGoalHours}h total`}
+        title="Tento měsíc"
+        subtitle={`${workingDaysInMonth} pracovních dní · ${dailyGoalHours}h každý = celkem ${workingDaysInMonth * dailyGoalHours}h`}
         value={monthSeconds}
         goal={monthGoalSeconds}
-        valueLabel={`goal: ${workingDaysInMonth * dailyGoalHours}h`}
+        valueLabel={`cíl: ${workingDaysInMonth * dailyGoalHours}h`}
         percent={monthPct}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
-          label="Expected by today"
+          label="Očekáváno do dnes"
           value={formatDurationShort(expectedByTodaySeconds)}
         />
         <StatCard
-          label="Actual logged"
+          label="Skutečně zalogováno"
           value={formatDurationShort(monthSeconds)}
         />
         <StatCard
-          label="Pace difference"
+          label="Rozdíl tempa"
           value={formatSignedDuration(paceDifferenceSeconds)}
           tone={paceDifferenceSeconds >= 0 ? "neutral" : "danger"}
         />
         <StatCard
-          label="Remaining days"
+          label="Zbývající dny"
           value={`${Math.max(0, remainingWorkingDays)}`}
         />
       </div>

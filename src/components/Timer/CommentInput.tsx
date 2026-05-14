@@ -18,12 +18,12 @@ export function CommentInput({
   onChange,
   id = "worklog-comment",
   disabled,
-  placeholder = "What did you do? (optional)",
+  placeholder = "Co jste dělal/a? (volitelné)",
 }: CommentInputProps) {
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-xs font-medium text-[var(--text-secondary)]">
-        Comment
+        Komentář
       </label>
       <textarea
         id={id}

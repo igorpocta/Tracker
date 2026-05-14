@@ -135,11 +135,11 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   const handleSubmit = async () => {
     setError(null);
     if (!issueKey) {
-      setError("Pick an issue first.");
+      setError("Nejprve vyberte úkol.");
       return;
     }
     if (totalMinutes <= 0) {
-      setError("End must be after start.");
+      setError("Konec musí být po začátku.");
       return;
     }
     setSaving(true);
@@ -153,7 +153,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
       });
       onClose();
     } catch (e) {
-      setError(typeof e === "string" ? e : "Failed to save entry");
+      setError(typeof e === "string" ? e : "Záznam se nepodařilo uložit");
     } finally {
       setSaving(false);
     }
@@ -162,7 +162,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   return (
     <aside
       role="dialog"
-      aria-label="Add entry"
+      aria-label="Přidat záznam"
       className="w-[300px] shrink-0 h-full overflow-y-auto
                  border-l border-[var(--border-subtle)]
                  bg-[var(--bg-surface)]
@@ -178,16 +178,16 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
         </span>
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-            Add entry
+            Přidat záznam
           </h2>
           <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-            Log time you've spent
+            Zaznamenat strávený čas
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close add entry panel"
+          aria-label="Zavřít panel přidání záznamu"
           className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                      transition-colors duration-150"
         >
@@ -198,7 +198,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
       <div className="flex-1 p-4 flex flex-col gap-4">
         {/* Ticket */}
         <div ref={issueContainerRef} className="relative">
-          <FieldLabel required>Ticket</FieldLabel>
+          <FieldLabel required>Úkol</FieldLabel>
           <input
             type="text"
             value={issueKey || issueQuery}
@@ -208,7 +208,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
               setIssuePickerOpen(true);
             }}
             onFocus={() => setIssuePickerOpen(issueQuery.length > 0)}
-            placeholder="Type to search"
+            placeholder="Vyhledat psaním"
             className={inputCls}
           />
           {issuePickerOpen && issueResults.length > 0 && (
@@ -225,7 +225,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
 
         {/* Date */}
         <div>
-          <FieldLabel>Date</FieldLabel>
+          <FieldLabel>Datum</FieldLabel>
           <input
             type="date"
             value={dateIso}
@@ -236,7 +236,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
 
         {/* Start / end time */}
         <div>
-          <FieldLabel>Start & end time</FieldLabel>
+          <FieldLabel>Začátek a konec</FieldLabel>
           <div className="flex flex-wrap gap-1 mb-2">
             {QUICK_DURATIONS.map((d) => (
               <button
@@ -257,7 +257,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
               value={start}
               onChange={(e) => setStart(e.target.value)}
               className={`${inputCls} flex-1`}
-              aria-label="Start time"
+              aria-label="Začátek"
             />
             <span aria-hidden className="text-[var(--text-tertiary)]">→</span>
             <input
@@ -265,14 +265,14 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
               value={end}
               onChange={(e) => setEnd(e.target.value)}
               className={`${inputCls} flex-1`}
-              aria-label="End time"
+              aria-label="Konec"
             />
           </div>
         </div>
 
         {/* Comment */}
         <div>
-          <FieldLabel>Comment (optional)</FieldLabel>
+          <FieldLabel>Komentář (volitelné)</FieldLabel>
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -294,7 +294,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
           <div className="font-mono tabular-nums text-[var(--text-primary)] text-sm">
             {totalLabel}
           </div>
-          Total duration
+          Celkem
         </div>
         <Button
           variant="primary"
@@ -302,7 +302,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
           onClick={handleSubmit}
           disabled={saving || !issueKey || totalMinutes <= 0}
         >
-          Save entry
+          Uložit záznam
         </Button>
       </footer>
     </aside>
@@ -339,7 +339,7 @@ function IssuePicker({
             {iss.issue_key}
           </span>
           <span className="truncate text-[var(--text-primary)]">
-            {iss.summary || "(no summary)"}
+            {iss.summary || "(bez popisu)"}
           </span>
         </button>
       ))}

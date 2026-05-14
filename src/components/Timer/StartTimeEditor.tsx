@@ -53,10 +53,10 @@ export function StartTimeEditor({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="text-xs font-medium text-[var(--text-secondary)]">Started at</div>
+      <div className="text-xs font-medium text-[var(--text-secondary)]">Začátek</div>
       <div className="flex items-center gap-2 flex-wrap">
         <IconButton
-          aria-label="Subtract 5 minutes"
+          aria-label="Odečíst 5 minut"
           onClick={() => onChange(clampedDelta(-5 * 60_000))}
         >
           <Minus className="w-3.5 h-3.5" aria-hidden />
@@ -65,7 +65,7 @@ export function StartTimeEditor({
           </span>
         </IconButton>
         <IconButton
-          aria-label="Subtract 1 minute"
+          aria-label="Odečíst 1 minutu"
           onClick={() => onChange(clampedDelta(-60_000))}
         >
           <Minus className="w-3.5 h-3.5" aria-hidden />
@@ -76,7 +76,7 @@ export function StartTimeEditor({
 
         <input
           type="time"
-          aria-label="Start time"
+          aria-label="Čas začátku"
           value={timeValue}
           onChange={(e) => onTimeInput(e.target.value)}
           className="px-2 h-8 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)]
@@ -88,7 +88,7 @@ export function StartTimeEditor({
         </span>
 
         <IconButton
-          aria-label="Add 1 minute"
+          aria-label="Přidat 1 minutu"
           onClick={() => onChange(clampedDelta(60_000))}
         >
           <Plus className="w-3.5 h-3.5" aria-hidden />
@@ -97,7 +97,7 @@ export function StartTimeEditor({
           </span>
         </IconButton>
         <IconButton
-          aria-label="Add 5 minutes"
+          aria-label="Přidat 5 minut"
           onClick={() => onChange(clampedDelta(5 * 60_000))}
         >
           <Plus className="w-3.5 h-3.5" aria-hidden />
@@ -110,9 +110,9 @@ export function StartTimeEditor({
           variant="ghost"
           size="sm"
           onClick={() => onChange(nowMs)}
-          aria-label="Reset start to now"
+          aria-label="Resetovat začátek na teď"
         >
-          Now
+          Teď
         </Button>
       </div>
     </div>
