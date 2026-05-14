@@ -9,7 +9,7 @@ pub mod state;
 pub mod tray;
 pub mod tray_ticker;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::state::AppState;
 
@@ -54,6 +54,39 @@ pub fn run() {
             // Bind failures are logged inside; they never abort startup.
             crate::server::start(handle);
 
+            // Auto-sync issues + worklogs shortly after startup. All errors
+            // are swallowed: a fresh install with no Jira config simply
+            // returns early, and transient network failures should never
+            // prevent the user from interacting with the local UI.
+            let auto_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Let the main window mount before hammering the network.
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let state = auto_handle.state::<AppState>();
+                let Some(client) = state.jira_client_cloned() else {
+                    return;
+                };
+
+                let _ = jira::sync_issues_from_jira(&client, &state.db).await;
+
+                let me = match client.myself().await {
+                    Ok(u) => u.account_id,
+                    Err(_) => return,
+                };
+                let today = chrono::Local::now().date_naive();
+                let from = today - chrono::Duration::days(30);
+                let _ = jira::worklog_sync::sync_worklogs_for_range(
+                    &client,
+                    &state.db,
+                    &me,
+                    from,
+                    today,
+                )
+                .await;
+
+                let _ = auto_handle.emit("auto-sync-complete", ());
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -63,6 +96,9 @@ pub fn run() {
             commands::config::enter_main_app,
             commands::config::open_main_window,
             commands::config::test_jira_connection,
+            commands::config::get_current_config,
+            commands::config::update_config,
+            commands::config::sign_out,
             commands::timer::get_timer_state,
             commands::timer::start_timer,
             commands::timer::stop_timer_inner,
@@ -72,6 +108,8 @@ pub fn run() {
             commands::issues::get_suggested_issues,
             commands::issues::refresh_cache,
             commands::worklog::get_worklog_issues,
+            commands::worklog::get_worklogs_for_range,
+            commands::worklog::refresh_all,
             commands::misc::open_jira_issue,
             commands::misc::open_url,
             commands::prefs::get_daily_goal,
@@ -80,6 +118,12 @@ pub fn run() {
             commands::prefs::set_app_icon,
             commands::prefs::get_hourly_rate,
             commands::prefs::set_hourly_rate,
+            commands::prefs::get_theme,
+            commands::prefs::set_theme,
+            commands::prefs::get_font_size,
+            commands::prefs::set_font_size,
+            commands::prefs::get_density,
+            commands::prefs::set_density,
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,
             commands::browser::get_extension_last_heartbeat,

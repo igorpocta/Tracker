@@ -44,6 +44,19 @@ pub fn extract_adf_text(value: &Value) -> String {
     out
 }
 
+/// Returns true if `value` is an ADF node whose effect is to insert a
+/// newline (hardBreak) or end a block — in either case the array walker
+/// should not insert a separator space immediately before it.
+fn is_break_node(value: &Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let Some(node_type) = obj.get("type").and_then(|t| t.as_str()) else {
+        return false;
+    };
+    node_type == "hardBreak" || BLOCK_TYPES.contains(&node_type)
+}
+
 /// Names of node types that represent a "block" boundary in ADF. After
 /// visiting one of these we emit a newline so paragraphs don't run together.
 const BLOCK_TYPES: &[&str] = &[
@@ -96,11 +109,14 @@ fn walk(value: &Value, out: &mut String) {
         Value::Array(arr) => {
             for (i, child) in arr.iter().enumerate() {
                 if i > 0 {
-                    // Insert a thin separator between inline siblings if the
-                    // previous run did not already end in whitespace.
+                    // Don't insert a space if the next node is itself a
+                    // line-break style node (it would produce stray
+                    // whitespace right before a newline).
+                    let next_breaks = is_break_node(child);
                     let needs_space = !out.is_empty()
                         && !out.ends_with(' ')
-                        && !out.ends_with('\n');
+                        && !out.ends_with('\n')
+                        && !next_breaks;
                     if needs_space {
                         out.push(' ');
                     }
