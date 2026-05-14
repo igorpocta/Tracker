@@ -101,3 +101,59 @@ export function isToday(valueSeconds: number, now: Date = new Date()): boolean {
     d.getDate() === now.getDate()
   );
 }
+
+/**
+ * Format a money amount in the user's currency.
+ *
+ * Conventions:
+ * - CZK / PLN: suffix with a thin space (`1 234 Kč`, `1 234 zł`).
+ * - EUR / USD / GBP / CHF: prefix with the symbol, 2 decimals.
+ *
+ * Falls back to ISO code suffix for anything unrecognized.
+ */
+export function formatMoney(amount: number, currency: string): string {
+  if (!Number.isFinite(amount)) return "—";
+  const code = (currency || "CZK").toUpperCase();
+  const thinSpace = " ";
+
+  // CZK / PLN — suffix with native sign, rounded to whole units (CZK is
+  // typically not displayed with hellers in modern apps).
+  if (code === "CZK") {
+    const rounded = Math.round(amount);
+    return `${groupThinSpace(rounded)}${thinSpace}Kč`;
+  }
+  if (code === "PLN") {
+    const rounded = Math.round(amount * 100) / 100;
+    return `${groupThinSpace(rounded)}${thinSpace}zł`;
+  }
+
+  // Symbol-prefixed currencies with 2 decimals.
+  const prefixMap: Record<string, string> = {
+    EUR: "€",
+    USD: "$",
+    GBP: "£",
+    CHF: "CHF ",
+  };
+  const prefix = prefixMap[code];
+  const rounded = Math.round(amount * 100) / 100;
+  if (prefix) {
+    return `${prefix}${groupComma(rounded)}`;
+  }
+  return `${groupComma(rounded)}${thinSpace}${code}`;
+}
+
+/** Number grouping with thin-space (1 234 567,89). */
+function groupThinSpace(n: number): string {
+  const isInt = Number.isInteger(n);
+  const [whole, frac] = (isInt ? `${n}` : n.toFixed(2)).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return frac ? `${grouped},${frac}` : grouped;
+}
+
+/** Number grouping with commas (1,234,567.89). */
+function groupComma(n: number): string {
+  const isInt = Number.isInteger(n);
+  const [whole, frac] = (isInt ? `${n}` : n.toFixed(2)).split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? `${grouped}.${frac}` : `${grouped}.00`;
+}
