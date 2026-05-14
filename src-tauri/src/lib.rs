@@ -59,6 +59,37 @@ pub fn run() {
             // Bind failures are logged inside; they never abort startup.
             crate::server::start(handle);
 
+            // Phase 15: startup recovery for pending deletes left over from a
+            // crashed undo window. Anything older than 30s is committed
+            // straight away (i.e. the Jira DELETE is issued + tombstoned).
+            let recovery_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let state = recovery_handle.state::<AppState>();
+                let cutoff = chrono::Utc::now().timestamp() - 30;
+                let pending = match cache::worklogs::pending_deletes_older_than(
+                    &state.db, cutoff,
+                ) {
+                    Ok(p) => p,
+                    Err(_) => return,
+                };
+                for row in pending {
+                    let (Some(local_id), Some(jira_id)) =
+                        (row.id, row.jira_worklog_id.clone())
+                    else {
+                        continue;
+                    };
+                    commands::worklog::commit_pending_delete(
+                        &recovery_handle,
+                        &state,
+                        local_id,
+                        &row.issue_key,
+                        &jira_id,
+                    )
+                    .await;
+                }
+            });
+
             // Auto-sync issues + worklogs shortly after startup. All errors
             // are swallowed: a fresh install with no Jira config simply
             // returns early, and transient network failures should never
@@ -116,6 +147,12 @@ pub fn run() {
             commands::worklog::get_worklog_issues,
             commands::worklog::get_worklogs_for_range,
             commands::worklog::refresh_all,
+            commands::worklog::create_manual_worklog,
+            commands::worklog::update_worklog,
+            commands::worklog::delete_worklog,
+            commands::worklog::undo_delete_worklog,
+            commands::worklog::move_worklog,
+            commands::worklog::get_audit_log,
             commands::misc::open_jira_issue,
             commands::misc::open_url,
             commands::prefs::get_daily_goal,

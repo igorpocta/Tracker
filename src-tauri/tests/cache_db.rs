@@ -1,10 +1,13 @@
 use tempfile::TempDir;
+use tracker_lib::cache::audit::{record as audit_record, recent as audit_recent, AuditEvent, AuditOp};
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
 use tracker_lib::cache::worklogs::{
-    for_date_range as worklog_for_date_range, recent as worklog_recent, record as worklog_record,
-    total_seconds_for_range, upsert_from_jira, WorklogRow,
+    clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id, get_by_jira_id,
+    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_jira_id,
+    pending_deletes_older_than, recent as worklog_recent, record as worklog_record,
+    total_seconds_for_range, update_fields, upsert_from_jira, WorklogRow,
 };
 use tracker_lib::cache::Db;
 
@@ -526,4 +529,186 @@ fn total_seconds_for_range_sums_correctly() {
     // Empty range.
     let none = total_seconds_for_range(&db, 100_000, 200_000, None).unwrap();
     assert_eq!(none, 0);
+}
+
+// -----------------------------------------------------------------------------
+// Phase 15: soft-delete + tombstone + audit
+// -----------------------------------------------------------------------------
+
+fn seed_jira_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
+    upsert_from_jira(
+        db,
+        &WorklogRow {
+            id: None,
+            issue_key: issue_key.into(),
+            issue_id: Some("10001".into()),
+            summary: Some("S".into()),
+            duration_s: 1800,
+            started_at: 1_700_000_000,
+            logged_at: 1_700_000_000,
+            comment: Some("c".into()),
+            jira_worklog_id: Some(jira_id.into()),
+            author_account_id: Some("me".into()),
+            source: "jira".into(),
+            updated_at_jira: Some(1_700_000_000),
+            pending_delete_at: None,
+            tombstoned_at: None,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn mark_pending_delete_then_clear_roundtrip() {
+    let (_d, db) = fresh_db();
+    let id = seed_jira_row(&db, "j-1", "K-1");
+
+    mark_pending_delete(&db, id, 1_700_000_100).unwrap();
+    let row = get_by_id(&db, id).unwrap().unwrap();
+    assert_eq!(row.pending_delete_at, Some(1_700_000_100));
+    assert!(row.tombstoned_at.is_none());
+
+    clear_pending_delete(&db, id).unwrap();
+    let row = get_by_id(&db, id).unwrap().unwrap();
+    assert!(row.pending_delete_at.is_none());
+}
+
+#[test]
+fn mark_tombstoned_clears_pending_delete() {
+    let (_d, db) = fresh_db();
+    let id = seed_jira_row(&db, "j-1", "K-1");
+    mark_pending_delete(&db, id, 1_700_000_100).unwrap();
+
+    mark_tombstoned(&db, id, 1_700_000_200).unwrap();
+    let row = get_by_id(&db, id).unwrap().unwrap();
+    assert_eq!(row.tombstoned_at, Some(1_700_000_200));
+    assert!(row.pending_delete_at.is_none());
+}
+
+#[test]
+fn mark_tombstoned_by_jira_id_targets_correct_row() {
+    let (_d, db) = fresh_db();
+    let _a = seed_jira_row(&db, "j-a", "K-1");
+    let b = seed_jira_row(&db, "j-b", "K-1");
+    mark_tombstoned_by_jira_id(&db, "j-b", 1_700_000_300).unwrap();
+
+    let row_a = get_by_jira_id(&db, "j-a").unwrap().unwrap();
+    let row_b = get_by_id(&db, b).unwrap().unwrap();
+    assert!(row_a.tombstoned_at.is_none());
+    assert_eq!(row_b.tombstoned_at, Some(1_700_000_300));
+}
+
+#[test]
+fn pending_deletes_older_than_filters_correctly() {
+    let (_d, db) = fresh_db();
+    let id_old = seed_jira_row(&db, "j-old", "K-1");
+    let id_new = seed_jira_row(&db, "j-new", "K-1");
+    mark_pending_delete(&db, id_old, 100).unwrap();
+    mark_pending_delete(&db, id_new, 10_000).unwrap();
+
+    let stale = pending_deletes_older_than(&db, 1_000).unwrap();
+    let ids: Vec<i64> = stale.iter().map(|r| r.id.unwrap()).collect();
+    assert_eq!(ids, vec![id_old]);
+    assert!(!ids.contains(&id_new));
+}
+
+#[test]
+fn update_fields_writes_new_values() {
+    let (_d, db) = fresh_db();
+    let id = seed_jira_row(&db, "j-1", "K-1");
+    update_fields(
+        &db,
+        id,
+        "K-2",
+        Some("20002"),
+        Some("New summary"),
+        3600,
+        1_800_000_000,
+        Some("Updated"),
+        Some(1_800_000_500),
+    )
+    .unwrap();
+
+    let row = get_by_id(&db, id).unwrap().unwrap();
+    assert_eq!(row.issue_key, "K-2");
+    assert_eq!(row.issue_id.as_deref(), Some("20002"));
+    assert_eq!(row.summary.as_deref(), Some("New summary"));
+    assert_eq!(row.duration_s, 3600);
+    assert_eq!(row.started_at, 1_800_000_000);
+    assert_eq!(row.comment.as_deref(), Some("Updated"));
+    assert_eq!(row.updated_at_jira, Some(1_800_000_500));
+}
+
+#[test]
+fn audit_record_and_recent_roundtrip() {
+    let (_d, db) = fresh_db();
+    let row = WorklogRow {
+        id: Some(1),
+        issue_key: "K-1".into(),
+        duration_s: 1800,
+        started_at: 1,
+        logged_at: 1,
+        jira_worklog_id: Some("j-1".into()),
+        source: "jira".into(),
+        ..Default::default()
+    };
+
+    audit_record(
+        &db,
+        AuditEvent {
+            occurred_at: 100,
+            op: AuditOp::Create,
+            issue_key: Some("K-1"),
+            worklog_id: Some("j-1"),
+            before: None,
+            after: Some(&row),
+            success: true,
+            error: None,
+        },
+    )
+    .unwrap();
+    audit_record(
+        &db,
+        AuditEvent {
+            occurred_at: 200,
+            op: AuditOp::Delete,
+            issue_key: Some("K-1"),
+            worklog_id: Some("j-1"),
+            before: Some(&row),
+            after: None,
+            success: false,
+            error: Some("network glitch"),
+        },
+    )
+    .unwrap();
+
+    let entries = audit_recent(&db, 10).unwrap();
+    assert_eq!(entries.len(), 2);
+    // Newest first.
+    assert_eq!(entries[0].op, "delete");
+    assert_eq!(entries[0].success, false);
+    assert_eq!(entries[0].error.as_deref(), Some("network glitch"));
+    assert!(entries[0].before_json.is_some());
+    assert!(entries[0].after_json.is_none());
+
+    assert_eq!(entries[1].op, "create");
+    assert_eq!(entries[1].success, true);
+    assert!(entries[1].after_json.is_some());
+    assert!(entries[1].before_json.is_none());
+}
+
+#[test]
+fn worklog_default_recent_hides_tombstoned() {
+    let (_d, db) = fresh_db();
+    let id = seed_jira_row(&db, "j-1", "K-1");
+    let _ = seed_jira_row(&db, "j-2", "K-1");
+    mark_tombstoned(&db, id, 1_700_000_500).unwrap();
+
+    let recent_rows = worklog_recent(&db, 50).unwrap();
+    let ids: Vec<&str> = recent_rows
+        .iter()
+        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .collect();
+    assert!(ids.contains(&"j-2"));
+    assert!(!ids.contains(&"j-1"));
 }
