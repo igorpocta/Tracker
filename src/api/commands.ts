@@ -9,12 +9,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   ActiveTimerState,
+  AuditEntry,
   CacheStats,
   DensityPref,
   FontSizePref,
   IssueRow,
   JiraConfig,
   JiraUser,
+  MoveWorklogResult,
   RefreshAllResult,
   SaveConfigArgs,
   ThemePref,
@@ -256,6 +258,92 @@ export function getWorklogsForRange(
     toUnixS,
     author: author ?? null,
   });
+}
+
+// -----------------------------------------------------------------------------
+// Worklog mutations (Phase 15)
+// -----------------------------------------------------------------------------
+
+/** Create a manual worklog (AddEntry panel). Pushes to Jira, then caches. */
+export function createManualWorklog(args: {
+  issueKey: string;
+  startedAtMs: number;
+  durationSeconds: number;
+  comment?: string | null;
+}): Promise<WorklogRow> {
+  return invoke<WorklogRow>("create_manual_worklog", {
+    issueKey: args.issueKey,
+    startedAtMs: args.startedAtMs,
+    durationSeconds: args.durationSeconds,
+    comment: args.comment ?? null,
+  });
+}
+
+/**
+ * Update an existing worklog. `null` (or `undefined`) values leave the field
+ * unchanged. Returns the updated row.
+ */
+export function updateWorklog(args: {
+  worklogId: string;
+  issueKey: string;
+  newStartedAtMs?: number | null;
+  newDurationSeconds?: number | null;
+  newComment?: string | null;
+}): Promise<WorklogRow> {
+  return invoke<WorklogRow>("update_worklog", {
+    worklogId: args.worklogId,
+    issueKey: args.issueKey,
+    newStartedAtMs: args.newStartedAtMs ?? null,
+    newDurationSeconds: args.newDurationSeconds ?? null,
+    newComment: args.newComment ?? null,
+  });
+}
+
+/**
+ * Soft-delete a worklog. Marks `pending_delete_at` locally; backend fires
+ * the actual Jira DELETE after a 5s undo grace window. Frontend should
+ * optimistically hide the row and show an undo toast.
+ */
+export function deleteWorklog(
+  worklogId: string,
+  issueKey: string,
+): Promise<void> {
+  return invoke<void>("delete_worklog", { worklogId, issueKey });
+}
+
+/** Cancel a pending delete within the 5s grace window. */
+export function undoDeleteWorklog(worklogId: string): Promise<void> {
+  return invoke<void>("undo_delete_worklog", { worklogId });
+}
+
+/**
+ * Move a worklog from one issue to another. Backed by POST new + DELETE old.
+ *
+ * On the partial-success path (POST succeeded, DELETE failed) the backend
+ * returns an error string starting with "Original worklog still exists on …"
+ * so the UI can offer a manual retry.
+ */
+export function moveWorklog(args: {
+  oldIssueKey: string;
+  oldWorklogId: string;
+  newIssueKey: string;
+  startedAtMs: number;
+  durationSeconds: number;
+  comment?: string | null;
+}): Promise<MoveWorklogResult> {
+  return invoke<MoveWorklogResult>("move_worklog", {
+    oldIssueKey: args.oldIssueKey,
+    oldWorklogId: args.oldWorklogId,
+    newIssueKey: args.newIssueKey,
+    startedAtMs: args.startedAtMs,
+    durationSeconds: args.durationSeconds,
+    comment: args.comment ?? null,
+  });
+}
+
+/** Read the most recent `limit` audit entries (newest first). */
+export function getAuditLog(limit?: number): Promise<AuditEntry[]> {
+  return invoke<AuditEntry[]>("get_audit_log", { limit: limit ?? null });
 }
 
 // -----------------------------------------------------------------------------

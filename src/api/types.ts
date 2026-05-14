@@ -63,6 +63,34 @@ export interface WorklogRow {
   logged_at: number;
   comment?: string | null;
   jira_worklog_id?: string | null;
+  /** Phase 11A backend additions (optional for older payloads). */
+  author_account_id?: string | null;
+  source?: string | null;
+  updated_at_jira?: number | null;
+  /** Phase 15 — soft-delete + tombstone columns. */
+  pending_delete_at?: number | null;
+  tombstoned_at?: number | null;
+}
+
+/** Mirrors `src-tauri/src/commands/worklog.rs::MoveWorklogResultDto`. */
+export interface MoveWorklogResult {
+  new_worklog_id: string;
+  new_row: WorklogRow;
+  /** True if the move's DELETE half failed (rare). */
+  original_still_exists: boolean;
+}
+
+/** Mirrors `src-tauri/src/cache/audit.rs::AuditEntry`. */
+export interface AuditEntry {
+  id: number;
+  occurred_at: number;
+  op: string;
+  issue_key?: string | null;
+  worklog_id?: string | null;
+  before_json?: string | null;
+  after_json?: string | null;
+  success: boolean;
+  error?: string | null;
 }
 
 /** Mirrors `src-tauri/src/commands/timer.rs::ActiveTimerState`. */
