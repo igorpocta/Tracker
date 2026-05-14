@@ -37,6 +37,8 @@ function setupInvoke({
         return goal;
       case "get_accent_color":
         return "aurora";
+      case "get_theme":
+        return "auto";
       case "start_timer":
         return {
           issue_key: "ACME-1",
@@ -68,12 +70,12 @@ describe("Popover", () => {
 
     // After hydrate the idle status card appears.
     await waitFor(() =>
-      expect(screen.getByText(/no timer running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/žádná časomíra neběží/i)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/click an issue to start tracking/i)).toBeInTheDocument();
+    expect(screen.getByText(/klikni na úkol pro spuštění/i)).toBeInTheDocument();
   });
 
-  it("renders the Trcker. brand and Today goal block", async () => {
+  it("renders the Trcker. brand and Dnešní cíl block", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
@@ -81,7 +83,7 @@ describe("Popover", () => {
     await waitFor(() =>
       expect(screen.getByText(/trcker\./i)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/today goal/i)).toBeInTheDocument();
+    expect(screen.getByText(/dnešní cíl/i)).toBeInTheDocument();
   });
 
   it("lists recent issues and starts a timer on click", async () => {
@@ -116,25 +118,25 @@ describe("Popover", () => {
     });
   });
 
-  it("invokes open_main_window when 'Open app' is clicked", async () => {
+  it("invokes open_main_window when 'Otevřít aplikaci' is clicked", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
     await waitFor(() =>
-      expect(screen.getByText(/no recent issues yet/i)).toBeInTheDocument(),
+      expect(screen.getByText(/zatím žádné nedávné úkoly/i)).toBeInTheDocument(),
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /open app/i }));
+    await userEvent.click(screen.getByRole("button", { name: /otevřít aplikaci/i }));
     expect(mockInvoke).toHaveBeenCalledWith("open_main_window");
   });
 
-  it("renders the Settings and Quit footer buttons", async () => {
+  it("renders the Nastavení and Ukončit footer buttons", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /nastavení/i })).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: /quit/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ukončit/i })).toBeInTheDocument();
   });
 });

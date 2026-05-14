@@ -27,14 +27,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 
 import {
+  getAccentColor,
   getDailyGoal,
   getRecentIssues,
+  getTheme,
   getTimerState,
   getWorklogsForRange,
   openMainWindow,
   startTimer,
 } from "./api/commands";
-import type { ActiveTimerState, IssueRow, WorklogRow } from "./api/types";
+import type { ActiveTimerState, IssueRow, ThemePref, WorklogRow } from "./api/types";
 import { useNow } from "./hooks/useNow";
 import { applyPalette } from "./lib/accent";
 import { todayEndUnixS, todayStartUnixS } from "./lib/dates";
@@ -42,6 +44,34 @@ import { formatDuration } from "./lib/format";
 import { elapsedSeconds } from "./stores/timerStore";
 
 import "./index.css";
+
+function applyThemeAttr(theme: ThemePref): void {
+  if (typeof document === "undefined") return;
+  const html = document.documentElement;
+  if (theme === "auto") {
+    html.removeAttribute("data-theme");
+  } else {
+    html.setAttribute("data-theme", theme);
+  }
+}
+
+/**
+ * Hydrate theme + palette (mono/dual collapses into one accent set) from the
+ * backend so the popover matches whatever the main window looks like. Runs on
+ * mount and on every `prefs-changed` event so live changes propagate.
+ */
+async function hydratePopoverAppearance(): Promise<void> {
+  try {
+    const [theme, accent] = await Promise.all([
+      getTheme().catch<ThemePref>(() => "auto"),
+      getAccentColor().catch(() => "aurora"),
+    ]);
+    applyThemeAttr(theme);
+    applyPalette(accent);
+  } catch {
+    /* defaults are fine */
+  }
+}
 
 const RECENT_LIMIT = 5;
 
@@ -72,17 +102,11 @@ export function Popover() {
     }
   }, []);
 
-  // Best-effort palette hydration.
+  // Best-effort theme + palette hydration. Done on mount and again whenever
+  // the backend tells us prefs changed (so live theme switches in the main
+  // window propagate into an already-open popover).
   useEffect(() => {
-    (async () => {
-      try {
-        const { getAccentColor } = await import("./api/commands");
-        const accent = await getAccentColor();
-        applyPalette(accent);
-      } catch {
-        /* defaults are fine */
-      }
-    })();
+    void hydratePopoverAppearance();
   }, []);
 
   useEffect(() => {
@@ -95,7 +119,6 @@ export function Popover() {
       "timer-started",
       "timer-stopped",
       "worklog-saved",
-      "prefs-changed",
     ];
     const unlisteners: Array<() => void> = [];
     events.forEach((ev) => {
@@ -105,6 +128,13 @@ export function Popover() {
         .then((u) => unlisteners.push(u))
         .catch(() => {});
     });
+    // `prefs-changed` triggers BOTH a data refresh AND an appearance reload.
+    listen("prefs-changed", () => {
+      void refresh();
+      void hydratePopoverAppearance();
+    })
+      .then((u) => unlisteners.push(u))
+      .catch(() => {});
     return () => {
       for (const u of unlisteners) u();
     };
@@ -221,7 +251,7 @@ function Header({
         </span>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-            Today goal
+            Dnešní cíl
           </div>
           <div className="text-sm font-medium tabular-nums" style={{ color: "var(--accent)" }}>
             {shortDuration(loggedSeconds)} / {shortDuration(dailyGoalSeconds)}
@@ -268,16 +298,16 @@ function StatusCard({ active }: { active: ActiveTimerState | null }) {
               {formatDuration(elapsed)}
             </div>
             <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-              Tracking {active.issue_key}
+              Sledování {active.issue_key}
             </div>
           </>
         ) : (
           <>
             <div className="text-sm font-medium text-[var(--text-primary)]">
-              No timer running
+              Žádná časomíra neběží
             </div>
             <div className="text-[11px] text-[var(--text-tertiary)]">
-              Click an issue to start tracking
+              Klikni na úkol pro spuštění
             </div>
           </>
         )}
@@ -298,12 +328,12 @@ function RecentList({
   return (
     <div className="px-4 flex-1 min-h-0 flex flex-col">
       <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-2">
-        Recent
+        Naposledy
       </div>
       <div className="flex-1 overflow-y-auto -mr-1 pr-1">
         {recent.length === 0 ? (
           <div className="text-xs text-[var(--text-tertiary)] py-2">
-            No recent issues yet.
+            Zatím žádné nedávné úkoly.
           </div>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -329,7 +359,7 @@ function RecentList({
                     {iss.issue_key}
                   </span>
                   <span className="text-xs text-[var(--text-primary)] truncate flex-1">
-                    {iss.summary || "(no summary)"}
+                    {iss.summary || "(bez popisu)"}
                   </span>
                 </button>
               </li>
@@ -352,9 +382,9 @@ function Footer({
 }) {
   return (
     <div className="grid grid-cols-3 gap-2 px-4 py-3 border-t border-[var(--border-subtle)]">
-      <FooterButton icon={<ExternalLink className="w-3.5 h-3.5" />} label="Open app" onClick={onOpen} />
-      <FooterButton icon={<SettingsIcon className="w-3.5 h-3.5" />} label="Settings" onClick={onSettings} />
-      <FooterButton icon={<LogOut className="w-3.5 h-3.5" />} label="Quit" onClick={onQuit} />
+      <FooterButton icon={<ExternalLink className="w-3.5 h-3.5" />} label="Otevřít aplikaci" onClick={onOpen} />
+      <FooterButton icon={<SettingsIcon className="w-3.5 h-3.5" />} label="Nastavení" onClick={onSettings} />
+      <FooterButton icon={<LogOut className="w-3.5 h-3.5" />} label="Ukončit" onClick={onQuit} />
     </div>
   );
 }
