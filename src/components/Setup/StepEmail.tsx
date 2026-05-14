@@ -31,7 +31,7 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
     >
       <div className="flex flex-col gap-1.5">
         <label htmlFor="setup-email" className="text-sm font-medium text-[var(--text-primary)]">
-          Atlassian account email
+          E-mail Atlassian účtu
         </label>
         <input
           id="setup-email"
@@ -52,7 +52,7 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          The email tied to your Atlassian account.
+          E-mail propojený s vaším Atlassian účtem.
         </p>
       </div>
 
@@ -62,14 +62,14 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Back
+          Zpět
         </button>
         <button
           type="submit"
           disabled={!isValid}
           className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
-          Next
+          Další
         </button>
       </div>
     </form>

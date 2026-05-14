@@ -32,7 +32,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
     >
       <div className="flex flex-col gap-1.5">
         <label htmlFor="setup-url" className="text-sm font-medium text-[var(--text-primary)]">
-          Jira base URL
+          Základní URL Jiry
         </label>
         <input
           id="setup-url"
@@ -53,7 +53,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          Your Atlassian cloud URL, e.g. <code>https://acme.atlassian.net</code>.
+          Vaše Atlassian Cloud URL, např. <code>https://acme.atlassian.net</code>.
         </p>
       </div>
 
@@ -63,7 +63,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
           disabled={!isValid}
           className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
-          Next
+          Další
         </button>
       </div>
     </form>

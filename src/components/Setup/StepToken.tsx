@@ -89,7 +89,7 @@ export function StepToken({
         <input
           id="setup-token"
           type="password"
-          placeholder="paste your token"
+          placeholder="vložte svůj token"
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
@@ -108,7 +108,7 @@ export function StepToken({
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          Create one at{" "}
+          Vytvořte si ho na{" "}
           <span className="text-[var(--text-secondary)]">id.atlassian.com → Security → API tokens</span>.
         </p>
       </div>
@@ -123,7 +123,7 @@ export function StepToken({
           {test.kind === "loading" && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Test connection
+          Otestovat připojení
         </button>
 
         {test.kind === "ok" && (
@@ -132,7 +132,7 @@ export function StepToken({
             role="status"
           >
             <CircleCheck className="w-4 h-4" aria-hidden />
-            Connected as {test.user.displayName}
+            Připojeno jako {test.user.displayName}
           </span>
         )}
         {test.kind === "error" && (
@@ -148,7 +148,7 @@ export function StepToken({
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Back
+          Zpět
         </button>
         <button
           type="submit"
@@ -158,7 +158,7 @@ export function StepToken({
           {submitting && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Finish
+          Dokončit
         </button>
       </div>
     </form>

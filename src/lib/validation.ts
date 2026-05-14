@@ -12,17 +12,17 @@ import { z } from "zod";
  */
 export const urlSchema = z
   .string()
-  .url("must be a valid URL")
-  .regex(/^https:\/\//, "must start with https://");
+  .url("musí být platná URL")
+  .regex(/^https:\/\//, "musí začínat https://");
 
 /** Account email — basic shape check, not RFC-perfect. */
-export const emailSchema = z.string().email("must be a valid email");
+export const emailSchema = z.string().email("musí být platný e-mail");
 
 /**
  * Jira API token. We can't actually verify the token without hitting the API,
  * but we can at least reject obviously-too-short strings.
  */
-export const tokenSchema = z.string().min(10, "API token looks too short");
+export const tokenSchema = z.string().min(10, "API token vypadá příliš krátký");
 
 /**
  * Convenience: returns the first validation error message produced by `schema`
@@ -31,5 +31,5 @@ export const tokenSchema = z.string().min(10, "API token looks too short");
 export function firstError<T>(schema: z.ZodType<T>, value: unknown): string | null {
   const result = schema.safeParse(value);
   if (result.success) return null;
-  return result.error.issues[0]?.message ?? "invalid value";
+  return result.error.issues[0]?.message ?? "neplatná hodnota";
 }

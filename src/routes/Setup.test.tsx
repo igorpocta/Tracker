@@ -37,20 +37,20 @@ describe("Setup wizard", () => {
 
   it("starts on step 1 (URL)", () => {
     renderSetup();
-    expect(screen.getByLabelText(/jira base url/i)).toBeInTheDocument();
-    expect(screen.getByText(/step 1 of 3/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/základní url jiry/i)).toBeInTheDocument();
+    expect(screen.getByText(/krok 1 z 3/i)).toBeInTheDocument();
   });
 
-  it("keeps Next disabled until URL is valid https://", async () => {
+  it("keeps Další disabled until URL is valid https://", async () => {
     const user = userEvent.setup();
     renderSetup();
-    const input = screen.getByLabelText(/jira base url/i);
-    const next = screen.getByRole("button", { name: /next/i });
+    const input = screen.getByLabelText(/základní url jiry/i);
+    const next = screen.getByRole("button", { name: /^další$/i });
     expect(next).toBeDisabled();
 
     await user.type(input, "http://nope");
     expect(next).toBeDisabled();
-    expect(screen.getByText(/must start with https/i)).toBeInTheDocument();
+    expect(screen.getByText(/musí začínat https/i)).toBeInTheDocument();
 
     await user.clear(input);
     await user.type(input, "https://acme.atlassian.net");
@@ -63,54 +63,54 @@ describe("Setup wizard", () => {
 
     // Step 1 → 2.
     await user.type(
-      screen.getByLabelText(/jira base url/i),
+      screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
 
     // Step 2.
-    expect(screen.getByText(/step 2 of 3/i)).toBeInTheDocument();
-    const emailInput = screen.getByLabelText(/account email/i);
-    const next2 = screen.getByRole("button", { name: /next/i });
+    expect(screen.getByText(/krok 2 z 3/i)).toBeInTheDocument();
+    const emailInput = screen.getByLabelText(/e-mail atlassian/i);
+    const next2 = screen.getByRole("button", { name: /^další$/i });
     expect(next2).toBeDisabled();
     await user.type(emailInput, "not-an-email");
     expect(next2).toBeDisabled();
-    expect(screen.getByText(/must be a valid email/i)).toBeInTheDocument();
+    expect(screen.getByText(/musí být platný e-mail/i)).toBeInTheDocument();
     await user.clear(emailInput);
     await user.type(emailInput, "alice@example.com");
     expect(next2).toBeEnabled();
     await user.click(next2);
 
     // Step 3.
-    expect(screen.getByText(/step 3 of 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/krok 3 z 3/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /test connection/i }),
+      screen.getByRole("button", { name: /otestovat připojení/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^finish$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeDisabled();
   });
 
-  it("enables Finish only after a successful connection test", async () => {
+  it("enables Dokončit only after a successful connection test", async () => {
     const user = userEvent.setup();
     renderSetup();
 
     // Drive through to step 3.
     await user.type(
-      screen.getByLabelText(/jira base url/i),
+      screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
     await user.type(
-      screen.getByLabelText(/account email/i),
+      screen.getByLabelText(/e-mail atlassian/i),
       "alice@example.com",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
 
     // Test connection should be disabled until token meets min length.
-    const testBtn = screen.getByRole("button", { name: /test connection/i });
+    const testBtn = screen.getByRole("button", { name: /otestovat připojení/i });
     expect(testBtn).toBeDisabled();
     await user.type(screen.getByLabelText(/jira api token/i), "abcd1234567890");
     expect(testBtn).toBeEnabled();
-    expect(screen.getByRole("button", { name: /^finish$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeDisabled();
 
     // Mock the test_jira_connection call to succeed.
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -127,7 +127,7 @@ describe("Setup wizard", () => {
     await user.click(testBtn);
 
     await waitFor(() =>
-      expect(screen.getByText(/connected as alice example/i)).toBeInTheDocument(),
+      expect(screen.getByText(/připojeno jako alice example/i)).toBeInTheDocument(),
     );
 
     // Verify the wrapper translated the JS args into the snake_case shape.
@@ -136,23 +136,23 @@ describe("Setup wizard", () => {
       email: "alice@example.com",
       token: "abcd1234567890",
     });
-    expect(screen.getByRole("button", { name: /^finish$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeEnabled();
   });
 
-  it("calls save_config and enter_main_app on Finish, then navigates home", async () => {
+  it("calls save_config and enter_main_app on Dokončit, then navigates home", async () => {
     const user = userEvent.setup();
     renderSetup();
 
     await user.type(
-      screen.getByLabelText(/jira base url/i),
+      screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
     await user.type(
-      screen.getByLabelText(/account email/i),
+      screen.getByLabelText(/e-mail atlassian/i),
       "alice@example.com",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
     await user.type(screen.getByLabelText(/jira api token/i), "abcd1234567890");
 
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -171,11 +171,11 @@ describe("Setup wizard", () => {
       }
     });
 
-    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    await user.click(screen.getByRole("button", { name: /otestovat připojení/i }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^finish$/i })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: /^finish$/i }));
+    await user.click(screen.getByRole("button", { name: /^dokončit$/i }));
 
     await waitFor(() =>
       expect(screen.getByTestId("home-marker")).toBeInTheDocument(),
@@ -198,15 +198,15 @@ describe("Setup wizard", () => {
     renderSetup();
 
     await user.type(
-      screen.getByLabelText(/jira base url/i),
+      screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
     await user.type(
-      screen.getByLabelText(/account email/i),
+      screen.getByLabelText(/e-mail atlassian/i),
       "alice@example.com",
     );
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
     await user.type(screen.getByLabelText(/jira api token/i), "abcd1234567890");
 
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -216,10 +216,10 @@ describe("Setup wizard", () => {
       throw new Error(`unexpected command: ${cmd}`);
     });
 
-    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    await user.click(screen.getByRole("button", { name: /otestovat připojení/i }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(/unauthorized/i),
     );
-    expect(screen.getByRole("button", { name: /^finish$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeDisabled();
   });
 });

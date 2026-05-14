@@ -17,7 +17,7 @@ export interface WizardStepMeta {
 
 export const SETUP_STEPS: WizardStepMeta[] = [
   { index: 1, label: "URL", Icon: Globe },
-  { index: 2, label: "Email", Icon: Mail },
+  { index: 2, label: "E-mail", Icon: Mail },
   { index: 3, label: "Token", Icon: KeyRound },
 ];
 
@@ -39,18 +39,18 @@ export function Wizard({ step, children }: WizardProps) {
       <section
         className="w-full max-w-[480px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] p-7"
         role="region"
-        aria-label="Setup wizard"
+        aria-label="Průvodce nastavením"
       >
         <header className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Connect to Jira</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Připojit k Jira</h1>
           <p className="text-sm text-[var(--text-tertiary)] mt-1">
-            Step {step + 1} of {SETUP_STEPS.length}
+            Krok {step + 1} z {SETUP_STEPS.length}
           </p>
         </header>
 
         <ol
           className="flex items-center justify-between mb-8"
-          aria-label="Setup progress"
+          aria-label="Postup nastavení"
         >
           {SETUP_STEPS.map((s, i) => {
             const isDone = i < step;
