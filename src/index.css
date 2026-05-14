@@ -1,62 +1,217 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300..900&family=JetBrains+Mono:wght@400..700&display=swap");
 @import "tailwindcss";
 
-/*
- * Base typography and color-scheme tokens.
+/* =============================================================================
+ * Design Token System
  *
- * `--base-font-size` is updated at runtime by `prefsStore.applyFontSize` so
- * tweaking the size radio in Settings immediately scales the whole UI.
+ * Single source of truth for every color, radius, shadow, and typographic
+ * scale in the app. Components reference these via CSS custom properties
+ * (or the Tailwind `@theme` shortcuts below).
  *
  * Theme is encoded as a `data-theme` attribute on `<html>`:
  *   (none)        → follow `prefers-color-scheme` (the `auto` mode)
  *   "dark"        → force dark
  *   "light"       → force light
- */
+ *
+ * Accent color is driven by `--accent-h` (HSL hue) so swapping the accent
+ * is a single-number change applied to <html> from React.
+ * ============================================================================= */
+
 :root {
-  font-family: "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* ---- typography ---- */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: dark;
   --base-font-size: 14px;
   font-size: var(--base-font-size);
+
+  /* ---- accent (Apple blue, default) ---- */
+  --accent-h: 211;
+  --accent-s: 100%;
+  --accent-l: 50%;
+  --accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-hover: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 6%));
+  --accent-text: #ffffff;
+  --accent-soft: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.14);
+  --accent-strong: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.28);
+  --accent-ring: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.35);
+
+  /* ---- radii ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* ---- dark theme (default) ---- */
+  --bg-app: #0b0b0d;
+  --bg-surface: #15151a;
+  --bg-elevated: #1c1c22;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --bg-active: rgba(255, 255, 255, 0.07);
+  --bg-overlay: rgba(0, 0, 0, 0.55);
+
+  --text-primary: #f5f5f7;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-disabled: #52525b;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --danger: #ff453a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 12px 40px rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  background: #0f0f0f;
-  color: #fff;
-}
-
-/* --- explicit dark (default) -------------------------------------------- */
+/* ---- explicit dark (default values are already dark) -------------------- */
 html[data-theme="dark"] {
   color-scheme: dark;
 }
-html[data-theme="dark"], html[data-theme="dark"] body, html[data-theme="dark"] #root {
-  background: #0f0f0f;
-  color: #fff;
-}
 
-/* --- explicit light ----------------------------------------------------- */
+/* ---- explicit light ----------------------------------------------------- */
 html[data-theme="light"] {
   color-scheme: light;
-}
-html[data-theme="light"], html[data-theme="light"] body, html[data-theme="light"] #root {
-  background: #f7f7f7;
-  color: #111;
+
+  --bg-app: #f5f5f7;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.07);
+  --bg-overlay: rgba(0, 0, 0, 0.25);
+
+  --text-primary: #1d1d1f;
+  --text-secondary: #515156;
+  --text-tertiary: #86868b;
+  --text-disabled: #b8b8bd;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.18);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.12);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.16),
+    0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-/* --- auto / system ------------------------------------------------------ */
+/* ---- auto / system ------------------------------------------------------ */
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
+  html:not([data-theme]) {
     color-scheme: light;
-  }
-  html:not([data-theme]), html:not([data-theme]) body, html:not([data-theme]) #root {
-    background: #f7f7f7;
-    color: #111;
+
+    --bg-app: #f5f5f7;
+    --bg-surface: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-active: rgba(0, 0, 0, 0.07);
+    --bg-overlay: rgba(0, 0, 0, 0.25);
+
+    --text-primary: #1d1d1f;
+    --text-secondary: #515156;
+    --text-tertiary: #86868b;
+    --text-disabled: #b8b8bd;
+
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-default: rgba(0, 0, 0, 0.1);
+    --border-strong: rgba(0, 0, 0, 0.18);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.12);
+    --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.16),
+      0 1px 2px rgba(0, 0, 0, 0.06);
   }
 }
 
-/* --- density ------------------------------------------------------------ */
-/* `density-compact` shaves a couple px off list rows; comfortable is default. */
+/* =============================================================================
+ * Tailwind 4 theme bridge
+ *
+ * Map token CSS variables to Tailwind colors so components can use the
+ * canonical `bg-surface`, `text-primary`, `border-subtle` shortcuts.
+ * ============================================================================= */
+@theme {
+  --color-app: var(--bg-app);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+  --color-hover: var(--bg-hover);
+  --color-active: var(--bg-active);
+  --color-overlay: var(--bg-overlay);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-disabled: var(--text-disabled);
+
+  --color-subtle: var(--border-subtle);
+  --color-default: var(--border-default);
+  --color-strong: var(--border-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+
+/* =============================================================================
+ * Base resets
+ * ============================================================================= */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Selection follows accent. */
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* Subtle scrollbars to match the macOS feel. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+/* =============================================================================
+ * Density
+ * ============================================================================= */
 body.density-compact .worklog-row {
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
@@ -64,4 +219,14 @@ body.density-compact .worklog-row {
 body.density-comfortable .worklog-row {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
+}
+
+/* =============================================================================
+ * Motion — used sparingly. State changes get 150ms ease-out.
+ * ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
