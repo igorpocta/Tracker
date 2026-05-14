@@ -146,9 +146,9 @@ describe("Popover", () => {
     render(<Popover />);
     await waitFor(() => {
       // The popover wires up many listeners — `popover:opened` must be one.
-      const listenedEvents = eventMock.listen.mock.calls.map(
-        (call) => call[0] as string,
-      );
+      const listenedEvents = (
+        eventMock.listen.mock.calls as unknown as Array<[string, unknown]>
+      ).map((call) => call[0]);
       expect(listenedEvents).toContain("popover:opened");
       expect(listenedEvents).toContain("timer-started");
       expect(listenedEvents).toContain("timer-stopped");
