@@ -37,8 +37,23 @@ pub enum SyncError {
 /// near that — we still paginate in case someone has a hyper-active issue.
 const ISSUE_WORKLOG_PAGE_SIZE: u32 = 1000;
 
+/// How long we keep tombstoned rows around before hard-deleting them. The
+/// rows are excluded from the default worklog queries via the
+/// `tombstoned_at IS NULL` filter, but we hold onto them as a forensic
+/// audit trail.
+const TOMBSTONE_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+
 /// Fetch worklogs authored by `me_account_id` between `from_date` and
 /// `to_date` (inclusive), and upsert them into the local cache.
+///
+/// Also runs **mark-and-sweep**: any local row with `source='jira'` whose
+/// `jira_worklog_id` was *not* returned by this sync (and which falls inside
+/// the requested range) is presumed deleted upstream and gets tombstoned
+/// locally. This catches the case where the user deletes a worklog directly
+/// in the Jira web UI between syncs.
+///
+/// Tombstoned rows older than [`TOMBSTONE_RETENTION_SECONDS`] are then
+/// hard-deleted.
 ///
 /// Returns the number of worklog rows upserted (deduplicated by
 /// `jira_worklog_id` via [`cache::worklogs::upsert_from_jira`]).
@@ -80,6 +95,9 @@ pub async fn sync_worklogs_for_range(
 
     let mut upserted = 0usize;
     let mut page_token: Option<String> = None;
+    // Collect the set of Jira worklog ids we saw in this sync — used by the
+    // mark-and-sweep step below.
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     loop {
         let page = client
@@ -120,6 +138,7 @@ pub async fn sync_worklogs_for_range(
 
                     let row = jira_worklog_to_row(wl, &issue.key, started_ts);
                     cache::worklogs::upsert_from_jira(db, &row)?;
+                    seen_ids.insert(wl.id.clone());
                     upserted += 1;
                 }
 
@@ -136,6 +155,43 @@ pub async fn sync_worklogs_for_range(
         }
         page_token = page.next_page_token;
     }
+
+    // ----- Mark-and-sweep -----
+    //
+    // Any `source='jira'` row whose started_at falls inside our query window
+    // and whose `jira_worklog_id` was NOT returned this pass is presumed
+    // deleted upstream. Tombstone it locally.
+    //
+    // Note: we filter on author too because the sync itself is author-scoped
+    // — without that filter we'd tombstone other users' worklogs if the
+    // current user can see them (which doesn't happen in our schema today
+    // because we only sync our own, but defensive is cheap).
+    let local_ids =
+        cache::worklogs::jira_ids_in_range(db, from_ts, to_ts, me_account_id)?;
+    let now_unix = Utc::now().timestamp();
+    for local_id in &local_ids {
+        if !seen_ids.contains(local_id) {
+            cache::worklogs::mark_tombstoned_by_jira_id(db, local_id, now_unix)?;
+            // Audit the synthetic tombstone for traceability.
+            let _ = crate::cache::audit::record(
+                db,
+                crate::cache::audit::AuditEvent {
+                    occurred_at: now_unix,
+                    op: crate::cache::audit::AuditOp::SyncTombstone,
+                    issue_key: None,
+                    worklog_id: Some(local_id.as_str()),
+                    before: None,
+                    after: None,
+                    success: true,
+                    error: None,
+                },
+            );
+        }
+    }
+
+    // Hard-delete tombstoned rows older than the retention window.
+    let retention_cutoff = now_unix - TOMBSTONE_RETENTION_SECONDS;
+    cache::worklogs::purge_old_tombstoned(db, retention_cutoff)?;
 
     Ok(upserted)
 }

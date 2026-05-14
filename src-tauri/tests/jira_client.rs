@@ -838,3 +838,209 @@ async fn sync_worklogs_for_range_filters_by_user_and_range() {
     assert_eq!(row.source, "jira");
     assert_eq!(row.comment.as_deref(), Some("real work"));
 }
+
+// ---------- Phase 15: mark-and-sweep ----------
+
+#[tokio::test]
+async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
+    use chrono::NaiveDate;
+    use tracker_lib::cache::worklogs::{upsert_from_jira, WorklogRow};
+    use tracker_lib::jira::worklog_sync::sync_worklogs_for_range;
+
+    let (server, client) = server_and_client().await;
+
+    // Pre-seed two existing rows for the same date range. Only "5001" comes
+    // back from Jira this pass; "5002" should be tombstoned by the sweep.
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(&dir.path().join("sweep.db")).unwrap();
+
+    let in_range_ts = 1778751000_i64; // 2026-05-14 09:30 UTC
+    upsert_from_jira(
+        &db,
+        &WorklogRow {
+            id: None,
+            issue_key: "ACME-1".into(),
+            issue_id: Some("10001".into()),
+            summary: Some("S".into()),
+            duration_s: 1800,
+            started_at: in_range_ts,
+            logged_at: in_range_ts,
+            comment: None,
+            jira_worklog_id: Some("5001".into()),
+            author_account_id: Some("me-acc".into()),
+            source: "jira".into(),
+            updated_at_jira: Some(in_range_ts),
+            pending_delete_at: None,
+            tombstoned_at: None,
+        },
+    )
+    .unwrap();
+    upsert_from_jira(
+        &db,
+        &WorklogRow {
+            id: None,
+            issue_key: "ACME-1".into(),
+            issue_id: Some("10001".into()),
+            summary: Some("S".into()),
+            duration_s: 600,
+            started_at: in_range_ts + 60,
+            logged_at: in_range_ts + 60,
+            comment: None,
+            jira_worklog_id: Some("5002".into()),
+            author_account_id: Some("me-acc".into()),
+            source: "jira".into(),
+            updated_at_jira: Some(in_range_ts + 60),
+            pending_delete_at: None,
+            tombstoned_at: None,
+        },
+    )
+    .unwrap();
+
+    // Jira returns only 5001 now (5002 was deleted upstream).
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/search/jql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issues": [
+                { "id": "10001", "key": "ACME-1", "fields": { "summary": "S", "updated": "2026-05-14T09:00:00.000+0000" } }
+            ],
+            "isLast": true
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/ACME-1/worklog"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "worklogs": [
+                {
+                    "id": "5001",
+                    "author": { "accountId": "me-acc" },
+                    "started": "2026-05-14T09:30:00.000+0000",
+                    "timeSpentSeconds": 1800,
+                    "updated": "2026-05-14T09:30:00.000+0000",
+                    "created": "2026-05-14T09:30:00.000+0000"
+                }
+            ],
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 1000
+        })))
+        .mount(&server)
+        .await;
+
+    let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    sync_worklogs_for_range(&client, &db, "me-acc", from, to)
+        .await
+        .expect("ok");
+
+    // Default query should now show only 5001 (5002 is tombstoned).
+    let rows =
+        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc"))
+            .unwrap();
+    let ids: Vec<&str> = rows
+        .iter()
+        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .collect();
+    assert_eq!(ids, vec!["5001"]);
+
+    // …but the diagnostic query includes the tombstoned row.
+    let with_tomb =
+        tracker_lib::cache::worklogs::for_date_range_including_tombstoned(
+            &db,
+            0,
+            i64::MAX,
+            Some("me-acc"),
+        )
+        .unwrap();
+    assert_eq!(with_tomb.len(), 2);
+    let tombstoned = with_tomb
+        .iter()
+        .find(|r| r.jira_worklog_id.as_deref() == Some("5002"))
+        .expect("5002 row present");
+    assert!(tombstoned.tombstoned_at.is_some());
+}
+
+#[test]
+fn for_date_range_excludes_tombstoned() {
+    use tracker_lib::cache::worklogs::{
+        for_date_range, for_date_range_including_tombstoned, mark_tombstoned_by_jira_id,
+        upsert_from_jira, WorklogRow,
+    };
+
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(&dir.path().join("excl.db")).unwrap();
+
+    let base = 1_700_000_000_i64;
+    for jid in ["a", "b", "c"] {
+        upsert_from_jira(
+            &db,
+            &WorklogRow {
+                id: None,
+                issue_key: "K-1".into(),
+                duration_s: 600,
+                started_at: base,
+                logged_at: base,
+                jira_worklog_id: Some(jid.into()),
+                author_account_id: Some("me".into()),
+                source: "jira".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    mark_tombstoned_by_jira_id(&db, "b", base + 60).unwrap();
+
+    let default_rows = for_date_range(&db, 0, i64::MAX, Some("me")).unwrap();
+    let default_ids: Vec<&str> = default_rows
+        .iter()
+        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .collect();
+    assert_eq!(default_ids.len(), 2);
+    assert!(!default_ids.contains(&"b"));
+
+    let all_rows =
+        for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
+    assert_eq!(all_rows.len(), 3);
+}
+
+#[test]
+fn purge_old_tombstoned_hard_deletes_old_rows() {
+    use tracker_lib::cache::worklogs::{
+        count, for_date_range_including_tombstoned, mark_tombstoned_by_jira_id,
+        purge_old_tombstoned, upsert_from_jira, WorklogRow,
+    };
+
+    let dir = TempDir::new().unwrap();
+    let db = Db::open(&dir.path().join("purge.db")).unwrap();
+
+    let base = 1_700_000_000_i64;
+    for jid in ["old", "new"] {
+        upsert_from_jira(
+            &db,
+            &WorklogRow {
+                id: None,
+                issue_key: "K-1".into(),
+                duration_s: 600,
+                started_at: base,
+                logged_at: base,
+                jira_worklog_id: Some(jid.into()),
+                author_account_id: Some("me".into()),
+                source: "jira".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    mark_tombstoned_by_jira_id(&db, "old", 100).unwrap();
+    mark_tombstoned_by_jira_id(&db, "new", 10_000).unwrap();
+
+    let removed = purge_old_tombstoned(&db, 1_000).unwrap();
+    assert_eq!(removed, 1);
+    assert_eq!(count(&db).unwrap(), 1);
+
+    // The remaining row should be "new" (still tombstoned but within window).
+    let rows = for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].jira_worklog_id.as_deref(), Some("new"));
+}
