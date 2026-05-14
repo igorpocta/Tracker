@@ -80,13 +80,20 @@ export function getTimerState(): Promise<ActiveTimerState | null> {
   return invoke<ActiveTimerState | null>("get_timer_state");
 }
 
-/** `start_timer(issue_key, started_at_ms?): ActiveTimerState` */
+/**
+ * `start_timer(issue_key?, started_at_ms?): ActiveTimerState`
+ *
+ * Phase 18A — Item 4: `issueKey` is optional. Passing `undefined` (or an
+ * empty string) starts an "unassigned" timer — the UI surfaces a red ⚠ until
+ * the user assigns an issue via `assignActiveTimer` (or stops, in which case
+ * the resulting worklog has `pending_assignment = true`).
+ */
 export function startTimer(
-  issueKey: string,
+  issueKey?: string | null,
   startedAtMs?: number,
 ): Promise<ActiveTimerState> {
   return invoke<ActiveTimerState>("start_timer", {
-    issueKey,
+    issueKey: issueKey ?? null,
     startedAtMs: startedAtMs ?? null,
   });
 }
@@ -466,4 +473,224 @@ export function getDayTimelineVisible(): Promise<boolean> {
 
 export function setDayTimelineVisible(visible: boolean): Promise<void> {
   return invoke<void>("set_day_timeline_visible", { visible });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Multi-connection / multi-provider
+// -----------------------------------------------------------------------------
+
+export interface ConnectionDto {
+  id: number;
+  provider: string;
+  name: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+  config: Record<string, unknown>;
+  has_token: boolean;
+}
+
+export function listConnections(): Promise<ConnectionDto[]> {
+  return invoke<ConnectionDto[]>("list_connections");
+}
+
+export function addConnection(args: {
+  provider: string;
+  name: string;
+  config: Record<string, unknown>;
+  token: string;
+}): Promise<ConnectionDto> {
+  return invoke<ConnectionDto>("add_connection", { args });
+}
+
+export function updateConnectionApi(args: {
+  id: number;
+  name?: string;
+  config?: Record<string, unknown>;
+  token?: string;
+  enabled?: boolean;
+}): Promise<ConnectionDto> {
+  return invoke<ConnectionDto>("update_connection", { args });
+}
+
+export function removeConnection(id: number): Promise<void> {
+  return invoke<void>("remove_connection", { id });
+}
+
+export function enableConnection(id: number, enabled: boolean): Promise<ConnectionDto> {
+  return invoke<ConnectionDto>("enable_connection", { id, enabled });
+}
+
+export function testConnectionForProvider(args: {
+  provider: string;
+  config: Record<string, unknown>;
+  token: string;
+}): Promise<JiraUser> {
+  return invoke<JiraUser>("test_connection_for_provider", { args });
+}
+
+export function listMyIssues(
+  connectionId: number,
+  limit?: number,
+): Promise<IssueRow[]> {
+  return invoke<IssueRow[]>("list_my_issues", {
+    connectionId,
+    limit: limit ?? null,
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Timer extensions (assign / unassigned)
+// -----------------------------------------------------------------------------
+
+/**
+ * Assign an issue key to the currently running (unassigned) timer. Does NOT
+ * push a worklog — the timer keeps running with the new issue attached.
+ */
+export function assignActiveTimer(issueKey: string): Promise<ActiveTimerState> {
+  return invoke<ActiveTimerState>("assign_active_timer", { issueKey });
+}
+
+/**
+ * Phase 18A — Item 4: assign an issue to a previously-stopped unassigned
+ * worklog. POSTs a fresh worklog to Jira and links its id locally.
+ */
+export function assignWorklogIssue(
+  worklogId: number,
+  issueKey: string,
+): Promise<WorklogRow> {
+  return invoke<WorklogRow>("assign_worklog_issue", { worklogId, issueKey });
+}
+
+/**
+ * Phase 18A — Item 7: hard-delete a worklog that exists only locally (no
+ * `jira_worklog_id`). Used for pending-assignment rows and ones that failed
+ * to sync to Jira (e.g. <60s rejections).
+ */
+export function deleteLocalOnlyWorklog(worklogId: number): Promise<void> {
+  return invoke<void>("delete_local_only_worklog", { worklogId });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Rounding (Item 27)
+// -----------------------------------------------------------------------------
+
+export type RoundingMode = "none" | "up" | "down";
+
+export function getRoundingMode(): Promise<RoundingMode> {
+  return invoke<RoundingMode>("get_rounding_mode");
+}
+
+export function setRoundingMode(mode: RoundingMode): Promise<void> {
+  return invoke<void>("set_rounding_mode", { mode });
+}
+
+export function getRoundingIntervalMinutes(): Promise<number> {
+  return invoke<number>("get_rounding_interval_minutes");
+}
+
+export function setRoundingIntervalMinutes(minutes: number): Promise<void> {
+  return invoke<void>("set_rounding_interval_minutes", { minutes });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Calendar (Item 2)
+// -----------------------------------------------------------------------------
+
+export interface NonWorkingDay {
+  date: string;
+  reason: string;
+  label: string | null;
+  created_at: number;
+}
+
+export function getWorkingWeekMask(): Promise<number> {
+  return invoke<number>("get_working_week_mask");
+}
+
+export function setWorkingWeekMask(mask: number): Promise<void> {
+  return invoke<void>("set_working_week_mask", { mask });
+}
+
+export function listNonWorkingDays(
+  fromDate: string,
+  toDate: string,
+): Promise<NonWorkingDay[]> {
+  return invoke<NonWorkingDay[]>("list_non_working_days", { fromDate, toDate });
+}
+
+export function addNonWorkingDay(
+  date: string,
+  reason: string,
+  label?: string,
+): Promise<void> {
+  return invoke<void>("add_non_working_day", {
+    date,
+    reason,
+    label: label ?? null,
+  });
+}
+
+export function removeNonWorkingDay(date: string): Promise<void> {
+  return invoke<void>("remove_non_working_day", { date });
+}
+
+export function isWorkingDay(date: string): Promise<boolean> {
+  return invoke<boolean>("is_working_day", { date });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Activity (Item 32)
+// -----------------------------------------------------------------------------
+
+export interface DailyActivityRow {
+  date: string;
+  active_seconds: number;
+  inactive_seconds: number;
+  updated_at: number;
+}
+
+export interface ActivityIngestResult {
+  active_added: number;
+  inactive_added: number;
+}
+
+export function recordUserActivity(
+  timestampMs: number,
+): Promise<ActivityIngestResult> {
+  return invoke<ActivityIngestResult>("record_user_activity", {
+    timestampMs,
+  });
+}
+
+export function getDailyActivity(date: string): Promise<DailyActivityRow> {
+  return invoke<DailyActivityRow>("get_daily_activity", { date });
+}
+
+export function getActivityThresholdMin(): Promise<number> {
+  return invoke<number>("get_activity_threshold_min");
+}
+
+export function setActivityThresholdMin(min: number): Promise<void> {
+  return invoke<void>("set_activity_threshold_min", { min });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18A — Autostart (Item 30)
+//
+// Thin wrappers around `tauri-plugin-autostart`. We talk to the plugin
+// directly via its IPC namespace (`plugin:autostart|...`) so we don't have to
+// add the JS package — the dependency is purely on the Rust side.
+// -----------------------------------------------------------------------------
+
+export function getAutostart(): Promise<boolean> {
+  return invoke<boolean>("plugin:autostart|is_enabled");
+}
+
+export async function setAutostart(enabled: boolean): Promise<void> {
+  if (enabled) {
+    await invoke<void>("plugin:autostart|enable");
+  } else {
+    await invoke<void>("plugin:autostart|disable");
+  }
 }

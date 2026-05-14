@@ -70,6 +70,8 @@ export interface WorklogRow {
   /** Phase 15 — soft-delete + tombstone columns. */
   pending_delete_at?: number | null;
   tombstoned_at?: number | null;
+  /** Phase 18A — true for unassigned-timer worklogs (no issue selected). */
+  pending_assignment?: boolean;
 }
 
 /** Mirrors `src-tauri/src/commands/worklog.rs::MoveWorklogResultDto`. */
@@ -150,7 +152,7 @@ export type DensityPref = "compact" | "comfortable";
  *
  * The original "Apple-style" hues (blue/indigo/…) from Phase 11 are still
  * accepted by the backend for backwards compatibility, but the UI now picks
- * from the Mono + Dual palette set inspired by the Trcker reference. See
+ * from the Mono + Dual palette set inspired by the Tracker reference. See
  * `src/lib/accent.ts` for the canonical list of palette specs.
  */
 export type AccentColor =
