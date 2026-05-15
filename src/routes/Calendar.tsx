@@ -21,6 +21,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   addNonWorkingDay,
@@ -126,6 +127,7 @@ function MonthlyView({
   today: Date;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const monthStart = useMemo(
     () => startOfMonth(new Date(year, month, 1)),
     [year, month],
@@ -249,9 +251,12 @@ function MonthlyView({
           onMarkNonWorking={(reason) => void handleMark(menu.date, reason)}
           onUnmark={() => void handleUnmark(menu.date)}
           onOpenDetail={() => {
-            /* Day detail panel is still TODO (Phase 13B). The action is wired
-             * so the menu item stays clickable; once the panel lands, replace
-             * this with `setDetailDate(menu.date)`. */
+            // Navigate to TimeLog with the picked date as initial selection.
+            // TimeLog reads `location.state.targetDateMs` on first mount and
+            // its prev/next day buttons take over from there.
+            const targetDateMs = startOfDay(menu.date).getTime();
+            setMenu(null);
+            navigate("/", { state: { targetDateMs } });
           }}
           onClose={() => setMenu(null)}
         />

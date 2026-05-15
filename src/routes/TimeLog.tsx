@@ -21,7 +21,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Plus, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useLocation, useOutletContext } from "react-router-dom";
 
 import {
   deleteWorklog,
@@ -50,8 +50,22 @@ type Mode = "day" | "week";
 export default function TimeLog() {
   const ctx = useOutletContext<ShellOutletContext>();
   const queryClient = useQueryClient();
+  // The Calendar route navigates here with `location.state.targetDateMs` set
+  // when the user picks "Detail dne" from the right-click context menu. We
+  // honor that as the initial selection so the user lands on the right day.
+  const location = useLocation();
+  const initialDate = useMemo<Date>(() => {
+    const stateTs = (location.state as { targetDateMs?: number } | null)?.targetDateMs;
+    if (typeof stateTs === "number" && Number.isFinite(stateTs)) {
+      return startOfDay(new Date(stateTs));
+    }
+    return startOfDay(new Date());
+    // Only consume the state on first mount; subsequent renders use the
+    // current `selectedDate` state instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [mode, setMode] = useState<Mode>("day");
-  const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
+  const [selectedDate, setSelectedDate] = useState<Date>(initialDate);
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
 
   // Phase 18A — Item 9: re-evaluate the period range when the day rolls
