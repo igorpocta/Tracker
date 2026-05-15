@@ -22,7 +22,6 @@
  * (`src-tauri/src/popover.rs::setup`) — no JS blur handler required.
  */
 import { emitTo } from "@tauri-apps/api/event";
-import { listen } from "@tauri-apps/api/event";
 import { Clock, ExternalLink, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
@@ -40,6 +39,7 @@ import {
 } from "./api/commands";
 import type { ActiveTimerState, IssueRow, ThemePref, WorklogRow } from "./api/types";
 import { useNow } from "./hooks/useNow";
+import { useTauriEvent } from "./hooks/useTauriEvent";
 import { applyPalette } from "./lib/accent";
 import { todayEndUnixS, todayStartUnixS } from "./lib/dates";
 import { formatDuration } from "./lib/format";
@@ -123,40 +123,32 @@ export function Popover() {
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
-    // Phase 18B — Item 17: keep the popover face in lockstep with the main
-    // window. Every relevant event triggers a state refetch so the running
-    // timer / today totals / recent issues stay consistent.
-    const events = [
-      "popover:opened",
-      "timer-started",
-      "timer-stopped",
-      "timer-updated",
-      "worklog-saved",
-      "worklog-created",
-      "worklog-updated",
-      "worklog-deleted",
-      "worklog-moved",
-    ];
-    const unlisteners: Array<() => void> = [];
-    events.forEach((ev) => {
-      listen(ev, () => {
-        void refresh();
-      })
-        .then((u) => unlisteners.push(u))
-        .catch(() => {});
-    });
-    // `prefs-changed` triggers BOTH a data refresh AND an appearance reload.
-    listen("prefs-changed", () => {
-      void refresh();
-      void hydratePopoverAppearance();
-    })
-      .then((u) => unlisteners.push(u))
-      .catch(() => {});
-    return () => {
-      for (const u of unlisteners) u();
-    };
+  // Phase 18B — Item 17: keep the popover face in lockstep with the main
+  // window. Every relevant event triggers a state refetch so the running
+  // timer / today totals / recent issues stay consistent.
+  //
+  // Pre-fix the listeners were registered with a `listen(...).then(push)`
+  // pattern that leaked when the promise resolved AFTER unmount — the
+  // resolved unlisten ended up in an array nobody read on cleanup, and
+  // Tauri kept the handler alive. `useTauriEvent` carries the canonical
+  // `cancelled` guard so the late-resolved unlisten fires immediately.
+  const onRefresh = useCallback(() => {
+    void refresh();
   }, [refresh]);
+  const onPrefsChanged = useCallback(() => {
+    void refresh();
+    void hydratePopoverAppearance();
+  }, [refresh]);
+  useTauriEvent("popover:opened", onRefresh);
+  useTauriEvent("timer-started", onRefresh);
+  useTauriEvent("timer-stopped", onRefresh);
+  useTauriEvent("timer-updated", onRefresh);
+  useTauriEvent("worklog-saved", onRefresh);
+  useTauriEvent("worklog-created", onRefresh);
+  useTauriEvent("worklog-updated", onRefresh);
+  useTauriEvent("worklog-deleted", onRefresh);
+  useTauriEvent("worklog-moved", onRefresh);
+  useTauriEvent("prefs-changed", onPrefsChanged);
 
   const startForIssue = useCallback(
     async (issueKey: string) => {
