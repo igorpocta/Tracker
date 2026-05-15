@@ -56,6 +56,19 @@ import { SyncBanner } from "./SyncBanner";
 /** Number of days of worklog history we pull on startup / manual refresh. */
 const REFRESH_WINDOW_DAYS = 30;
 
+/**
+ * `true` when the app is running on macOS. We use the platform sniff once at
+ * module load — the result never changes during a session.
+ *
+ * On macOS the main window uses `titleBarStyle: "Overlay"` (see
+ * `tauri.conf.json`), so our content extends behind the transparent title
+ * bar. We compensate with ~28px of top padding and expose a draggable strip
+ * so users can still grab the window from where the title bar visually lives.
+ */
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+
 export interface ShellOutletContext {
   pushToast: (
     variant: ToastVariant,
@@ -329,10 +342,27 @@ export function AppShell() {
   const isSettings = location.pathname.startsWith("/settings");
 
   return (
-    <div className="h-screen flex bg-[var(--bg-app)] text-[var(--text-primary)]">
-      <IconSidebar />
+    <div
+      className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
+    >
+      {/*
+       * macOS Overlay title bar: the OS draws the close/min/max buttons over
+       * our content at the top-left. We add a transparent 28px drag strip so
+       * the user can grab the empty area to the right of the traffic lights
+       * and drag the window. Skipped on other platforms because the strip
+       * would do nothing useful.
+       */}
+      {IS_MAC && (
+        <div
+          data-tauri-drag-region
+          aria-hidden
+          className="absolute top-0 left-0 right-0 h-7 z-50"
+        />
+      )}
+      <div className="flex-1 min-h-0 flex">
+        <IconSidebar />
 
-      <div className="flex-1 min-w-0 flex">
+        <div className="flex-1 min-w-0 flex">
         <div className="flex-1 min-w-0 flex flex-col">
           {!isSettings && <SyncBanner />}
           {!isSettings && (
@@ -416,6 +446,7 @@ export function AppShell() {
             }
           }}
         />
+        </div>
       </div>
 
       {active && (
