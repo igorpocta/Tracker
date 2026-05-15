@@ -19,7 +19,7 @@
  *     fires the real Jira DELETE.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Plus, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
@@ -45,18 +45,13 @@ import { formatDateCs, formatDurationShort } from "../lib/format";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import { usePrefsStore } from "../stores/prefsStore";
 
-type Period = "today" | "yesterday" | "this-week";
-
-const PERIOD_LABEL: Record<Period, string> = {
-  today: "Dnes",
-  yesterday: "Včera",
-  "this-week": "Tento týden",
-};
+type Mode = "day" | "week";
 
 export default function TimeLog() {
   const ctx = useOutletContext<ShellOutletContext>();
   const queryClient = useQueryClient();
-  const [period, setPeriod] = useState<Period>("today");
+  const [mode, setMode] = useState<Mode>("day");
+  const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
 
   // Phase 18A — Item 9: re-evaluate the period range when the day rolls
@@ -69,11 +64,55 @@ export default function TimeLog() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const [from, to] = useMemo(
-    () => periodRange(period),
-    [period, dayBoundary.rolloverCount],
+  /** Today, recomputed when the day rolls over so "Dnes" / disabled-next stay accurate. */
+  const todayStart = useMemo(
+    () => startOfDay(new Date()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dayBoundary.rolloverCount],
   );
+
+  const [from, to] = useMemo<[Date, Date]>(() => {
+    if (mode === "week") {
+      const monday = startOfWeek(selectedDate);
+      return [monday, addDays(monday, 6)];
+    }
+    return [selectedDate, selectedDate];
+  }, [mode, selectedDate]);
+
+  /** True iff the selected day equals today (used to disable "next" + hide "Dnes" pill). */
+  const isAtToday = selectedDate.getTime() === todayStart.getTime();
+
+  const handlePrev = useCallback(() => {
+    setSelectedDate((d) => addDays(d, mode === "week" ? -7 : -1));
+  }, [mode]);
+
+  const handleNext = useCallback(() => {
+    setSelectedDate((d) => {
+      const next = addDays(d, mode === "week" ? 7 : 1);
+      // Never advance past today.
+      return next > todayStart ? todayStart : next;
+    });
+  }, [mode, todayStart]);
+
+  const handleJumpToday = useCallback(() => {
+    setSelectedDate(todayStart);
+  }, [todayStart]);
+
+  /** Label shown in the header (e.g. "Dnes · čt 14.5." or "po 12.5. – ne 18.5."). */
+  const headerLabel = useMemo(() => {
+    if (mode === "week") {
+      return `${formatDateCs(from)} – ${formatDateCs(to)}`;
+    }
+    const diffDays = Math.round(
+      (selectedDate.getTime() - todayStart.getTime()) / (24 * 3600 * 1000),
+    );
+    let prefix: string | null = null;
+    if (diffDays === 0) prefix = "Dnes";
+    else if (diffDays === -1) prefix = "Včera";
+    else if (diffDays === 1) prefix = "Zítra";
+    const fmt = formatDateCs(selectedDate);
+    return prefix ? `${prefix} · ${fmt}` : fmt;
+  }, [mode, selectedDate, todayStart, from, to]);
 
   const fromUnix = dayStartUnixS(from);
   const toUnix = dayEndUnixS(to);
@@ -188,15 +227,58 @@ export default function TimeLog() {
   return (
     <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
       {/* Header row ----------------------------------------------------- */}
-      <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
-        <div className="flex items-baseline gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
             Časový záznam
           </h1>
-          <PeriodSelector value={period} onChange={setPeriod} />
-          <span className="text-xs font-mono text-[var(--text-tertiary)]">
-            {formatDateCs(from)} → {formatDateCs(to)}
-          </span>
+          <ModeSelector value={mode} onChange={setMode} />
+
+          {/* < / > / Dnes navigator */}
+          <div className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handlePrev}
+              aria-label={mode === "week" ? "Předchozí týden" : "Předchozí den"}
+              title={mode === "week" ? "Předchozí týden" : "Předchozí den"}
+              className="w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-sm)]
+                         border border-[var(--border-subtle)] text-[var(--text-secondary)]
+                         hover:bg-[var(--bg-hover)] transition-colors duration-150"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+
+            <span className="text-xs font-mono text-[var(--text-tertiary)] min-w-[150px] text-center">
+              {headerLabel}
+            </span>
+
+            <button
+              type="button"
+              onClick={handleNext}
+              disabled={mode === "day" ? isAtToday : false}
+              aria-label={mode === "week" ? "Další týden" : "Další den"}
+              title={mode === "week" ? "Další týden" : "Další den"}
+              className="w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-sm)]
+                         border border-[var(--border-subtle)] text-[var(--text-secondary)]
+                         hover:bg-[var(--bg-hover)] transition-colors duration-150
+                         disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+
+            {!isAtToday && (
+              <button
+                type="button"
+                onClick={handleJumpToday}
+                className="ml-1 h-7 px-2 inline-flex items-center rounded-[var(--radius-sm)]
+                           text-[11px] font-medium
+                           bg-[var(--accent-soft)] text-[var(--accent)]
+                           hover:bg-[var(--bg-hover)] transition-colors duration-150"
+              >
+                Dnes
+              </button>
+            )}
+          </div>
         </div>
         <div className="text-right">
           <div className="text-xl font-semibold text-[var(--accent)] tabular-nums">
@@ -276,27 +358,24 @@ export default function TimeLog() {
   );
 }
 
-function PeriodSelector({
+function ModeSelector({
   value,
   onChange,
 }: {
-  value: Period;
-  onChange: (p: Period) => void;
+  value: Mode;
+  onChange: (m: Mode) => void;
 }) {
   return (
     <label className="inline-flex items-center gap-1 cursor-pointer">
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value as Period)}
+        onChange={(e) => onChange(e.target.value as Mode)}
         className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                    cursor-pointer focus:outline-none pr-4"
-        aria-label="Období"
+        aria-label="Režim"
       >
-        {(["today", "yesterday", "this-week"] as Period[]).map((p) => (
-          <option key={p} value={p}>
-            {PERIOD_LABEL[p]}
-          </option>
-        ))}
+        <option value="day">Den</option>
+        <option value="week">Týden</option>
       </select>
       <ChevronDown
         className="w-3 h-3 -ml-3 text-[var(--text-tertiary)] pointer-events-none"
@@ -568,17 +647,6 @@ const editCellCls =
   "px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-default)] " +
   "bg-transparent focus:outline-none";
 
-function periodRange(p: Period): [Date, Date] {
-  const today = startOfDay(new Date());
-  if (p === "today") return [today, today];
-  if (p === "yesterday") {
-    const y = addDays(today, -1);
-    return [y, y];
-  }
-  // This week
-  const monday = startOfWeek(today);
-  return [monday, today];
-}
 
 function formatHHMM(d: Date): string {
   return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
