@@ -216,14 +216,22 @@ export default function TimeLog() {
         comment?: string | null;
       },
     ) => {
-      const jiraId = row.jira_worklog_id;
-      if (!jiraId) {
-        ctx.pushToast("error", "Tento záznam ještě nebyl synchronizován do Jiry.");
+      // `jira_worklog_id` is a misnomer left over from the single-provider
+      // era — it holds the upstream ID for ALL providers: a Jira id for
+      // Jira worklogs, `freelo:<id>` for Freelo. Missing → the worklog is
+      // local-only and has never been synced upstream; we can't push the
+      // edit anywhere.
+      const remoteId = row.jira_worklog_id;
+      if (!remoteId) {
+        ctx.pushToast(
+          "error",
+          "Tento záznam je zatím jen lokální — nelze upravit, dokud se nesynchronizuje.",
+        );
         return;
       }
       try {
         await updateWorklog({
-          worklogId: jiraId,
+          worklogId: remoteId,
           issueKey: row.issue_key,
           newStartedAtMs: patch.startedAtMs ?? null,
           newDurationSeconds: patch.durationSeconds ?? null,
