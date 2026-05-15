@@ -349,14 +349,23 @@ export function AppShell() {
        * macOS Overlay title bar: the OS draws the close/min/max buttons over
        * our content at the top-left. We add a transparent 28px drag strip so
        * the user can grab the empty area to the right of the traffic lights
-       * and drag the window. Skipped on other platforms because the strip
-       * would do nothing useful.
+       * and drag the window. We use BOTH `data-tauri-drag-region` (Tauri
+       * convention) and CSS `-webkit-app-region: drag` (Wry/WebKit canonical)
+       * for maximum reliability. Z-index is intentionally above content
+       * (z-[100]) so toasts/modals at z-50 don't sit over the drag area.
+       *
+       * Traffic lights are drawn by the OS *outside* the webview, so the
+       * strip doesn't block them — clicks on them are intercepted by macOS
+       * before reaching the webview.
+       *
+       * Skipped on other platforms (Windows has its own non-overlay chrome).
        */}
       {IS_MAC && (
         <div
           data-tauri-drag-region
           aria-hidden
-          className="absolute top-0 left-0 right-0 h-7 z-50"
+          className="absolute top-0 left-0 right-0 h-7 z-[100]"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
         />
       )}
       <div className="flex-1 min-h-0 flex">
