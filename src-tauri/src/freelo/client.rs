@@ -15,11 +15,13 @@ use thiserror::Error;
 use url::Url;
 
 use super::models::{FreeloProject, FreeloTask, FreeloUser, FreeloWorkReport};
+use crate::http_base::{self, HttpError, RateLimitInfo};
 
-/// Max retries after a 429.
-pub const MAX_RETRIES: u32 = 3;
+/// Max retries after a 429. Re-export of the shared constant; Phase C
+/// will inline callers onto `http_base::MAX_RETRIES`.
+pub const MAX_RETRIES: u32 = http_base::MAX_RETRIES;
 /// Cap on retry wait derived from `Retry-After` or backoff.
-pub const MAX_RETRY_WAIT_SECS: u64 = 60;
+pub const MAX_RETRY_WAIT_SECS: u64 = http_base::MAX_RETRY_WAIT_SECS;
 
 /// Errors produced by the Freelo API client.
 #[derive(Debug, Error)]
@@ -49,49 +51,46 @@ pub struct FreeloClient {
     api_key: String,
 }
 
-async fn default_sleep(d: Duration) {
-    tokio::time::sleep(d).await;
+impl HttpError for FreeloError {
+    fn as_rate_limit(&self) -> Option<RateLimitInfo> {
+        if let FreeloError::RateLimited { retry_after_secs } = self {
+            Some(RateLimitInfo {
+                retry_after_secs: *retry_after_secs,
+            })
+        } else {
+            None
+        }
+    }
+    fn rate_limited(retry_after_secs: Option<u64>) -> Self {
+        FreeloError::RateLimited { retry_after_secs }
+    }
+    fn unauthorized() -> Self {
+        FreeloError::Unauthorized
+    }
+    fn api(status: u16, body: String) -> Self {
+        FreeloError::Api { status, body }
+    }
 }
 
-/// Retry wrapper for Freelo calls — same shape as the Jira one but typed for
-/// [`FreeloError::RateLimited`].
+/// Retry wrapper for Freelo calls. Delegates to
+/// [`crate::http_base::with_retry`]; Phase C will inline this.
 pub async fn with_retry<F, Fut, T>(f: F) -> Result<T, FreeloError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, FreeloError>>,
 {
-    with_retry_using(f, default_sleep).await
+    http_base::with_retry(f).await
 }
 
-pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(
-    mut f: F,
-    sleep: S,
-) -> Result<T, FreeloError>
+#[allow(dead_code)]
+pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(f: F, sleep: S) -> Result<T, FreeloError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, FreeloError>>,
     S: Fn(Duration) -> SFut,
     SFut: Future<Output = ()>,
 {
-    let mut attempt: u32 = 0;
-    loop {
-        match f().await {
-            Err(FreeloError::RateLimited { retry_after_secs }) if attempt < MAX_RETRIES => {
-                let wait = retry_after_secs
-                    .unwrap_or_else(|| 2u64.saturating_pow(attempt))
-                    .min(MAX_RETRY_WAIT_SECS);
-                sleep(Duration::from_secs(wait)).await;
-                attempt += 1;
-            }
-            other => return other,
-        }
-    }
-}
-
-fn parse_retry_after(h: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
-    let v = h?;
-    let s = v.to_str().ok()?.trim();
-    s.parse::<u64>().ok()
+    http_base::with_retry_using(f, sleep).await
 }
 
 impl FreeloClient {
@@ -139,20 +138,7 @@ impl FreeloClient {
     }
 
     async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, FreeloError> {
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(FreeloError::Unauthorized);
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_secs = parse_retry_after(resp.headers().get("Retry-After"));
-            return Err(FreeloError::RateLimited { retry_after_secs });
-        }
-        let code = status.as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        Err(FreeloError::Api { status: code, body })
+        http_base::check_status::<FreeloError>(resp).await
     }
 
     /// `GET /users/me` — authentication health check + minimal user info.
@@ -717,7 +703,8 @@ impl FreeloClient {
                 return Err(FreeloError::Unauthorized);
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_secs = parse_retry_after(resp.headers().get("Retry-After"));
+                let retry_after_secs =
+                    http_base::parse_retry_after(resp.headers().get("Retry-After"));
                 return Err(FreeloError::RateLimited { retry_after_secs });
             }
             let code = status.as_u16();

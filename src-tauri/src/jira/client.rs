@@ -13,12 +13,16 @@ use super::models::{
     IssueWorklogsPage, JiraIssue, JiraUser, JiraWorklog, SearchPage, WorklogResponse,
     WorklogUpdatedPage,
 };
+use crate::http_base::{self, HttpError, RateLimitInfo};
 
 /// Maximum number of retries for a single Jira request after a 429 response.
-pub const MAX_RETRIES: u32 = 3;
-/// Cap on the wait-before-retry derived from `Retry-After` or backoff. Prevents
-/// the app from blocking indefinitely if Jira sends back an absurd value.
-pub const MAX_RETRY_WAIT_SECS: u64 = 60;
+///
+/// Kept as a re-export of the shared constant so existing callers
+/// (`jira::client::MAX_RETRIES`) keep linking. Will be removed in Phase C
+/// of the refactor once callers move to [`crate::http_base::MAX_RETRIES`].
+pub const MAX_RETRIES: u32 = http_base::MAX_RETRIES;
+/// Cap on the wait-before-retry derived from `Retry-After` or backoff.
+pub const MAX_RETRY_WAIT_SECS: u64 = http_base::MAX_RETRY_WAIT_SECS;
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -62,62 +66,63 @@ pub struct JiraClient {
     token: String,
 }
 
-/// Sleep wrapper kept behind a function pointer so unit tests can stub it out
-/// (no real wall-clock waiting in tests).
-async fn default_sleep(d: Duration) {
-    tokio::time::sleep(d).await;
+impl HttpError for JiraError {
+    fn as_rate_limit(&self) -> Option<RateLimitInfo> {
+        if let JiraError::RateLimited { retry_after_secs } = self {
+            Some(RateLimitInfo {
+                retry_after_secs: *retry_after_secs,
+            })
+        } else {
+            None
+        }
+    }
+    fn rate_limited(retry_after_secs: Option<u64>) -> Self {
+        JiraError::RateLimited { retry_after_secs }
+    }
+    fn unauthorized() -> Self {
+        JiraError::Unauthorized
+    }
+    fn api(status: u16, body: String) -> Self {
+        JiraError::Api { status, body }
+    }
 }
 
 /// Generic retry-with-backoff for Jira API calls.
 ///
-/// On [`JiraError::RateLimited`]:
-/// - If `retry_after_secs` is `Some(n)`, wait `n` seconds.
-/// - Otherwise wait `2^attempt` seconds (1, 2, 4 for attempts 0..3).
-/// - Cap any computed wait at [`MAX_RETRY_WAIT_SECS`].
-/// - Give up after [`MAX_RETRIES`] attempts.
-///
-/// All other errors are returned immediately without retrying.
+/// Delegates to [`crate::http_base::with_retry`]; existing callers keep
+/// using `jira::client::with_retry`. Phase C will inline this away.
 pub async fn with_retry<F, Fut, T>(f: F) -> Result<T, JiraError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, JiraError>>,
 {
-    with_retry_using(f, default_sleep).await
+    http_base::with_retry(f).await
 }
 
 /// Test-friendly variant of [`with_retry`] that accepts a custom sleep
 /// function. Production code calls [`with_retry`].
-pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(mut f: F, sleep: S) -> Result<T, JiraError>
+///
+/// Currently no in-tree caller (retry behaviour is tested at the
+/// `http_base` level), but exposed `pub(crate)` for tests that may need
+/// to drive the retry loop without wall-clock delay.
+#[allow(dead_code)]
+pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(f: F, sleep: S) -> Result<T, JiraError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, JiraError>>,
     S: Fn(Duration) -> SFut,
     SFut: Future<Output = ()>,
 {
-    let mut attempt: u32 = 0;
-    loop {
-        match f().await {
-            Err(JiraError::RateLimited { retry_after_secs }) if attempt < MAX_RETRIES => {
-                let wait = retry_after_secs
-                    .unwrap_or_else(|| 2u64.saturating_pow(attempt))
-                    .min(MAX_RETRY_WAIT_SECS);
-                sleep(Duration::from_secs(wait)).await;
-                attempt += 1;
-            }
-            other => return other,
-        }
-    }
+    http_base::with_retry_using(f, sleep).await
 }
 
 /// Parse a `Retry-After` header value. Returns `None` for malformed input or
 /// HTTP-date forms (we only support seconds because Jira always emits that).
+///
+/// Thin re-export of [`crate::http_base::parse_retry_after`] kept for the
+/// existing Jira-specific name. Phase C cleanup removes this.
 pub fn parse_retry_after_header(h: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
-    let v = h?;
-    let s = v.to_str().ok()?.trim();
-    if let Ok(n) = s.parse::<u64>() {
-        return Some(n);
-    }
-    None
+    http_base::parse_retry_after(h)
 }
 
 impl JiraClient {
@@ -158,20 +163,7 @@ impl JiraClient {
     }
 
     async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, JiraError> {
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(JiraError::Unauthorized);
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_secs = parse_retry_after_header(resp.headers().get("Retry-After"));
-            return Err(JiraError::RateLimited { retry_after_secs });
-        }
-        let code = status.as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        Err(JiraError::Api { status: code, body })
+        http_base::check_status::<JiraError>(resp).await
     }
 
     /// `GET /rest/api/3/myself` — current user.
