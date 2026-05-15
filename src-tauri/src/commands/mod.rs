@@ -32,7 +32,7 @@ pub use config::{
     sign_out, test_jira_connection, update_config,
 };
 pub use issues::{get_recent_issues, get_suggested_issues, refresh_cache, search_issues_cache};
-pub use misc::{haptic_feedback, open_jira_issue, open_url};
+pub use misc::{haptic_feedback, open_issue, open_jira_issue, open_url};
 pub use prefs::{
     get_daily_goal, get_density, get_font_size, get_hourly_rate, get_theme, set_app_icon,
     set_daily_goal, set_density, set_font_size, set_hourly_rate, set_theme, set_widget_format,

@@ -150,6 +150,13 @@ impl JiraClient {
         Ok(self.base_url.join(path)?)
     }
 
+    /// The base URL the client was configured with (e.g.
+    /// `https://example.atlassian.net/`). Used by link-builder helpers that
+    /// need to construct `<base>/browse/KEY` style URLs without re-parsing.
+    pub fn base_url(&self) -> &str {
+        self.base_url.as_str()
+    }
+
     async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, JiraError> {
         let status = resp.status();
         if status.is_success() {

@@ -393,6 +393,7 @@ pub fn run() {
             commands::worklog::delete_local_only_worklog,
             // Misc
             commands::misc::open_jira_issue,
+            commands::misc::open_issue,
             commands::misc::open_url,
             // Prefs
             commands::prefs::get_daily_goal,

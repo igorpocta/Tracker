@@ -193,6 +193,19 @@ export function openJiraIssue(key: string): Promise<void> {
   return invoke<void>("open_jira_issue", { key });
 }
 
+/**
+ * Provider-aware "open this issue in the user's default browser" command.
+ *
+ * Routes by the synthetic key prefix:
+ *   - `FREELO-{id}`   → https://app.freelo.io/task/{id}
+ *   - `FREELO-P-{id}` → https://app.freelo.io/project/{id}
+ *   - anything else   → looks up the issue's owning connection in the cache
+ *                       and opens `<that connection's base_url>/browse/{key}`.
+ */
+export function openIssue(key: string): Promise<void> {
+  return invoke<void>("open_issue", { key });
+}
+
 export function openUrl(url: string): Promise<void> {
   return invoke<void>("open_url", { url });
 }

@@ -37,6 +37,18 @@ pub struct ActiveConnection {
     pub client: ProviderClient,
 }
 
+impl ActiveConnection {
+    /// Return the connection's Jira base URL if this is a Jira connection.
+    /// Used by routing helpers that need to build `<base>/browse/KEY` style
+    /// links for multi-Jira installs.
+    pub fn jira_base_url(&self) -> Option<String> {
+        match &self.client {
+            ProviderClient::Jira(client) => Some(client.base_url().to_string()),
+            _ => None,
+        }
+    }
+}
+
 /// Tauri-managed state shared across all command invocations.
 pub struct AppState {
     /// Local SQLite cache (issues, worklogs, settings, active timer).
