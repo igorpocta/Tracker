@@ -31,6 +31,7 @@ import {
   getAccentColor,
   getDailyGoal,
   getRecentIssues,
+  getSuggestedIssues,
   getTheme,
   getTimerState,
   getWorklogsForRange,
@@ -87,14 +88,22 @@ export function Popover() {
   const refresh = useCallback(async () => {
     try {
       const range = [todayStartUnixS(), todayEndUnixS()] as const;
-      const [t, r, w, g] = await Promise.all([
+      // "Naposledy trackováno" — issues seřazené podle posledního lokálního
+      // worklogu (`getSuggestedIssues`), shoda s hlavním oknem. Pokud uživatel
+      // ještě nemá žádné worklogy v cache, padáme zpět na "naposledy upraveno
+      // v provideru" (`getRecentIssues`), ať dropdown nebyl prázdný.
+      const [t, suggested, w, g] = await Promise.all([
         getTimerState(),
-        getRecentIssues(RECENT_LIMIT),
+        getSuggestedIssues(RECENT_LIMIT),
         getWorklogsForRange(range[0], range[1]),
         getDailyGoal().catch(() => 9 * 3600),
       ]);
+      let recentList = suggested ?? [];
+      if (recentList.length === 0) {
+        recentList = (await getRecentIssues(RECENT_LIMIT)) ?? [];
+      }
       setActive(t ?? null);
-      setRecent(r ?? []);
+      setRecent(recentList);
       setTodayRows(w ?? []);
       setDailyGoalSeconds(g ?? 9 * 3600);
       setError(null);
@@ -251,13 +260,10 @@ function Header({
     <div className="px-4 pt-4 pb-3">
       <div className="flex items-end justify-between gap-3">
         <span
-          className="text-[26px] leading-none italic font-semibold"
-          style={{
-            color: "var(--accent)",
-            fontFamily: "var(--font-script), serif",
-          }}
+          className="text-[22px] leading-none font-semibold tracking-tight"
+          style={{ color: "var(--accent)" }}
         >
-          Tracker.
+          Tracker
         </span>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
@@ -441,5 +447,7 @@ function errMessage(e: unknown): string {
 // Only mount when actually loaded in the browser/webview.
 const rootEl = document.getElementById("root");
 if (rootEl) {
+  // Production-only: F12 / Cmd+Opt+I / kontextové menu blok. V dev no-op.
+  void import("./lib/devtoolsGuard").then((m) => m.installDevtoolsGuard());
   ReactDOM.createRoot(rootEl).render(<Popover />);
 }

@@ -78,8 +78,7 @@ fn upsert_legacy_jira_connection(
     let jira_cfg = JiraConnectionConfig {
         base_url: cfg.base_url.clone(),
         email: cfg.email.clone(),
-        sync_jql: None,
-        my_issues_jql: None,
+        ..Default::default()
     };
     let cfg_json = serde_json::to_string(&jira_cfg).unwrap_or_else(|_| "{}".to_string());
 

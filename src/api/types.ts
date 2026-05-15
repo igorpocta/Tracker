@@ -93,28 +93,51 @@ export interface IssueRow {
   updated_at: number;
 }
 
-/** Mirrors `src-tauri/src/cache/worklogs.rs::WorklogRow`. */
+/**
+ * Mirrors `src-tauri/src/cache/worklogs.rs::WorklogRow` after migration 0012.
+ *
+ * Backend vystaví nová pole (`connection_id`, `description`, `ended_at`,
+ * `is_synced`, `synced_at`, `remote_id`, `summary` from JOIN) i legacy
+ * aliasy (`comment`, `jira_worklog_id`, `source`, `pending_assignment`,
+ * `duration_s`) pro zpětnou kompatibilitu FE.
+ */
 export interface WorklogRow {
   id?: number | null;
-  issue_key: string;
-  issue_id?: string | null;
-  summary?: string | null;
+  /** ID připojení (Jira/Freelo), null pro lokálně vytvořený nesyncovaný řádek. */
+  connection_id?: number | null;
+  /** `null` pro řádky bez přiřazeného úkolu (timer-stop bez výběru). */
+  issue_key?: string | null;
+  description?: string | null;
+  /** Derived: `ended_at - started_at`. Backend ho dál vystaví. */
   duration_s: number;
   /** Seconds since Unix epoch. */
   started_at: number;
   /** Seconds since Unix epoch. */
+  ended_at?: number;
+  /** Seconds since Unix epoch — kdy se řádek poprvé objevil lokálně. */
   logged_at: number;
+  /** Last local UPDATE timestamp. */
+  updated_at?: number;
+  /** True když je řádek odeslaný do providera. */
+  is_synced?: boolean;
+  /** Last successful sync timestamp. */
+  synced_at?: number | null;
+  /** Provider's worklog id (bez prefixu). */
+  remote_id?: string | null;
+  /** Task title z join s `issues_v2`. */
+  summary?: string | null;
+
+  // ----- Legacy alias fields (still emitted by backend) -----
   comment?: string | null;
   jira_worklog_id?: string | null;
-  /** Phase 11A backend additions (optional for older payloads). */
-  author_account_id?: string | null;
   source?: string | null;
+  pending_assignment?: boolean;
+  /** No longer populated post-0012, kept optional for old payloads. */
+  author_account_id?: string | null;
   updated_at_jira?: number | null;
   /** Phase 15 — soft-delete + tombstone columns. */
   pending_delete_at?: number | null;
   tombstoned_at?: number | null;
-  /** Phase 18A — true for unassigned-timer worklogs (no issue selected). */
-  pending_assignment?: boolean;
 }
 
 /** Mirrors `src-tauri/src/commands/worklog.rs::MoveWorklogResultDto`. */

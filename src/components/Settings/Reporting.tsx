@@ -75,7 +75,7 @@ export default function Reporting() {
   };
 
   return (
-    <div className="flex flex-col gap-6 max-w-xl">
+    <div className="flex flex-col gap-6 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Reporting
@@ -139,3 +139,4 @@ export default function Reporting() {
     </div>
   );
 }
+

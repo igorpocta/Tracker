@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   CircleAlert,
+  DownloadCloud,
   LoaderCircle,
   Pencil,
   Plus,
@@ -27,9 +28,13 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import {
+  getConnectionStats,
   getFreeloSelectedProjects,
+  getSyncErrors,
   listConnections,
   listFreeloProjects,
+  listSyncRuns,
+  refreshConnection,
   removeConnection,
   setFreeloSelectedProjects,
   syncFreeloNow,
@@ -46,17 +51,26 @@ export default function Connection() {
     queryKey: ["connections"],
     queryFn: listConnections,
   });
+  const syncErrorsQ = useQuery({
+    queryKey: ["sync-errors"],
+    queryFn: getSyncErrors,
+    staleTime: 5_000,
+  });
   const [addOpen, setAddOpen] = useState(false);
   const [editConn, setEditConn] = useState<ConnectionDto | null>(null);
 
   const conns = connsQ.data ?? [];
+  const errorByConn = new Map(
+    (syncErrorsQ.data ?? []).map((e) => [e.connection_id, e]),
+  );
 
   function refresh() {
     queryClient.invalidateQueries({ queryKey: ["connections"] });
+    queryClient.invalidateQueries({ queryKey: ["sync-errors"] });
   }
 
   return (
-    <div className="flex flex-col gap-4 max-w-xl">
+    <div className="flex flex-col gap-4 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Připojení
@@ -75,6 +89,7 @@ export default function Connection() {
           <ConnectionCard
             key={conn.id}
             conn={conn}
+            syncError={errorByConn.get(conn.id) ?? null}
             onChanged={refresh}
             onEdit={() => setEditConn(conn)}
           />
@@ -115,6 +130,8 @@ export default function Connection() {
           onSaved={refresh}
         />
       )}
+
+      <SyncRunsHistory />
     </div>
   );
 }
@@ -125,13 +142,21 @@ export default function Connection() {
 
 function ConnectionCard({
   conn,
+  syncError,
   onChanged,
   onEdit,
 }: {
   conn: ConnectionDto;
+  syncError: import("../../api/commands").SyncErrorEntry | null;
   onChanged: () => void;
   onEdit: () => void;
 }) {
+  const statsQ = useQuery({
+    queryKey: ["connection-stats", conn.id],
+    queryFn: () => getConnectionStats(conn.id),
+    // Refetch po sync — invalidace skrz auto-sync-complete v Sidebar dotahuje sem.
+    staleTime: 30_000,
+  });
   const [expanded, setExpanded] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [testing, setTesting] = useState<
@@ -140,13 +165,34 @@ function ConnectionCard({
     | { kind: "ok" }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+  const [fullSyncing, setFullSyncing] = useState(false);
+
+  async function handleFullSync() {
+    if (fullSyncing) return;
+    if (
+      !window.confirm(
+        `Stáhnout celou historii pro „${conn.name}"?\n\n` +
+          `Toto stáhne všechny úkoly a worklogy ~10 let zpět a může chvíli trvat. ` +
+          `Pro běžnou aktualizaci stačí tlačítko v levé liště.`,
+      )
+    ) {
+      return;
+    }
+    setFullSyncing(true);
+    try {
+      await refreshConnection(conn.id, "full");
+    } catch {
+      /* error surfaces via the SyncBanner */
+    } finally {
+      setFullSyncing(false);
+    }
+  }
 
   const cfg = (conn.config ?? {}) as Record<string, unknown>;
   const email =
     typeof cfg["email"] === "string" ? (cfg["email"] as string) : null;
   const baseUrl =
     typeof cfg["base_url"] === "string" ? (cfg["base_url"] as string) : null;
-  const icon = providerIcon(conn.provider);
 
   async function handleTest() {
     setTesting({ kind: "loading" });
@@ -178,15 +224,7 @@ function ConnectionCard({
       data-testid={`connection-card-${conn.id}`}
     >
       <div className="flex items-center gap-3">
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-base"
-          style={{
-            background: "var(--accent-soft)",
-          }}
-          aria-hidden
-        >
-          {icon}
-        </div>
+        <ProviderAvatar provider={conn.provider} />
         <div className="flex-1 min-w-0">
           {renaming ? (
             <InlineRename
@@ -221,6 +259,17 @@ function ConnectionCard({
             {email ? ` · ${email}` : ""}
             {baseUrl ? ` · ${baseUrl}` : ""}
           </div>
+          {statsQ.data && (
+            <div className="text-[10px] text-[var(--text-tertiary)] truncate font-mono tabular-nums">
+              {statsQ.data.worklog_count.toLocaleString("cs-CZ")} worklog
+              {worklogPlural(statsQ.data.worklog_count)} ·{" "}
+              {statsQ.data.issue_count.toLocaleString("cs-CZ")} úkol
+              {issuePlural(statsQ.data.issue_count)}
+              {statsQ.data.last_synced_at
+                ? ` · sync ${formatSyncTime(statsQ.data.last_synced_at)}`
+                : " · nikdy nesyncováno"}
+            </div>
+          )}
         </div>
 
         <ActionButton
@@ -256,6 +305,18 @@ function ConnectionCard({
         </ActionButton>
 
         <ActionButton
+          onClick={() => void handleFullSync()}
+          ariaLabel="Stáhnout celou historii (úkoly + worklogy ~10 let)"
+          testId={`conn-fullsync-${conn.id}`}
+        >
+          {fullSyncing ? (
+            <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
+          ) : (
+            <DownloadCloud className="w-4 h-4" aria-hidden />
+          )}
+        </ActionButton>
+
+        <ActionButton
           onClick={async () => {
             if (!window.confirm(`Odpojit „${conn.name}"?`)) return;
             try {
@@ -280,6 +341,33 @@ function ConnectionCard({
         >
           {testing.message}
         </p>
+      )}
+
+      {syncError && (
+        <div
+          className="flex items-start gap-2 pl-11 pr-2 py-1.5 rounded-[var(--radius-sm)]"
+          style={{
+            background: "color-mix(in srgb, var(--danger, #c0392b) 8%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--danger, #c0392b) 25%, transparent)",
+          }}
+          role="alert"
+        >
+          <CircleAlert
+            className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--danger)]"
+            aria-hidden
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-medium text-[var(--danger)]">
+              {syncErrorLabel(syncError.phase)} selhala
+            </p>
+            <p className="text-[11px] text-[var(--text-secondary)] break-words">
+              {syncError.error}
+            </p>
+            <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+              {formatErrorTime(syncError.at)}
+            </p>
+          </div>
+        </div>
       )}
 
       {conn.provider === "freelo" && (
@@ -501,14 +589,192 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+function SyncRunsHistory() {
+  const [expanded, setExpanded] = useState(false);
+  const q = useQuery({
+    queryKey: ["sync-runs", 50],
+    queryFn: () => listSyncRuns(50),
+    enabled: expanded,
+    staleTime: 30_000,
+  });
+  const runs = q.data ?? [];
+  return (
+    <section className="flex flex-col gap-2 pt-3 border-t border-[var(--border-subtle)]">
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="self-start text-xs text-[var(--text-secondary)]
+                   hover:text-[var(--text-primary)] transition-colors duration-150"
+      >
+        {expanded ? "Skrýt historii synchronizací" : "Historie synchronizací"}
+      </button>
+      {expanded && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] border-collapse">
+            <thead>
+              <tr
+                className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
+                style={{ borderBottom: "1px solid var(--border-subtle)" }}
+              >
+                <th className="text-left px-2 py-1.5">Kdy</th>
+                <th className="text-left px-2 py-1.5">Připojení</th>
+                <th className="text-left px-2 py-1.5">Režim</th>
+                <th className="text-right px-2 py-1.5">Úkoly</th>
+                <th className="text-right px-2 py-1.5">Worklogy</th>
+                <th className="text-right px-2 py-1.5">Trvání</th>
+                <th className="text-left px-2 py-1.5">Stav</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.length === 0 && !q.isLoading && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-2 py-3 text-center text-[var(--text-tertiary)]"
+                  >
+                    Žádné záznamy.
+                  </td>
+                </tr>
+              )}
+              {runs.map((r) => {
+                const durSec = r.finished_at - r.started_at;
+                return (
+                  <tr
+                    key={r.id}
+                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                  >
+                    <td className="px-2 py-1 text-[var(--text-tertiary)] font-mono">
+                      {formatSyncTime(r.finished_at)}
+                    </td>
+                    <td className="px-2 py-1">{r.connection_name ?? "—"}</td>
+                    <td className="px-2 py-1 text-[var(--text-tertiary)]">
+                      {r.mode === "full" ? "celá historie" : "přírůstky"}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums">
+                      {r.issues_count}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums">
+                      {r.worklogs_count}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-[var(--text-tertiary)]">
+                      {durSec}s
+                    </td>
+                    <td className="px-2 py-1">
+                      {r.error_phase ? (
+                        <span
+                          className="text-[var(--danger)]"
+                          title={r.error_message ?? undefined}
+                        >
+                          ⚠ {r.error_phase}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--success)]">✓</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function providerLabel(p: string): string {
   if (p === "jira") return "Jira";
   if (p === "freelo") return "Freelo";
   return p;
 }
 
-function providerIcon(p: string): string {
-  if (p === "jira") return "🔷";
-  if (p === "freelo") return "🟢";
-  return "🔗";
+/**
+ * Avatar pro Connection card. Žádné emoji — kruh v provider-charakteristické
+ * barvě s iniciálou. Drží stejnou velikost i pro neznámé providery
+ * (fallback `?` v neutrální šedé).
+ */
+function ProviderAvatar({ provider }: { provider: string }) {
+  const spec = providerAvatarSpec(provider);
+  return (
+    <div
+      aria-hidden
+      className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center
+                 text-[12px] font-bold tracking-tight select-none"
+      style={{
+        background: spec.background,
+        color: spec.color,
+      }}
+      title={providerLabel(provider)}
+    >
+      {spec.initial}
+    </div>
+  );
+}
+
+function providerAvatarSpec(p: string): {
+  initial: string;
+  background: string;
+  color: string;
+} {
+  // Provider-specific accent: Jira modrá, Freelo zelená.
+  if (p === "jira") {
+    return { initial: "J", background: "#1B6FE5", color: "#ffffff" };
+  }
+  if (p === "freelo") {
+    return { initial: "F", background: "#2CC067", color: "#ffffff" };
+  }
+  // Toggl / Clockify / cokoli dalšího → neutrální až do doby, než budou
+  // mít vlastní brand barvu.
+  return {
+    initial: (p[0] ?? "?").toUpperCase(),
+    background: "var(--bg-elevated)",
+    color: "var(--text-secondary)",
+  };
+}
+
+/** Plurály pro „worklog/worklogy/worklogů". */
+function worklogPlural(n: number): string {
+  if (n === 1) return "";
+  if (n >= 2 && n <= 4) return "y";
+  return "ů";
+}
+function issuePlural(n: number): string {
+  if (n === 1) return "";
+  if (n >= 2 && n <= 4) return "y";
+  return "ů";
+}
+
+function formatSyncTime(unixS: number): string {
+  if (!unixS) return "";
+  const d = new Date(unixS * 1000);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return `dnes ${hh}:${mm}`;
+  return `${d.getDate()}. ${d.getMonth() + 1}. ${hh}:${mm}`;
+}
+
+function syncErrorLabel(phase: string): string {
+  if (phase === "connection") return "Připojení";
+  if (phase === "issues") return "Načtení úkolů";
+  if (phase === "worklogs") return "Načtení záznamů";
+  return phase;
+}
+
+function formatErrorTime(unixS: number): string {
+  if (!unixS) return "";
+  const d = new Date(unixS * 1000);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return `dnes ${hh}:${mm}`;
+  return `${d.getDate()}. ${d.getMonth() + 1}. ${hh}:${mm}`;
 }

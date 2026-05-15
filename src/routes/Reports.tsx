@@ -27,10 +27,10 @@
  * card shows a dash.
  */
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Flame } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { getWorklogsForRange } from "../api/commands";
+import { getStreaks, getWorklogsForRange } from "../api/commands";
 import type { WorklogRow } from "../api/types";
 import { IssuePill } from "../components/common/IssuePill";
 import { DailyBarChart } from "../components/Reports/DailyBarChart";
@@ -76,6 +76,12 @@ export default function Reports() {
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
+  const streakQ = useQuery({
+    queryKey: ["streaks"],
+    queryFn: getStreaks,
+    staleTime: 60_000,
+  });
+
   const rows = q.data ?? [];
   const totalSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
   const daysWorked = useMemo(() => uniqueDays(rows), [rows]);
@@ -97,7 +103,10 @@ export default function Reports() {
             {formatDateCs(from)} → {formatDateCs(to)}
           </span>
         </div>
-        <ExportButton rows={rows} from={from} to={to} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <StreakBadge streaks={streakQ.data} />
+          <ExportButton rows={rows} from={from} to={to} />
+        </div>
       </div>
 
       <SummaryCards
@@ -164,8 +173,42 @@ function PeriodSelector({
   );
 }
 
+function StreakBadge({
+  streaks,
+}: {
+  streaks?: { current: number; longest: number; today_met: boolean };
+}) {
+  if (!streaks || streaks.current === 0) return null;
+  const days = streaks.current;
+  // "Pracovní dny" pluralizace pro češtinu.
+  const label = days === 1 ? "den" : days >= 2 && days <= 4 ? "dny" : "dní";
+  const subtitle =
+    streaks.current === streaks.longest
+      ? "osobní rekord!"
+      : `nejdelší ${streaks.longest}`;
+  return (
+    <div
+      title={`Po sobě jdoucí pracovní dny se splněným denním cílem · ${subtitle}`}
+      className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-full text-xs font-medium"
+      style={{
+        background: "var(--accent-soft)",
+        color: "var(--accent)",
+      }}
+    >
+      <Flame className="w-3.5 h-3.5" aria-hidden />
+      <span>
+        {days} {label}
+      </span>
+      {!streaks.today_met && (
+        <span className="text-[10px] opacity-60">· dnes ještě</span>
+      )}
+    </div>
+  );
+}
+
 function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
   const aggregated = useMemo(() => aggregateByIssue(rows), [rows]);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
@@ -173,7 +216,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
         Rozpad úkolů
       </h3>
-      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 gap-y-1 text-xs items-center">
+      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs items-center">
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
           Úkol
         </div>
@@ -191,22 +234,54 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
             Zatím prázdné.
           </div>
         )}
-        {aggregated.map((a) => (
-          <div className="contents" key={a.issueKey}>
-            <div>
-              <IssuePill issueKey={a.issueKey} />
+        {aggregated.map((a) => {
+          const isHovered = hoverKey === a.issueKey;
+          // `display:contents` rozloží wrapper na 4 buňky gridu, takže si
+          // udržíme zarovnání sloupců. Hover styl aplikujeme na každou
+          // buňku zvlášť, aby barva pokryla celou „řádkovou" plochu.
+          const cellStyle = {
+            background: isHovered ? "var(--accent-soft)" : "transparent",
+            transition: "background-color 120ms ease-out",
+          };
+          const onEnter = () => setHoverKey(a.issueKey);
+          const onLeave = () => setHoverKey(null);
+          return (
+            <div className="contents" key={a.issueKey}>
+              <div
+                className="py-1 px-2 -mx-2 rounded-l-[6px]"
+                style={cellStyle}
+                onMouseEnter={onEnter}
+                onMouseLeave={onLeave}
+              >
+                <IssuePill issueKey={a.issueKey} />
+              </div>
+              <div
+                className="py-1 truncate text-[var(--text-secondary)]"
+                style={cellStyle}
+                onMouseEnter={onEnter}
+                onMouseLeave={onLeave}
+              >
+                {a.summary || "(načítá se…)"}
+              </div>
+              <div
+                className="py-1 text-right font-mono tabular-nums text-[var(--text-primary)]"
+                style={cellStyle}
+                onMouseEnter={onEnter}
+                onMouseLeave={onLeave}
+              >
+                {formatDurationShort(a.totalSeconds)}
+              </div>
+              <div
+                className="py-1 px-2 -mx-2 text-right font-mono tabular-nums text-[var(--text-tertiary)] rounded-r-[6px]"
+                style={cellStyle}
+                onMouseEnter={onEnter}
+                onMouseLeave={onLeave}
+              >
+                {formatDateCs(new Date(a.lastLoggedUnixS * 1000))}
+              </div>
             </div>
-            <div className="truncate text-[var(--text-secondary)]">
-              {a.summary || "(načítá se…)"}
-            </div>
-            <div className="text-right font-mono tabular-nums text-[var(--text-primary)]">
-              {formatDurationShort(a.totalSeconds)}
-            </div>
-            <div className="text-right font-mono tabular-nums text-[var(--text-tertiary)]">
-              {formatDateCs(new Date(a.lastLoggedUnixS * 1000))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -235,10 +310,13 @@ interface Aggregated {
 function aggregateByIssue(rows: WorklogRow[]): Aggregated[] {
   const map = new Map<string, Aggregated>();
   for (const r of rows) {
-    const cur = map.get(r.issue_key);
+    // Local-only worklogy bez přiřazeného úkolu drží `null`. Zařadíme je
+    // pod sentinelový klíč, aby se nesloučily s jinými.
+    const key = r.issue_key ?? "(bez úkolu)";
+    const cur = map.get(key);
     if (!cur) {
-      map.set(r.issue_key, {
-        issueKey: r.issue_key,
+      map.set(key, {
+        issueKey: key,
         summary: r.summary,
         totalSeconds: r.duration_s,
         lastLoggedUnixS: r.started_at,

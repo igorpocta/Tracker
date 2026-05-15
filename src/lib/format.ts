@@ -93,6 +93,21 @@ export function formatDateCsShort(d: Date): string {
   return `${d.getDate()}. ${d.getMonth() + 1}.`;
 }
 
+const WEEKDAYS_CS = [
+  "Neděle",
+  "Pondělí",
+  "Úterý",
+  "Středa",
+  "Čtvrtek",
+  "Pátek",
+  "Sobota",
+] as const;
+
+/** Czech weekday name with first letter capitalised: `Pondělí`, `Úterý`, … */
+export function formatWeekdayCs(d: Date): string {
+  return WEEKDAYS_CS[d.getDay()];
+}
+
 /** Format a timestamp as a `HH:MM` clock time in the user's local timezone. */
 export function formatClockTime(value: Date | number): string {
   const d =

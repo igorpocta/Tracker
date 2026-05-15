@@ -107,8 +107,8 @@ mod tests {
         let rows = list_favorites_inner(&db).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].issue_key, "ACME-1");
-        // summary is empty because the issue isn't cached.
-        assert_eq!(rows[0].summary, "");
+        // name is empty because the issue isn't cached.
+        assert_eq!(rows[0].name, "");
     }
 
     #[test]

@@ -32,6 +32,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   createManualWorklog,
   discardTimer,
+  getCacheStats,
   hasConfig,
   refreshAll,
   refreshCache,
@@ -39,6 +40,8 @@ import {
 } from "../../api/commands";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
+import { useIdleDetection } from "../../hooks/useIdleDetection";
+import { usePomodoroTimer } from "../../hooks/usePomodoroTimer";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { useTimerStore } from "../../stores/timerStore";
@@ -49,14 +52,17 @@ import {
   type ToastUndoAction,
   type ToastVariant,
 } from "../common/Toast";
+import { IdleDialog } from "../Timer/IdleDialog";
 import { StopDialog } from "../Timer/TimerControls";
 import { CommandBar } from "./CommandBar";
 import { IconSidebar } from "./IconSidebar";
 import { StartTrackingBar } from "./StartTrackingBar";
 import { SyncBanner } from "./SyncBanner";
 
-/** Number of days of worklog history we pull on startup / manual refresh. */
-const REFRESH_WINDOW_DAYS = 30;
+// AppShell sync — viz `refresh` níže. Šetříme API: pokud lokální cache už
+// nějaké worklogy obsahuje, jedeme jen rolling 30 dní (incremental).
+// Při prvním spuštění (prázdná tabulka) backend dostane `mode=full` a
+// stáhne historii ~10 let zpět.
 
 /**
  * `true` when the app is running on macOS. We use the platform sniff once at
@@ -95,6 +101,7 @@ export function AppShell() {
   // Phase 18A — Item 32: record user activity at the shell level so every
   // route benefits without each component needing to wire its own listeners.
   useActivityTracker();
+  usePomodoroTimer();
 
   // Hydrate stores once.
   useEffect(() => {
@@ -103,9 +110,22 @@ export function AppShell() {
   }, [hydrateTimer, hydratePrefs]);
 
   // ---- refresh -------------------------------------------------------------
+  // Heuristika prvního spuštění: pokud v lokální DB nejsou žádné worklogy,
+  // backend dostane `mode=full` a stáhne ~10 let historie. Při dalších
+  // mountech / Cmd+R jedeme `incremental` (rolling 30 dní), což je o řád
+  // levnější a stačí na běžný provoz.
   const refresh = useCallback(async () => {
     try {
-      await refreshAll(REFRESH_WINDOW_DAYS);
+      let mode: "full" | "incremental" = "incremental";
+      try {
+        const stats = await getCacheStats();
+        if ((stats?.worklogs_local ?? 0) === 0) {
+          mode = "full";
+        }
+      } catch {
+        // Když cache_stats selže, zůstaneme u bezpečného incremental.
+      }
+      await refreshAll(mode);
       queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
       queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
       queryClient.invalidateQueries({ queryKey: ["search-issues"] });
@@ -239,6 +259,53 @@ export function AppShell() {
 
   // ---- StopDialog state ----------------------------------------------------
   const [stopOpen, setStopOpen] = useState(false);
+
+  // ---- Idle detection ------------------------------------------------------
+  // Pokud uživatel je pryč déle než `activity_threshold_min` a timer běží,
+  // hook drží `gap` a my otevřeme dialog s Toggl-like volbami.
+  const { gap: idleGap, dismiss: dismissIdleGap } = useIdleDetection();
+  const handleIdleDiscard = useCallback(async () => {
+    if (!idleGap) return;
+    try {
+      // Posunout `started_at` o délku idle dopředu, aby `stop` spočítal jen
+      // skutečně pracovaný čas (před idle).
+      const state = useTimerStore.getState();
+      const active = state.active;
+      if (active) {
+        const idleMs =
+          idleGap.returnedAtMs - idleGap.startedAtMs;
+        await state.updateStart(active.started_at + idleMs);
+      }
+      await state.stop();
+    } catch (e) {
+      pushToast("error", typeof e === "string" ? e : "Idle: stop selhal");
+    } finally {
+      dismissIdleGap();
+    }
+  }, [idleGap, dismissIdleGap, pushToast]);
+
+  const handleIdleDiscardContinue = useCallback(async () => {
+    if (!idleGap) return;
+    try {
+      const state = useTimerStore.getState();
+      const prev = state.active;
+      const issueKey = prev?.issue_key ?? "";
+      const idleMs = idleGap.returnedAtMs - idleGap.startedAtMs;
+      if (prev) {
+        await state.updateStart(prev.started_at + idleMs);
+      }
+      await state.stop();
+      // Hned znovu nastartuj se stejným úkolem od teď.
+      await startTimer(issueKey || null, Date.now());
+    } catch (e) {
+      pushToast(
+        "error",
+        typeof e === "string" ? e : "Idle: restart selhal",
+      );
+    } finally {
+      dismissIdleGap();
+    }
+  }, [idleGap, dismissIdleGap, pushToast]);
 
   const handleStopConfirm = useCallback(
     async ({
@@ -471,6 +538,16 @@ export function AppShell() {
               );
             }
           }}
+        />
+      )}
+
+      {idleGap && active && (
+        <IdleDialog
+          gap={idleGap}
+          issueKey={active.issue_key}
+          onKeep={dismissIdleGap}
+          onDiscard={() => void handleIdleDiscard()}
+          onDiscardAndContinue={() => void handleIdleDiscardContinue()}
         />
       )}
 

@@ -4,7 +4,7 @@
  * Coverage:
  * - `groupByDay` correctly buckets entries into Dnes / Včera / specific dates.
  * - The route renders entries grouped by day with op badges.
- * - Clicking "Obnovit v Jira" prompts a confirmation, then calls
+ * - Clicking "Obnovit v Jiře" prompts a confirmation, then calls
  *   `restoreDeletedWorklog` with the correct audit id.
  * - The action button on entries that have already been restored shows
  *   "Již obnoveno" instead of an active button.
@@ -160,7 +160,7 @@ describe("Audit route", () => {
     expect(screen.getByText("DEV-2")).toBeInTheDocument();
   });
 
-  it("clicking Obnovit v Jira confirms then calls restoreDeletedWorklog", async () => {
+  it("clicking Obnovit v Jiře confirms then calls restoreDeletedWorklog", async () => {
     const todayTs = Math.floor(Date.now() / 1000);
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "get_audit_log") {
@@ -203,7 +203,7 @@ describe("Audit route", () => {
     renderAudit();
 
     const restoreBtn = await screen.findByRole("button", {
-      name: /obnovit v jira/i,
+      name: /obnovit v jiře/i,
     });
     await user.click(restoreBtn);
     // Confirmation pair appears.
@@ -270,7 +270,7 @@ describe("Audit route", () => {
     expect(await screen.findByText(/Již obnoveno/i)).toBeInTheDocument();
     // The Obnovit button should NOT be present for the original delete.
     expect(
-      screen.queryByRole("button", { name: /obnovit v jira/i }),
+      screen.queryByRole("button", { name: /obnovit v jiře/i }),
     ).not.toBeInTheDocument();
   });
 

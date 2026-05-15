@@ -168,7 +168,7 @@ function ActionButtons({
   if (entry.op === "delete" || entry.op === "sync_tombstone") {
     return (
       <ConfirmButton
-        label="Obnovit v Jira"
+        label={`Obnovit ${providerLocative(entry.issue_key)}`}
         confirmLabel="Obnovit"
         variant="primary"
         disabled={busy}
@@ -192,6 +192,17 @@ function ActionButtons({
     );
   }
   return null;
+}
+
+/**
+ * Z prefixu issue klíče odhadne provider a vrátí lokativ pro tlačítko —
+ * "v Jiře" / "ve Freelu". Pro neznámý prefix (nebo NULL klíč) padá na
+ * obecné "v cloudu", ať tlačítko zůstane gramaticky čitelné.
+ */
+function providerLocative(issueKey?: string | null): string {
+  if (!issueKey) return "v cloudu";
+  if (issueKey.startsWith("FREELO-")) return "ve Freelu";
+  return "v Jiře";
 }
 
 function parseRow(s: string | null | undefined): WorklogRow | null {

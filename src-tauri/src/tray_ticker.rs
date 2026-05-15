@@ -1,9 +1,11 @@
 //! Long-lived background task that keeps the tray title + tooltip in sync
 //! with the active timer.
 //!
-//! The tray ICON is intentionally cleared on startup — only the menu-bar
-//! TITLE text is updated. That text carries the recording state ("🔴 KEY
-//! 01:23") and goes monochrome with a sleep emoji when idle ("💤 —:—").
+//! Idle stav používá bílou „Zzz" ikonku (rendered SVG → PNG) + text
+//! `"—:—"`; running stav má vyčištěnou ikonu a text typu `"🔴 KEY 01:23"`.
+//! Důvod rozdílu: emoji v menu baru macOS render render-uje v systémové
+//! barvě (nelze obarvit zelený zámek apod.) — ikona je obrázek a může tedy
+//! mít vlastní bílou.
 //!
 //! Tick rate: 1 Hz. The 🔴 emoji alternates with an equal-width invisible
 //! braille blank (`U+2800`) every other tick to produce a blink effect
@@ -28,11 +30,13 @@ const TICK_INTERVAL_MS: u64 = 1000;
 /// Tauri's setup model).
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
-        // Clear the declarative icon from tauri.conf.json once on startup so
-        // only the title text is visible in the menu bar from here on.
-        let _ = crate::tray::clear_icon(&app);
+        // Idle starts with the white Zzz icon (SVG-rendered, cached). If the
+        // SVG render fails we fall back to clearing the icon — text "—:—"
+        // alone is still readable in the menu bar.
+        let _ = crate::tray::set_idle_zzz(&app);
 
         let mut last_title: Option<String> = None;
+        let mut last_running: Option<bool> = None;
         let mut tick: u64 = 0;
         let mut interval = tokio::time::interval(Duration::from_millis(TICK_INTERVAL_MS));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -53,6 +57,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                 }
             };
 
+            let running = timer.is_some();
             let (title, tooltip) = match timer {
                 Some(t) => {
                     let now_s = Utc::now().timestamp();
@@ -73,8 +78,19 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                     let tooltip = format!("Tracker — {}", format_hms(elapsed));
                     (title, tooltip)
                 }
-                None => ("💤 —:—".to_string(), "Tracker — nečinný".to_string()),
+                None => ("—:—".to_string(), "Tracker — nečinný".to_string()),
             };
+
+            // Switch the tray icon on idle↔running transitions only; setting
+            // the same icon every tick would flicker.
+            if last_running != Some(running) {
+                if running {
+                    let _ = crate::tray::clear_icon(&app);
+                } else {
+                    let _ = crate::tray::set_idle_zzz(&app);
+                }
+                last_running = Some(running);
+            }
 
             if last_title.as_deref() != Some(title.as_str()) {
                 let _ = crate::tray::set_title(&app, Some(title.as_str()));

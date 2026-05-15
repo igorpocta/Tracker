@@ -344,6 +344,19 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   setAccent: async (accent) => {
     await invokeSetAccentColor(accent);
     applyPalette(accent);
+    // Po změně palety přebarvit APP ikonu (dock na macOS, taskbar/window
+    // jinde) podle vybrané palety. Tichá best-effort akce — failuje-li
+    // (např. nepodporovaná platforma), aplikace běží dál s původní ikonou.
+    try {
+      const spec = (await import("../lib/accent")).getPaletteSpec(accent);
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_app_icon_accent", {
+        primary: spec.primary,
+        secondary: spec.secondary !== spec.primary ? spec.secondary : null,
+      });
+    } catch {
+      /* tauri API není dostupné (web preview, test) */
+    }
     // Keep the palette mode in sync with the accent's natural mode so the
     // Mono/Dual toggle UI always reflects reality.
     const derivedMode: PaletteMode = isDualPalette(accent) ? "dual" : "mono";

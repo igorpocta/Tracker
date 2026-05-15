@@ -36,6 +36,31 @@ pub struct JiraConnectionConfig {
     /// ORDER BY updated DESC`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub my_issues_jql: Option<String>,
+    /// Opt-in: zařadit tuto connection do `/jira-dashboard` přehledové
+    /// tabulky. Když je `false`, command `get_jira_dashboard_issues` ji
+    /// přeskočí. Hodnota se ukládá společně s `dashboard_jql` níže.
+    #[serde(default)]
+    pub dashboard_enabled: bool,
+    /// JQL pro Dashboard přehled. Vyžadováno, když `dashboard_enabled` je
+    /// true; jinak ignorováno. Atlassian odmítne JQL bez aspoň jedné
+    /// restrikce (status 400), takže prázdné/nezadané JQL → connection se
+    /// z dashboardu efektivně vyřadí.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dashboard_jql: Option<String>,
+    /// Auto-transition: když uživatel začne trackovat issue a její aktuální
+    /// status je `auto_transition_from`, Tracker zavolá Jira transitions API
+    /// a pokusí se přejít do `auto_transition_to_name`. Když některé z polí
+    /// chybí (nebo se neshodne), nic se neudělá — sync nikdy nepadá kvůli
+    /// této featuře.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_transition_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_transition_to_name: Option<String>,
+    /// Volitelný hex barvy (`#RRGGBB`), kterou Reporty použijí místo
+    /// defaultní per-provider palety. Sdílí se s `FreeloConnectionConfig.color`
+    /// — má stejnou sémantiku, jen je per provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// Freelo-specific config persisted in the `config_json` column.
@@ -57,6 +82,10 @@ pub struct FreeloConnectionConfig {
     /// every pull.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_user_id: Option<i64>,
+    /// Volitelný hex barvy (`#RRGGBB`) pro Reporty. Když není zadán,
+    /// použije se default per-provider barva (Freelo orange).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// DTO returned to the frontend. The token is NEVER included — it lives in
@@ -74,6 +103,53 @@ pub struct ConnectionDto {
     /// `true` if a token is stored for this connection. We don't return the
     /// token itself but the UI uses this to know whether to prompt for one.
     pub has_token: bool,
+}
+
+/// Statistika jedné connection — vrací se z `get_connection_stats` a slouží
+/// pro „trust signal" na Connection cardě.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionStats {
+    pub connection_id: i64,
+    pub issue_count: i64,
+    pub worklog_count: i64,
+    /// Unix sec posledního syncu (max z `last_synced_at`). `None` pokud
+    /// connection ještě nikdy nesynchronizovala.
+    pub last_synced_at: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn get_connection_stats(
+    state: tauri::State<'_, AppState>,
+    connection_id: i64,
+) -> Result<ConnectionStats, String> {
+    let conn = state.db.pool().get().map_err(|e| e.to_string())?;
+    let issue_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM issues_v2 WHERE connection_id = ?1",
+            [connection_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let worklog_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM worklogs WHERE connection_id = ?1 AND tombstoned_at IS NULL",
+            [connection_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let last_synced_at: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(last_synced_at) FROM issues_v2 WHERE connection_id = ?1",
+            [connection_id],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(ConnectionStats {
+        connection_id,
+        issue_count,
+        worklog_count,
+        last_synced_at,
+    })
 }
 
 /// Unified "who am I" result returned by [`test_connection_for_provider`].
@@ -105,7 +181,36 @@ fn validate_jira_config(cfg: &JiraConnectionConfig) -> Result<(), String> {
             crate::validation::validate_jql(j)?;
         }
     }
+    if let Some(j) = &cfg.dashboard_jql {
+        if !j.trim().is_empty() {
+            crate::validation::validate_jql(j)?;
+        }
+    }
+    if cfg.dashboard_enabled
+        && cfg
+            .dashboard_jql
+            .as_deref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+    {
+        return Err(
+            "Dashboard je zapnutý, ale JQL je prázdné. Zadejte JQL nebo Dashboard vypněte.".into(),
+        );
+    }
+    if let Some(c) = cfg.color.as_deref() {
+        if !c.trim().is_empty() && !is_valid_hex(c.trim()) {
+            return Err(format!("Neplatná barva {c:?}; očekáváno #RRGGBB"));
+        }
+    }
     Ok(())
+}
+
+fn is_valid_hex(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() != 7 || bytes[0] != b'#' {
+        return false;
+    }
+    s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 impl ConnectionDto {
@@ -370,7 +475,7 @@ pub async fn list_my_issues(
     limit: Option<u32>,
 ) -> Result<Vec<cache::issues::IssueRow>, String> {
     let limit = limit.unwrap_or(50).clamp(1, 200);
-    let row = cache::connections::get_by_id(&state.db, connection_id)
+    let conn_row = cache::connections::get_by_id(&state.db, connection_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
 
@@ -387,7 +492,7 @@ pub async fn list_my_issues(
     match client {
         crate::state::ProviderClient::Jira(client) => {
             let cfg: JiraConnectionConfig =
-                serde_json::from_str(&row.config_json).unwrap_or_default();
+                serde_json::from_str(&conn_row.config_json).unwrap_or_default();
             let jql = cfg.my_issues_jql.as_deref().unwrap_or(
                 r#"assignee = currentUser() AND statusCategory != "Done" ORDER BY updated DESC"#,
             );
@@ -396,10 +501,11 @@ pub async fn list_my_issues(
                 .await
                 .map_err(|e| e.to_string())?;
             let mut out = Vec::with_capacity(page.issues.len());
+            let now = chrono::Utc::now().timestamp();
             for issue in &page.issues {
-                let row = crate::jira::map_issue_to_row(issue);
-                cache::issues::upsert(&state.db, &row).map_err(|e| e.to_string())?;
-                out.push(row);
+                let issue_row = crate::jira::map_issue_to_row(issue, conn_row.id, now);
+                cache::issues::upsert(&state.db, &issue_row).map_err(|e| e.to_string())?;
+                out.push(issue_row);
             }
             Ok(out)
         }
@@ -418,6 +524,32 @@ pub async fn list_my_issues(
     }
 }
 
+/// Vrátí všechny názvy statusů z Jiry pro dané (Jira) připojení. Použito
+/// k naplnění select-boxů v Nastavení → Připojení → Auto-přechod.
+///
+/// Pozn.: Endpoint `/rest/api/3/status` vrací globální seznam napříč všemi
+/// workflow, takže do dropdownu se mohou dostat i statusy z projektů, kde
+/// daný uživatel reálně nepracuje. Validace přímé linky mezi from→to se
+/// děje až v okamžiku auto-přechodu (`list_transitions` na konkrétní issue).
+#[tauri::command]
+pub async fn list_jira_statuses(
+    state: tauri::State<'_, AppState>,
+    connection_id: i64,
+) -> Result<Vec<String>, String> {
+    let client = {
+        let conns = state.connections.read().unwrap();
+        let c = conns
+            .iter()
+            .find(|c| c.id == connection_id)
+            .ok_or_else(|| "Connection not found".to_string())?;
+        match &c.client {
+            crate::state::ProviderClient::Jira(j) => j.clone(),
+            _ => return Err("Connection není Jira".into()),
+        }
+    };
+    client.list_status_names().await.map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,8 +559,7 @@ mod tests {
         let cfg = JiraConnectionConfig {
             base_url: "https://x.atlassian.net".into(),
             email: "u@example.com".into(),
-            sync_jql: None,
-            my_issues_jql: None,
+            ..Default::default()
         };
         assert!(validate_jira_config(&cfg).is_ok());
     }
@@ -436,10 +567,9 @@ mod tests {
     #[test]
     fn validate_jira_config_accepts_typical_jql() {
         let cfg = JiraConnectionConfig {
-            base_url: String::new(),
-            email: String::new(),
             sync_jql: Some("project = ACME".into()),
             my_issues_jql: Some("assignee = currentUser()".into()),
+            ..Default::default()
         };
         assert!(validate_jira_config(&cfg).is_ok());
     }
@@ -447,23 +577,18 @@ mod tests {
     #[test]
     fn validate_jira_config_rejects_nul_in_sync_jql() {
         let cfg = JiraConnectionConfig {
-            base_url: String::new(),
-            email: String::new(),
             sync_jql: Some("project = ACME\0".into()),
-            my_issues_jql: None,
+            ..Default::default()
         };
         assert!(validate_jira_config(&cfg).is_err());
     }
 
     #[test]
     fn validate_jira_config_treats_empty_string_as_none() {
-        // An empty string should be normalised away by the caller and
-        // skipped here, not rejected as "empty JQL".
         let cfg = JiraConnectionConfig {
-            base_url: String::new(),
-            email: String::new(),
             sync_jql: Some(String::new()),
             my_issues_jql: Some("   ".into()),
+            ..Default::default()
         };
         assert!(validate_jira_config(&cfg).is_ok());
     }
@@ -471,11 +596,29 @@ mod tests {
     #[test]
     fn validate_jira_config_rejects_overlong_my_issues_jql() {
         let cfg = JiraConnectionConfig {
-            base_url: String::new(),
-            email: String::new(),
-            sync_jql: None,
             my_issues_jql: Some("x".repeat(2001)),
+            ..Default::default()
         };
         assert!(validate_jira_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_jira_config_rejects_dashboard_enabled_without_jql() {
+        let cfg = JiraConnectionConfig {
+            dashboard_enabled: true,
+            dashboard_jql: None,
+            ..Default::default()
+        };
+        assert!(validate_jira_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_jira_config_accepts_dashboard_with_jql() {
+        let cfg = JiraConnectionConfig {
+            dashboard_enabled: true,
+            dashboard_jql: Some("project = SAB".into()),
+            ..Default::default()
+        };
+        assert!(validate_jira_config(&cfg).is_ok());
     }
 }

@@ -5,7 +5,7 @@ use chrono::{NaiveDate, TimeZone, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
-use super::sync::work_report_to_row;
+// `work_report_to_row` is re-used by callers via `super::sync::work_report_to_row`.
 use crate::cache::{self, worklogs::WorklogRow, Db, DbError};
 
 /// Errors produced by the Freelo work-report ops.
@@ -60,7 +60,7 @@ pub async fn add_work_report(
     duration_seconds: i64,
     comment: Option<&str>,
     connection_id: i64,
-    sync_user_id: i64,
+    _sync_user_id: i64,
 ) -> Result<WorklogRow, FreeloOpError> {
     let task_id = super::parse_task_key(issue_key)
         .ok_or_else(|| FreeloOpError::InvalidIssueKey(issue_key.to_string()))?;
@@ -71,15 +71,9 @@ pub async fn add_work_report(
         .create_work_report(task_id, date, minutes, comment)
         .await?;
 
-    let mut row = work_report_to_row(&resp);
-    // Use the connection's user id (in case the response omits it).
-    if row.author_account_id.is_none() {
-        row.author_account_id = Some(sync_user_id.to_string());
-    }
-    // Connection-aware upsert: the row goes into the shared cache; the
-    // connection_id is set on the row at the cache layer level.
-    let _ = connection_id; // currently unused; reserved for per-connection scoping
-    let id = cache::worklogs::upsert_from_jira(db, &row)?;
+    let now = Utc::now().timestamp();
+    let mut row = super::sync::work_report_to_row(&resp, connection_id, now);
+    let id = cache::worklogs::upsert_from_remote(db, &row)?;
     row.id = Some(id);
 
     Ok(row)
@@ -105,17 +99,22 @@ pub async fn update_work_report(
         .update_work_report(work_report_id, minutes, date, new_comment)
         .await?;
 
-    let row = work_report_to_row(&resp);
+    // Reuse the local row's connection_id so we don't lose ownership during
+    // an edit — Freelo's POST /work-reports/{id} response doesn't carry it.
+    let existing = cache::worklogs::get_by_id(db, local_id)?.ok_or_else(|| {
+        FreeloOpError::Db(DbError::Migration("row disappeared before update".into()))
+    })?;
+    let connection_id = existing.connection_id.unwrap_or(0);
+    let now = Utc::now().timestamp();
+    let row = super::sync::work_report_to_row(&resp, connection_id, now);
     cache::worklogs::update_fields(
         db,
         local_id,
-        &row.issue_key,
-        row.issue_id.as_deref(),
-        row.summary.as_deref(),
-        row.duration_s,
+        row.issue_key.as_deref(),
+        row.description.as_deref(),
         row.started_at,
-        row.comment.as_deref(),
-        Some(Utc::now().timestamp()),
+        row.ended_at,
+        Some(now),
     )?;
     let after = cache::worklogs::get_by_id(db, local_id)?.ok_or_else(|| {
         FreeloOpError::Db(DbError::Migration("row disappeared after update".into()))

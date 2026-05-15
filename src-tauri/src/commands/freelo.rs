@@ -122,10 +122,14 @@ pub async fn sync_freelo_now(
     connection_id: i64,
 ) -> Result<usize, String> {
     let (client, mut cfg) = freelo_config_for(&state, connection_id)?;
-    let issues =
-        freelo_sync::sync_issues_for_connection(&client, &state.db, &cfg.selected_project_ids)
-            .await
-            .map_err(|e| e.to_string())?;
+    let issues = freelo_sync::sync_issues_for_connection(
+        &client,
+        &state.db,
+        connection_id,
+        &cfg.selected_project_ids,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Cache sync_user_id if missing.
     if cfg.sync_user_id.is_none() {
@@ -149,6 +153,7 @@ pub async fn sync_freelo_now(
         let _ = freelo_sync::sync_worklogs_for_range(
             &client,
             &state.db,
+            connection_id,
             user_id,
             from,
             today,

@@ -54,9 +54,14 @@ pub const SYNC_FIELDS: &[&str] = &[
 /// Returns the number of issues processed across all pages. Capped at
 /// [`SYNC_MAX_RESULTS_TOTAL`] so that an accidental "give me everything"
 /// query on a huge instance can't run away with the disk.
-pub async fn sync_issues_from_jira(client: &JiraClient, db: &Db) -> Result<usize, SyncError> {
+pub async fn sync_issues_from_jira(
+    client: &JiraClient,
+    db: &Db,
+    connection_id: i64,
+) -> Result<usize, SyncError> {
     let mut total = 0usize;
     let mut page_token: Option<String> = None;
+    let now = chrono::Utc::now().timestamp();
     loop {
         let page = client
             .search_jql(
@@ -67,7 +72,7 @@ pub async fn sync_issues_from_jira(client: &JiraClient, db: &Db) -> Result<usize
             )
             .await?;
         for issue in &page.issues {
-            cache::issues::upsert(db, &map_issue_to_row(issue))?;
+            cache::issues::upsert(db, &map_issue_to_row(issue, connection_id, now))?;
         }
         total += page.issues.len();
         if total >= SYNC_MAX_RESULTS_TOTAL {

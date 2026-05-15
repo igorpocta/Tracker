@@ -16,9 +16,10 @@
  * the first Jira, just to keep the keychain happy).
  */
 import { CircleCheck, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
+  listJiraStatuses,
   testConnectionForProvider,
   testJiraConnection,
   updateConnectionApi,
@@ -53,6 +54,19 @@ export function EditConnectionDialog({
   const cfg = (conn.config ?? {}) as Record<string, unknown>;
   const initialUrl = typeof cfg["base_url"] === "string" ? (cfg["base_url"] as string) : "";
   const initialEmail = typeof cfg["email"] === "string" ? (cfg["email"] as string) : "";
+  const initialDashboardEnabled = cfg["dashboard_enabled"] === true;
+  const initialDashboardJql =
+    typeof cfg["dashboard_jql"] === "string" ? (cfg["dashboard_jql"] as string) : "";
+  const initialAutoFrom =
+    typeof cfg["auto_transition_from"] === "string"
+      ? (cfg["auto_transition_from"] as string)
+      : "";
+  const initialAutoTo =
+    typeof cfg["auto_transition_to_name"] === "string"
+      ? (cfg["auto_transition_to_name"] as string)
+      : "";
+  const initialColor =
+    typeof cfg["color"] === "string" ? (cfg["color"] as string) : "";
 
   const [name, setName] = useState(conn.name);
   const [baseUrl, setBaseUrl] = useState(initialUrl);
@@ -63,11 +77,47 @@ export function EditConnectionDialog({
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (!open) return null;
+  const [dashboardEnabled, setDashboardEnabled] = useState(initialDashboardEnabled);
+  const [dashboardJql, setDashboardJql] = useState(initialDashboardJql);
+  const [autoFrom, setAutoFrom] = useState(initialAutoFrom);
+  const [autoTo, setAutoTo] = useState(initialAutoTo);
+  // Seznam Jira status názvů (lazy-loaded přes /rest/api/3/status).
+  const [statuses, setStatuses] = useState<string[] | null>(null);
+  const [statusesLoading, setStatusesLoading] = useState(false);
+  const [statusesError, setStatusesError] = useState<string | null>(null);
+  /** Hex barva pro toto připojení; prázdný řetězec = "fallback default". */
+  const [color, setColor] = useState(initialColor);
+  const [colorEnabled, setColorEnabled] = useState(initialColor.length > 0);
 
   const isJira = conn.provider === "jira";
   const isFreelo = conn.provider === "freelo";
+
+  // Statusy nahrajeme až když uživatel detaily otevře. `loadStatuses` je
+  // idempotentní — po prvním fetchnutí se další volání no-op-uje.
+  async function loadStatuses() {
+    if (!isJira || statuses !== null || statusesLoading) return;
+    setStatusesLoading(true);
+    setStatusesError(null);
+    try {
+      const list = await listJiraStatuses(conn.id);
+      setStatuses(list);
+    } catch (e) {
+      setStatusesError(errMsg(e, "Statusy se nepodařilo načíst"));
+      setStatuses([]); // neretryovat při každém open
+    } finally {
+      setStatusesLoading(false);
+    }
+  }
+  // Pokud existuje uložená hodnota, statusy hned hydratujeme — uživatel
+  // nemusí klikat na <details> aby viděl předvyplněný select.
+  useEffect(() => {
+    if (open && isJira && (initialAutoFrom || initialAutoTo)) {
+      void loadStatuses();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  if (!open) return null;
 
   // Validation: name required; URL / email required only if changed.
   const nameOk = name.trim().length > 0;
@@ -119,10 +169,16 @@ export function EditConnectionDialog({
       if (isJira) {
         newConfig["base_url"] = baseUrl;
         newConfig["email"] = email;
+        newConfig["dashboard_enabled"] = dashboardEnabled;
+        newConfig["dashboard_jql"] = dashboardJql.trim() || null;
+        newConfig["auto_transition_from"] = autoFrom.trim() || null;
+        newConfig["auto_transition_to_name"] = autoTo.trim() || null;
       } else if (isFreelo) {
         newConfig["email"] = email;
         if (baseUrl) newConfig["base_url"] = baseUrl;
       }
+      // Color je provider-agnostický override; null = používej default.
+      newConfig["color"] = colorEnabled && color ? color : null;
       await updateConnectionApi({
         id: conn.id,
         name: name.trim(),
@@ -302,6 +358,133 @@ export function EditConnectionDialog({
           </div>
         )}
 
+        {isJira && (
+          <div className="flex flex-col gap-2 pt-2 border-t border-[var(--border-subtle)]">
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={dashboardEnabled}
+                onChange={(e) => setDashboardEnabled(e.target.checked)}
+                className="mt-0.5 accent-[var(--accent)]"
+              />
+              <span className="text-xs text-[var(--text-secondary)]">
+                <span className="font-medium text-[var(--text-primary)]">
+                  Zobrazit Dashboard
+                </span>
+                <br />
+                Přidá tuto Jiru do přehledové tabulky „JIRA Přehled" v menu.
+                Vyžaduje JQL filter níže.
+              </span>
+            </label>
+            {dashboardEnabled && (
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="edit-jira-dashboard-jql"
+                  className="text-xs font-medium text-[var(--text-secondary)]"
+                >
+                  JQL pro Dashboard
+                </label>
+                <textarea
+                  id="edit-jira-dashboard-jql"
+                  value={dashboardJql}
+                  onChange={(e) => setDashboardJql(e.target.value)}
+                  placeholder={
+                    'project = "PORTAL" AND statusCategory != "Done" ORDER BY priority DESC'
+                  }
+                  spellCheck={false}
+                  rows={3}
+                  className="px-3 py-2 rounded-[var(--radius-md)] bg-transparent
+                             border border-[var(--border-default)]
+                             focus:border-[var(--accent)] focus:outline-none
+                             focus:ring-2 focus:ring-[var(--accent-ring)]
+                             text-xs font-mono text-[var(--text-primary)]
+                             transition-colors duration-150 resize-y"
+                />
+                <p className="text-[10px] text-[var(--text-tertiary)]">
+                  Atlassian odmítne JQL bez aspoň jedné restrikce. Bez ORDER BY
+                  bere defaultní řazení dle Jiry.
+                </p>
+              </div>
+            )}
+
+            <details
+              className="mt-2"
+              onToggle={(e) => {
+                if ((e.target as HTMLDetailsElement).open) void loadStatuses();
+              }}
+            >
+              <summary className="text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
+                Automatický přechod stavu (volitelné)
+              </summary>
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                <StatusSelect
+                  id="auto-trans-from"
+                  label="Pokud je úkol ve stavu…"
+                  value={autoFrom}
+                  options={statuses}
+                  loading={statusesLoading}
+                  onChange={setAutoFrom}
+                />
+                <StatusSelect
+                  id="auto-trans-to"
+                  label="…přejít při spuštění na"
+                  value={autoTo}
+                  options={statuses}
+                  loading={statusesLoading}
+                  onChange={setAutoTo}
+                />
+              </div>
+              {statusesError && (
+                <p className="text-[10px] text-[var(--danger,#dc2626)] mt-1">
+                  {statusesError}
+                </p>
+              )}
+              <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                Tichá best-effort akce — pokud mezi vybranými stavy v Jiře
+                neexistuje přímá transition, Tracker se ji prostě nepokusí
+                provést (zapíše do logu). Necháte-li vybráno „—", nic se nedělá.
+              </p>
+            </details>
+          </div>
+        )}
+
+        <section className="flex flex-col gap-2 pt-2 border-t border-[var(--border-subtle)]">
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={colorEnabled}
+              onChange={(e) => {
+                setColorEnabled(e.target.checked);
+                if (e.target.checked && !color) {
+                  setColor(isJira ? "#1B6FE5" : "#2CC067");
+                }
+              }}
+              className="mt-0.5 accent-[var(--accent)]"
+            />
+            <span className="text-xs text-[var(--text-secondary)]">
+              <span className="font-medium text-[var(--text-primary)]">
+                Vlastní barva v Reportech
+              </span>
+              <br />
+              Když je vypnuto, použije se výchozí barva providera.
+            </span>
+          </label>
+          {colorEnabled && (
+            <div className="flex items-center gap-2 pl-6">
+              <input
+                type="color"
+                value={color || "#1B6FE5"}
+                onChange={(e) => setColor(e.target.value)}
+                className="w-8 h-8 rounded border-none cursor-pointer bg-transparent"
+                aria-label="Barva pro toto připojení"
+              />
+              <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                {color || "#1B6FE5"}
+              </span>
+            </div>
+          )}
+        </section>
+
         {error && (
           <p className="text-xs text-[var(--danger)]" role="alert">
             {error}
@@ -358,6 +541,60 @@ function errMsg(e: unknown, fallback: string): string {
   if (typeof e === "string") return e;
   if (e instanceof Error) return e.message;
   return fallback;
+}
+
+function StatusSelect({
+  id,
+  label,
+  value,
+  options,
+  loading,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  options: string[] | null;
+  loading: boolean;
+  onChange: (v: string) => void;
+}) {
+  // Pokud má uživatel uloženou hodnotu, která už ve statuses není (jiný
+  // workflow, přejmenovaný status), zachováme ji jako fallback option, ať
+  // se select nepřeskočí na prázdno.
+  const merged: string[] = (() => {
+    const base = options ?? [];
+    if (value && !base.includes(value)) return [value, ...base];
+    return base;
+  })();
+  return (
+    <div className="flex flex-col gap-1">
+      <label
+        htmlFor={id}
+        className="text-xs font-medium text-[var(--text-secondary)]"
+      >
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={loading}
+        className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent
+                   border border-[var(--border-default)] focus:border-[var(--accent)]
+                   focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)]
+                   text-sm text-[var(--text-primary)] transition-colors duration-150
+                   disabled:opacity-60"
+      >
+        <option value="">— nezvoleno —</option>
+        {loading && options === null && <option disabled>Načítám…</option>}
+        {merged.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 function Field({

@@ -57,7 +57,7 @@ describe("hourlyRateSchema", () => {
   it("accepts the canonical range", () => {
     expect(firstError(hourlyRateSchema, 0)).toBeNull();
     expect(firstError(hourlyRateSchema, 1500)).toBeNull();
-    expect(firstError(hourlyRateSchema, 100_000)).toBeNull();
+    expect(firstError(hourlyRateSchema, 99_999)).toBeNull();
   });
 
   it("rejects infinity / NaN", () => {
@@ -68,7 +68,7 @@ describe("hourlyRateSchema", () => {
 
   it("rejects negative + overlarge", () => {
     expect(firstError(hourlyRateSchema, -0.01)).not.toBeNull();
-    expect(firstError(hourlyRateSchema, 100_000.01)).not.toBeNull();
+    expect(firstError(hourlyRateSchema, 100_000)).not.toBeNull();
     expect(firstError(hourlyRateSchema, 1e10)).not.toBeNull();
   });
 });

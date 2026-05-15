@@ -1,17 +1,19 @@
 //! Worklog sync — pulls worklogs from Jira for a given date range and
-//! upserts them into the local cache.
+//! upserts them into the local `worklogs` cache.
 //!
 //! Strategy:
-//! 1. Run a JQL search for issues where the current user has logged worklogs
-//!    in the requested range. JQL's `worklogAuthor` + `worklogDate` filters
-//!    are what we need; we use the existing paged search and the issue
-//!    "summary" field to keep the per-issue upsert cheap.
-//! 2. For each issue, page over `/issue/{key}/worklog`.
-//! 3. Filter entries: keep only the ones authored by `me_account_id` whose
-//!    `started` falls inside `[from_date, to_date]` (inclusive).
-//! 4. Upsert each surviving entry via `worklogs::upsert_from_jira`.
+//! 1. Resolve the current user's `accountId` via `client.myself()`.
+//! 2. Run a JQL search for issues where that user logged worklogs in the
+//!    range (uses `worklogAuthor` + `worklogDate` filters).
+//! 3. For each issue, page over `/issue/{key}/worklog`.
+//! 4. Filter entries: keep only the ones authored by the current user
+//!    whose `started` falls inside the requested window.
+//! 5. Upsert each surviving entry into `worklogs` via `upsert_from_remote`.
+//! 6. Mark-and-sweep: any local row keyed by `(connection_id, remote_id)`
+//!    inside the window that the sync did NOT return is tombstoned.
 //!
-//! Returns the count of upserted worklog rows.
+//! Tombstoned rows stay in the database forever — they form the local
+//! audit trail.
 
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use thiserror::Error;
@@ -19,7 +21,7 @@ use thiserror::Error;
 use super::adf::extract_adf_text;
 use super::client::{JiraClient, JiraError};
 use super::models::{map_issue_to_row, parse_jira_timestamp_public, JiraWorklog};
-use crate::cache::{self, issues::IssueRow, worklogs::WorklogRow, Db, DbError};
+use crate::cache::{self, worklogs::WorklogRow, Db, DbError};
 
 /// Errors produced by [`sync_worklogs_for_range`].
 #[derive(Debug, Error)]
@@ -32,35 +34,15 @@ pub enum SyncError {
     InvalidRange(String),
 }
 
-/// Page size used when paginating per-issue worklog lists. Jira's API max is
-/// effectively 1000 for this endpoint and time tracking volumes never get
-/// near that — we still paginate in case someone has a hyper-active issue.
+/// Page size used when paginating per-issue worklog lists. Jira's API max
+/// is effectively 1000 for this endpoint and time-tracking volumes never
+/// get near that — we still paginate just in case.
 const ISSUE_WORKLOG_PAGE_SIZE: u32 = 1000;
 
-/// How long we keep tombstoned rows around before hard-deleting them. The
-/// rows are excluded from the default worklog queries via the
-/// `tombstoned_at IS NULL` filter, but we hold onto them as a forensic
-/// audit trail.
-const TOMBSTONE_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
-
-/// Fetch worklogs authored by `me_account_id` between `from_date` and
-/// `to_date` (inclusive), and upsert them into the local cache.
-///
-/// Also runs **mark-and-sweep**: any local row with `source='jira'` whose
-/// `jira_worklog_id` was *not* returned by this sync (and which falls inside
-/// the requested range) is presumed deleted upstream and gets tombstoned
-/// locally. This catches the case where the user deletes a worklog directly
-/// in the Jira web UI between syncs.
-///
-/// Tombstoned rows older than [`TOMBSTONE_RETENTION_SECONDS`] are then
-/// hard-deleted.
-///
-/// Returns the number of worklog rows upserted (deduplicated by
-/// `jira_worklog_id` via [`cache::worklogs::upsert_from_jira`]).
 pub async fn sync_worklogs_for_range(
     client: &JiraClient,
     db: &Db,
-    me_account_id: &str,
+    connection_id: i64,
     from_date: NaiveDate,
     to_date: NaiveDate,
 ) -> Result<usize, SyncError> {
@@ -70,8 +52,14 @@ pub async fn sync_worklogs_for_range(
         )));
     }
 
-    // Convert the date range to inclusive unix seconds. We use UTC bounds:
-    // anything started on `from_date` 00:00 UTC up to `to_date` 23:59:59 UTC.
+    let me = client.myself().await?;
+    let me_account_id = me.account_id;
+
+    // Range in UTC unix seconds: `from_date` 00:00 UTC through `to_date`
+    // 23:59:59 UTC. This is intentionally generous on the boundary; Jira
+    // JQL evaluates `worklogDate` in the user's timezone, so a worklog
+    // logged just after midnight local time can still satisfy JQL — we
+    // want to keep it instead of dropping it on a strict UTC bound.
     let from_ts = Utc
         .with_ymd_and_hms(
             from_date.year(),
@@ -90,9 +78,7 @@ pub async fn sync_worklogs_for_range(
         .ok_or_else(|| SyncError::InvalidRange("to_date is ambiguous".into()))?
         .timestamp();
 
-    // Build JQL. `worklogAuthor` and `worklogDate` are both indexed by Jira.
-    // We don't bother escaping `me_account_id` because account ids are
-    // [a-z0-9:-] and never contain quotes.
+    // JQL: account ids are [a-z0-9:-] and don't need quoting.
     let jql = format!(
         r#"worklogAuthor = "{me}" AND worklogDate >= "{from}" AND worklogDate <= "{to}""#,
         me = me_account_id,
@@ -102,31 +88,23 @@ pub async fn sync_worklogs_for_range(
 
     let mut upserted = 0usize;
     let mut page_token: Option<String> = None;
-    // Collect the set of Jira worklog ids we saw in this sync — used by the
-    // mark-and-sweep step below.
-    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_remote_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let now = Utc::now().timestamp();
 
     loop {
         let page = client
             .search_jql(
                 &jql,
                 page_token.as_deref(),
-                &["summary", "updated"],
+                &["summary", "status", "updated", "parent", "issuetype"],
                 crate::jira::SYNC_PAGE_MAX_RESULTS,
             )
             .await?;
 
         for issue in &page.issues {
-            // Make sure the issue exists in our cache (otherwise the worklog
-            // row would have no summary/issue_id fallback).
-            let issue_row = map_issue_to_row(issue);
+            // Make sure the issue exists in our cache.
+            let issue_row = map_issue_to_row(issue, connection_id, now);
             cache::issues::upsert(db, &issue_row)?;
-            // Snapshot the summary so we can stamp it onto each worklog row.
-            let issue_summary = if issue_row.summary.is_empty() {
-                None
-            } else {
-                Some(issue_row.summary.clone())
-            };
 
             // Page through this issue's worklogs.
             let mut start_at: u32 = 0;
@@ -137,11 +115,9 @@ pub async fn sync_worklogs_for_range(
                 let returned = wl_page.worklogs.len() as u32;
 
                 for wl in &wl_page.worklogs {
-                    // Skip entries not by the current user.
                     if wl.author.account_id != me_account_id {
                         continue;
                     }
-                    // Skip entries outside the requested range.
                     let started_ts = match parse_jira_timestamp_public(&wl.started) {
                         Some(ts) => ts,
                         None => continue,
@@ -150,15 +126,9 @@ pub async fn sync_worklogs_for_range(
                         continue;
                     }
 
-                    let mut row = jira_worklog_to_row(wl, &issue.key, started_ts);
-                    // Phase 18A — Item 8: populate summary from the cached
-                    // issue we just upserted so the UI never falls back to
-                    // "(bez popisu)".
-                    if row.summary.is_none() {
-                        row.summary = issue_summary.clone();
-                    }
-                    cache::worklogs::upsert_from_jira(db, &row)?;
-                    seen_ids.insert(wl.id.clone());
+                    let row = jira_worklog_to_row(wl, &issue.key, started_ts, connection_id, now);
+                    cache::worklogs::upsert_from_remote(db, &row)?;
+                    seen_remote_ids.insert(wl.id.clone());
                     upserted += 1;
                 }
 
@@ -176,33 +146,23 @@ pub async fn sync_worklogs_for_range(
         page_token = page.next_page_token;
     }
 
-    // ----- Mark-and-sweep -----
-    //
-    // Any `source='jira'` row whose started_at falls inside our query window
-    // and whose `jira_worklog_id` was NOT returned this pass is presumed
-    // deleted upstream. Tombstone it locally.
-    //
-    // Note: we filter on author too because the sync itself is author-scoped
-    // — without that filter we'd tombstone other users' worklogs if the
-    // current user can see them (which doesn't happen in our schema today
-    // because we only sync our own, but defensive is cheap).
-    let local_ids = cache::worklogs::jira_ids_in_range(db, from_ts, to_ts, me_account_id)?;
-    let now_unix = Utc::now().timestamp();
-    for local_id in &local_ids {
-        if !seen_ids.contains(local_id) {
-            cache::worklogs::mark_tombstoned_by_jira_id(db, local_id, now_unix)?;
-            // Audit the synthetic tombstone for traceability. We also pull
-            // the row's `before` snapshot (last known state) so the UI can
-            // surface a "Smazáno mimo aplikaci" entry with enough context to
-            // reconstruct from.
-            let before = cache::worklogs::get_by_jira_id(db, local_id).ok().flatten();
+    // Mark-and-sweep: any local row for this connection inside the window
+    // whose `remote_id` wasn't returned this pass is presumed deleted.
+    // Tombstoned rows stay forever — the audit trail is complete.
+    let local_ids = cache::worklogs::remote_ids_in_range(db, connection_id, from_ts, to_ts)?;
+    for remote_id in &local_ids {
+        if !seen_remote_ids.contains(remote_id) {
+            cache::worklogs::mark_tombstoned_by_remote_id(db, connection_id, remote_id, now)?;
+            let before = cache::worklogs::get_by_remote_id(db, connection_id, remote_id)
+                .ok()
+                .flatten();
             let _ = crate::cache::audit::record(
                 db,
                 crate::cache::audit::AuditEvent {
-                    occurred_at: now_unix,
+                    occurred_at: now,
                     op: crate::cache::audit::AuditOp::SyncTombstone,
-                    issue_key: before.as_ref().map(|r| r.issue_key.as_str()),
-                    worklog_id: Some(local_id.as_str()),
+                    issue_key: before.as_ref().and_then(|r| r.issue_key.as_deref()),
+                    worklog_id: Some(remote_id.as_str()),
                     before: before.as_ref(),
                     after: None,
                     success: true,
@@ -213,101 +173,19 @@ pub async fn sync_worklogs_for_range(
         }
     }
 
-    // Hard-delete tombstoned rows older than the retention window.
-    let retention_cutoff = now_unix - TOMBSTONE_RETENTION_SECONDS;
-    cache::worklogs::purge_old_tombstoned(db, retention_cutoff)?;
-
-    // Phase 18A — Item 8: backfill summaries on any rows that still lack one
-    // (e.g. legacy rows from before the per-row summary stamping was added).
-    backfill_missing_summaries(client, db, from_ts, to_ts).await?;
-
     Ok(upserted)
 }
 
-/// Find worklog rows in the given window with `summary IS NULL` and try to
-/// populate them — first from the local issue cache, then (if absent) by
-/// fetching the issue from Jira on the fly.
-///
-/// Errors hitting Jira are tolerated: missing summaries stay missing and the
-/// next sync will retry. We deliberately do NOT count this towards `upserted`.
-async fn backfill_missing_summaries(
-    client: &JiraClient,
-    db: &Db,
-    from_ts: i64,
-    to_ts: i64,
-) -> Result<(), SyncError> {
-    let keys: Vec<String> = {
-        let conn = db.pool().get().map_err(DbError::from)?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT DISTINCT issue_key FROM recent_worklogs
-                 WHERE summary IS NULL
-                   AND tombstoned_at IS NULL
-                   AND issue_key != ''
-                   AND started_at BETWEEN ?1 AND ?2",
-            )
-            .map_err(DbError::from)?;
-        let mapped = stmt
-            .query_map(rusqlite::params![from_ts, to_ts], |r| r.get::<_, String>(0))
-            .map_err(DbError::from)?;
-        mapped.filter_map(Result::ok).collect()
-    };
-
-    for key in keys {
-        // Cache hit?
-        if let Some(issue) = cache::issues::get_by_key(db, &key)? {
-            if !issue.summary.is_empty() {
-                stamp_summary(db, &key, &issue.summary)?;
-                continue;
-            }
-        }
-        // Fallback: fetch the issue from Jira.
-        match client.get_issue(&key).await {
-            Ok(jira_issue) => {
-                let row = map_issue_to_row(&jira_issue);
-                cache::issues::upsert(db, &row)?;
-                if !row.summary.is_empty() {
-                    stamp_summary(db, &key, &row.summary)?;
-                }
-            }
-            // 404 — issue deleted in Jira since the worklog was created. Leave
-            // summary null; next sync will retry. Don't fail the whole sync.
-            Err(JiraError::Api { status: 404, .. }) | Err(JiraError::WorklogNotFound) => continue,
-            // Any other Jira error: log via the error chain and continue. We
-            // chose to swallow because the worklog already exists locally —
-            // missing summary is a cosmetic problem, not a data-integrity one.
-            Err(_) => continue,
-        }
-    }
-    Ok(())
-}
-
-fn stamp_summary(db: &Db, issue_key: &str, summary: &str) -> Result<(), DbError> {
-    let conn = db.pool().get().map_err(DbError::from)?;
-    conn.execute(
-        "UPDATE recent_worklogs SET summary = ?2
-         WHERE issue_key = ?1 AND summary IS NULL",
-        rusqlite::params![issue_key, summary],
-    )
-    .map_err(DbError::from)?;
-    Ok(())
-}
-
-// Silence unused-import warning when `IssueRow` is only referenced from this
-// file's docs (it's used transitively through `cache::issues`).
-#[allow(dead_code)]
-fn _assert_issue_row_compiles(_r: IssueRow) {}
-
-/// Convert a `JiraWorklog` to the local row shape. Caller supplies the
-/// already-parsed `started_ts` to avoid parsing the timestamp twice.
-fn jira_worklog_to_row(wl: &JiraWorklog, issue_key: &str, started_ts: i64) -> WorklogRow {
-    let logged_ts = wl
-        .updated
-        .as_str()
-        .pipe(parse_jira_timestamp_public)
-        .unwrap_or(started_ts);
+/// Convert a `JiraWorklog` into the multi-provider `WorklogRow`.
+fn jira_worklog_to_row(
+    wl: &JiraWorklog,
+    issue_key: &str,
+    started_ts: i64,
+    connection_id: i64,
+    now: i64,
+) -> WorklogRow {
     let updated_ts = wl.updated.as_str().pipe(parse_jira_timestamp_public);
-
+    let logged_ts = updated_ts.unwrap_or(started_ts);
     let comment_text = wl
         .comment
         .as_ref()
@@ -316,20 +194,19 @@ fn jira_worklog_to_row(wl: &JiraWorklog, issue_key: &str, started_ts: i64) -> Wo
 
     WorklogRow {
         id: None,
-        issue_key: issue_key.to_string(),
-        issue_id: wl.issue_id.clone(),
-        summary: None,
-        duration_s: wl.time_spent_seconds,
+        connection_id: Some(connection_id),
+        issue_key: Some(issue_key.to_string()),
+        description: comment_text,
         started_at: started_ts,
+        ended_at: started_ts.saturating_add(wl.time_spent_seconds.max(0)),
         logged_at: logged_ts,
-        comment: comment_text,
-        jira_worklog_id: Some(wl.id.clone()),
-        author_account_id: Some(wl.author.account_id.clone()),
-        source: "jira".to_string(),
-        updated_at_jira: updated_ts,
+        updated_at: now,
+        is_synced: true,
+        synced_at: Some(now),
+        remote_id: Some(wl.id.clone()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment: false,
+        summary: None,
     }
 }
 
@@ -342,4 +219,5 @@ trait Pipe: Sized {
         f(self)
     }
 }
+
 impl<T> Pipe for T {}

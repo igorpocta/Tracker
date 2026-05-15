@@ -75,13 +75,13 @@ describe("Popover", () => {
     expect(screen.getByText(/klikni na úkol pro spuštění/i)).toBeInTheDocument();
   });
 
-  it("renders the Tracker. brand and Dnešní cíl block", async () => {
+  it("renders the Tracker brand and Dnešní cíl block", async () => {
     setupInvoke({ timer: null, recent: [] });
 
     render(<Popover />);
 
     await waitFor(() =>
-      expect(screen.getByText(/tracker\./i)).toBeInTheDocument(),
+      expect(screen.getByText(/^tracker$/i)).toBeInTheDocument(),
     );
     expect(screen.getByText(/dnešní cíl/i)).toBeInTheDocument();
   });

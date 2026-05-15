@@ -254,14 +254,14 @@ async fn create_work_report_posts_correct_body() {
         .and(body_partial_json(json!({
             "minutes": 30,
             "date_reported": "2026-05-14",
-            "description": "did the thing"
+            "note": "did the thing"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": 555,
             "task_id": 42,
             "minutes": 30,
             "date_reported": "2026-05-14",
-            "description": "did the thing",
+            "note": "did the thing",
             "user_id": 7
         })))
         .expect(1)
@@ -376,8 +376,8 @@ async fn list_work_reports_uses_real_freelo_v1_shape() {
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
         .and(path("/work-reports"))
-        .and(query_param("date_from", "2026-04-01"))
-        .and(query_param("date_to", "2026-04-15"))
+        .and(query_param("date_reported_range[date_from]", "2026-04-01"))
+        .and(query_param("date_reported_range[date_to]", "2026-04-15"))
         .and(query_param("users_ids[]", "140342"))
         .and(query_param("projects_ids[]", "446399"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({

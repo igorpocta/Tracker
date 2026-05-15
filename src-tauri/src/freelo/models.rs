@@ -137,6 +137,13 @@ pub struct FreeloWorkReport {
     /// Numeric task id this entry belongs to. Freelo nests this under
     /// `task.id` in some response shapes; the client flattens.
     pub task_id: i64,
+    /// Task name hoisted from the nested `task.name` field by the client
+    /// flattener. Used as the row summary in the time log so users see the
+    /// task title rather than the synthetic `FREELO-{id}` key. Optional
+    /// because some endpoints (e.g. POST work-report create response) omit
+    /// the nested task block.
+    #[serde(default)]
+    pub task_name: Option<String>,
     /// Time worked, in minutes. Freelo stores minutes natively (Tracker
     /// converts to seconds for the shared `recent_worklogs.duration_s`).
     pub minutes: i64,
@@ -149,71 +156,66 @@ pub struct FreeloWorkReport {
     pub user_id: i64,
 }
 
-/// Map a [`FreeloProject`] into the synthetic `issues` row used as the
-/// "parent" / epic for all tasks in that project. We treat the project itself
-/// as a queryable "issue" so it shows up in the cache and can be looked up
-/// via [`crate::cache::issues::get_by_key`].
-pub fn project_to_issue_row(p: &FreeloProject, now_unix_s: i64) -> crate::cache::issues::IssueRow {
-    let key = super::project_key(p.id);
+/// Map a Freelo project to a synthetic `issues_v2` row.
+///
+/// Projects show up as pseudo-issues with the `FREELO-P-{id}` prefix so the
+/// UI search can match them but the picker filters them out (they aren't
+/// trackable themselves).
+pub fn project_to_issue_row(
+    p: &FreeloProject,
+    connection_id: i64,
+    now_unix_s: i64,
+) -> crate::cache::issues::IssueRow {
     crate::cache::issues::IssueRow {
-        issue_key: key,
-        issue_id: Some(p.id.to_string()),
-        summary: p.name.clone(),
-        status_category: Some(p.state.clone()),
-        priority_order: None,
-        assignee_email: None,
-        assignee_account_id: None,
+        id: None,
+        connection_id,
+        issue_id: p.id.to_string(),
+        issue_key: super::project_key(p.id),
+        name: p.name.clone(),
         parent_key: None,
-        parent_summary: None,
-        issue_type: Some("project".into()),
-        time_spent: None,
-        aggregate_time_spent: None,
-        time_original_estimate: None,
-        time_estimate: None,
-        epic_key: None,
-        epic_summary: None,
+        parent_name: None,
+        status: Some(p.state.clone()),
+        is_archived: !matches!(p.state.as_str(), "active"),
+        created_at: now_unix_s,
         updated_at: now_unix_s,
+        remote_updated_at: None,
+        last_synced_at: Some(now_unix_s),
     }
 }
 
-/// Map a [`FreeloTask`] into a row in the shared `issues` cache.
+/// Map a Freelo task to an `issues_v2` row.
 ///
-/// Project metadata (id + name) is pulled from the task's own `project_id` /
-/// `project_name` fields — these are populated by the client when the
-/// `/all-tasks` response carries a nested `project: {...}` object. If both
-/// are absent the parent columns are left `None`.
-pub fn task_to_issue_row(t: &FreeloTask, now_unix_s: i64) -> crate::cache::issues::IssueRow {
-    let key = super::task_key(t.id);
+/// `connection_id` ties the row to the integration that owns it; project
+/// metadata (id + name) is hoisted by the client from the nested `project`
+/// block when available.
+pub fn task_to_issue_row(
+    t: &FreeloTask,
+    connection_id: i64,
+    now_unix_s: i64,
+) -> crate::cache::issues::IssueRow {
     let parent_key = t.project_id.map(super::project_key);
     // Prefer the task's own `date_edited_at` so search results can sort by
-    // recency-of-edit (not recency-of-sync). Falls back to `now_unix_s` if
-    // Freelo didn't include the timestamp or it failed to parse.
-    let updated_at = t
+    // recency-of-edit (not recency-of-sync). Falls back to `None` if Freelo
+    // didn't include it or it failed to parse.
+    let remote_updated_at = t
         .date_edited_at
         .as_deref()
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| dt.with_timezone(&chrono::Utc).timestamp())
-        .unwrap_or(now_unix_s);
+        .map(|dt| dt.with_timezone(&chrono::Utc).timestamp());
     crate::cache::issues::IssueRow {
-        issue_key: key,
-        issue_id: Some(t.id.to_string()),
-        summary: t.name.clone(),
-        status_category: Some(t.state.clone()),
-        priority_order: None,
-        assignee_email: None,
-        assignee_account_id: None,
-        parent_key: parent_key.clone(),
-        parent_summary: t.project_name.clone(),
-        issue_type: Some("task".into()),
-        time_spent: None,
-        aggregate_time_spent: None,
-        time_original_estimate: None,
-        time_estimate: None,
-        // Freelo doesn't have epics; project doubles as the "epic" so the
-        // UI's grouping logic (which keys off epic_key) works as-is.
-        epic_key: parent_key,
-        epic_summary: t.project_name.clone(),
-        updated_at,
+        id: None,
+        connection_id,
+        issue_id: t.id.to_string(),
+        issue_key: super::task_key(t.id),
+        name: t.name.clone(),
+        parent_key,
+        parent_name: t.project_name.clone(),
+        status: Some(t.state.clone()),
+        is_archived: !matches!(t.state.as_str(), "active"),
+        created_at: now_unix_s,
+        updated_at: now_unix_s,
+        remote_updated_at,
+        last_synced_at: Some(now_unix_s),
     }
 }
 
@@ -253,11 +255,12 @@ mod tests {
             state: "active".into(),
             date_edited_at: None,
         };
-        let r = task_to_issue_row(&t, 1_700_000_000);
+        let r = task_to_issue_row(&t, 1, 1_700_000_000);
         assert_eq!(r.issue_key, "FREELO-42");
+        assert_eq!(r.connection_id, 1);
         assert_eq!(r.parent_key.as_deref(), Some("FREELO-P-10"));
-        assert_eq!(r.parent_summary.as_deref(), Some("Web"));
-        assert_eq!(r.epic_key.as_deref(), Some("FREELO-P-10"));
+        assert_eq!(r.parent_name.as_deref(), Some("Web"));
+        assert_eq!(r.name, "Landing page");
     }
 
     #[test]

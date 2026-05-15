@@ -38,3 +38,19 @@ pub async fn set_tray_available(app: tauri::AppHandle, available: bool) -> Resul
     let _ = app.emit("tray-available", available);
     Ok(())
 }
+
+/// Přebarví **app ikonu** (dock na macOS, taskbar/window na ostatních
+/// platformách) podle vybrané palety. `primary` je hlavní brand barva,
+/// `secondary` je volitelná tmavší zastávka gradientu (mono palety
+/// předají jen `primary`).
+///
+/// Tichá best-effort akce — pokud render SVG nebo aplikace na NSApp selže,
+/// vrátíme chybu, ale aplikace funguje dál s původní ikonou.
+#[tauri::command]
+pub async fn set_app_icon_accent(
+    app: tauri::AppHandle,
+    primary: String,
+    secondary: Option<String>,
+) -> Result<(), String> {
+    crate::app_icon::apply(&app, &primary, secondary.as_deref())
+}

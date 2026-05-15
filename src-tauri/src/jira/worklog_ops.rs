@@ -31,8 +31,6 @@ pub struct MoveWorklogArgs<'a> {
     pub started: DateTime<Utc>,
     pub time_spent_seconds: i64,
     pub comment: Option<&'a str>,
-    /// Account id of the current user — used to populate the new row.
-    pub author_account_id: Option<&'a str>,
 }
 
 /// Successful result of [`move_worklog`].
@@ -86,34 +84,30 @@ pub async fn move_worklog(
         .await
         .map_err(MoveWorklogError::CreateFailed)?;
 
-    // Build the new row from the response (with sensible fallbacks).
+    // Build the new row from the response.
     let started_ts = args.started.timestamp();
     let now_ts = Utc::now().timestamp();
-    let new_issue_id_fallback = create_resp.issue_id.clone();
 
-    // Look up summary/issue_id from the issue cache, falling back to the
-    // Jira response's issueId.
-    let (issue_id, summary) = match cache::issues::get_by_key(db, args.new_issue_key)? {
-        Some(row) => (row.issue_id.or(new_issue_id_fallback), Some(row.summary)),
-        None => (new_issue_id_fallback, None),
-    };
+    // Resolve owning connection from the issue cache. None ⇒ legacy single-
+    // Jira install, where downstream code treats `connection_id = 0` as the
+    // sentinel for "the only Jira".
+    let connection_id = cache::issues::get_connection_id_by_key(db, args.new_issue_key)?;
 
     let new_row = WorklogRow {
         id: None,
-        issue_key: args.new_issue_key.to_string(),
-        issue_id,
-        summary,
-        duration_s: args.time_spent_seconds,
+        connection_id,
+        issue_key: Some(args.new_issue_key.to_string()),
+        description: args.comment.map(|s| s.to_string()),
         started_at: started_ts,
+        ended_at: started_ts.saturating_add(args.time_spent_seconds.max(0)),
         logged_at: now_ts,
-        comment: args.comment.map(|s| s.to_string()),
-        jira_worklog_id: Some(create_resp.id.clone()),
-        author_account_id: args.author_account_id.map(|s| s.to_string()),
-        source: "jira".to_string(),
-        updated_at_jira: Some(now_ts),
+        updated_at: now_ts,
+        is_synced: true,
+        synced_at: Some(now_ts),
+        remote_id: Some(create_resp.id.clone()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment: false,
+        summary: None,
     };
 
     // Step 2: DELETE the old worklog.
@@ -121,12 +115,8 @@ pub async fn move_worklog(
         .delete_worklog(args.old_issue_key, args.old_worklog_id)
         .await
     {
-        // Treat 404 as "already gone, OK" — the old worklog is no longer in
-        // Jira anyway, so we still want to proceed with the success path.
         if !matches!(e, JiraError::WorklogNotFound) {
-            // The new worklog exists; persist it locally so the user sees it,
-            // but leave the old row intact (still mapped to old_issue_key).
-            cache::worklogs::upsert_from_jira(db, &new_row)?;
+            cache::worklogs::upsert_from_remote(db, &new_row)?;
             return Err(MoveWorklogError::DeleteAfterCreate {
                 new_worklog_id: create_resp.id,
                 old_issue_key: args.old_issue_key.to_string(),
@@ -136,13 +126,17 @@ pub async fn move_worklog(
     }
 
     // Step 3: full success. Insert/upsert the new row; remove the old.
-    cache::worklogs::upsert_from_jira(db, &new_row)?;
+    cache::worklogs::upsert_from_remote(db, &new_row)?;
 
-    // Hard-delete the old local row by jira id (it might or might not be in
-    // the DB — sync may not have caught it yet). Best-effort.
-    if let Some(old_row) = cache::worklogs::get_by_jira_id(db, args.old_worklog_id)? {
-        if let Some(id) = old_row.id {
-            cache::worklogs::delete_row(db, id)?;
+    // Hard-delete the old local row by remote id. The connection that owned
+    // it is the same one we just resolved (issue is moving within the same
+    // Jira instance). Best-effort — sync may not have caught it yet.
+    if let Some(conn_id) = connection_id {
+        if let Some(old_row) = cache::worklogs::get_by_remote_id(db, conn_id, args.old_worklog_id)?
+        {
+            if let Some(id) = old_row.id {
+                cache::worklogs::delete_row(db, id)?;
+            }
         }
     }
 

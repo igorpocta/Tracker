@@ -189,38 +189,43 @@ pub fn record_local_stop(
     timer: &ActiveTimer,
     now_ms: i64,
     comment: Option<&str>,
-    jira_worklog_id: Option<&str>,
+    remote_id: Option<&str>,
     override_duration_s: Option<i64>,
 ) -> Result<WorklogRow, String> {
     let now_s = now_ms / 1000;
     let started_at_s = timer.started_at;
     let raw_duration_s = (now_s - started_at_s).max(0);
     let duration_s = override_duration_s.unwrap_or(raw_duration_s);
+    let ended_at_s = started_at_s.saturating_add(duration_s);
 
-    // Look up summary/issue_id from cache (best-effort).
-    let (issue_id, summary) =
-        match cache::issues::get_by_key(db, &timer.issue_key).map_err(|e| e.to_string())? {
-            Some(row) => (row.issue_id, Some(row.summary)),
-            None => (None, None),
-        };
+    // Resolve the connection that owns this issue, if any. Lookup uses the
+    // issues cache populated by the sync jobs.
+    let connection_id = if timer.issue_key.is_empty() {
+        None
+    } else {
+        cache::issues::get_connection_id_by_key(db, &timer.issue_key).map_err(|e| e.to_string())?
+    };
 
-    let pending_assignment = timer.issue_key.is_empty();
+    let is_synced = remote_id.is_some();
     let mut row = WorklogRow {
         id: None,
-        issue_key: timer.issue_key.clone(),
-        issue_id,
-        summary,
-        duration_s,
+        connection_id,
+        issue_key: if timer.issue_key.is_empty() {
+            None
+        } else {
+            Some(timer.issue_key.clone())
+        },
+        description: comment.map(|s| s.to_string()),
         started_at: started_at_s,
+        ended_at: ended_at_s,
         logged_at: now_s,
-        comment: comment.map(|s| s.to_string()),
-        jira_worklog_id: jira_worklog_id.map(|s| s.to_string()),
-        author_account_id: None,
-        source: "local".to_string(),
-        updated_at_jira: None,
+        updated_at: now_s,
+        is_synced,
+        synced_at: if is_synced { Some(now_s) } else { None },
+        remote_id: remote_id.map(|s| s.to_string()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment,
+        summary: None,
     };
     let id = cache::worklogs::record(db, &row).map_err(|e| e.to_string())?;
     row.id = Some(id);
@@ -260,7 +265,90 @@ pub async fn start_timer(
     let issue_key = issue_key.unwrap_or_default();
     let res = start_timer_inner(&state.db, &issue_key, started, comment.as_deref())?;
     let _ = app.emit("timer-started", &res);
+
+    // Best-effort Jira auto-transition. Volá se na pozadí — selhání nikdy
+    // nesmí přerušit start timeru. Pro Freelo úkoly přeskočí, protože
+    // `resolve_jira_pair_for_issue` vrátí None.
+    if !issue_key.is_empty() && !crate::freelo::is_freelo_key(&issue_key) {
+        let key = issue_key.clone();
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            try_auto_transition(&handle, &key).await;
+        });
+    }
+
     Ok(res)
+}
+
+/// Pokusí se přejít issue do nakonfigurovaného stavu po startu timeru.
+/// Tichý fallback — všechny chyby se logují přes tracing a nezvedají se
+/// ven do UI.
+async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    // Najít Jira connection, která ten issue vlastní (pokud žádná → end).
+    let conn_id = match crate::cache::issues::get_connection_id_by_key(&state.db, issue_key) {
+        Ok(Some(id)) => id,
+        _ => return,
+    };
+    let (client, cfg_json) = {
+        let conns = state.connections.read().unwrap();
+        let Some(c) = conns.iter().find(|c| c.id == conn_id) else {
+            return;
+        };
+        let cfg_json = match crate::cache::connections::get_by_id(&state.db, conn_id) {
+            Ok(Some(row)) => row.config_json,
+            _ => return,
+        };
+        match &c.client {
+            crate::state::ProviderClient::Jira(j) => (j.clone(), cfg_json),
+            _ => return,
+        }
+    };
+    let cfg: crate::commands::connections::JiraConnectionConfig =
+        match serde_json::from_str(&cfg_json) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+    let from = match cfg.auto_transition_from.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return,
+    };
+    let to_name = match cfg.auto_transition_to_name.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return,
+    };
+
+    // Stávající status?
+    let status = match client.get_issue_status(issue_key).await {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
+    if !status.eq_ignore_ascii_case(&from) {
+        return; // Issue není v očekávaném stavu — nic neuděláme.
+    }
+
+    // Najít transition_id pro `to_name`.
+    let trans = match client.list_transitions(issue_key).await {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let Some((id, _)) = trans
+        .iter()
+        .find(|(_, name)| name.eq_ignore_ascii_case(&to_name))
+    else {
+        tracing::info!(
+            target: "auto_transition",
+            "issue {issue_key}: target status {to_name:?} není v list_transitions"
+        );
+        return;
+    };
+    if let Err(e) = client.transition_issue(issue_key, id).await {
+        tracing::warn!(
+            target: "auto_transition",
+            "issue {issue_key}: transition selhalo: {e}"
+        );
+    }
 }
 
 /// Phase 18A — Item 4: assign an issue to the currently-running unassigned
@@ -366,19 +454,19 @@ pub async fn stop_timer_inner(
     // `record_local_stop` (the freelo ops already insert the row). Jira:
     // legacy path through `state.jira_client_cloned()` for backwards compat.
     let mut freelo_saved: Option<WorklogRow> = None;
-    let jira_worklog_id = if is_unassigned {
+    let remote_id = if is_unassigned {
         None
     } else if freelo::is_freelo_key(&timer.issue_key) {
-        // Find a live Freelo client.
+        // Find a live Freelo client + its connection id.
         let freelo_pair = {
             let conns = state.connections.read().unwrap();
             conns.iter().find_map(|c| match &c.client {
-                ProviderClient::Freelo(client, cfg) => Some((client.clone(), cfg.clone())),
+                ProviderClient::Freelo(client, cfg) => Some((c.id, client.clone(), cfg.clone())),
                 _ => None,
             })
         };
         match freelo_pair {
-            Some((client, cfg)) => {
+            Some((conn_id, client, cfg)) => {
                 let user_id = cfg.sync_user_id.unwrap_or(0);
                 match freelo::ops::add_work_report(
                     &client,
@@ -387,13 +475,13 @@ pub async fn stop_timer_inner(
                     timer.started_at.saturating_mul(1000),
                     duration_s,
                     effective_comment.as_deref(),
-                    0, // connection id unused inside add_work_report
+                    conn_id,
                     user_id,
                 )
                 .await
                 {
                     Ok(row) => {
-                        let id = row.jira_worklog_id.clone();
+                        let id = row.remote_id.clone();
                         freelo_saved = Some(row);
                         id
                     }
@@ -441,7 +529,7 @@ pub async fn stop_timer_inner(
             &timer,
             now,
             effective_comment.as_deref(),
-            jira_worklog_id.as_deref(),
+            remote_id.as_deref(),
             Some(duration_s),
         )?
     };
@@ -470,7 +558,7 @@ fn maybe_notify_daily_goal_reached(app: &tauri::AppHandle, db: &Db) {
     };
     let to = from + 86_400;
 
-    let total = match cache::worklogs::total_seconds_for_range(db, from, to - 1, None) {
+    let total = match cache::worklogs::total_seconds_for_range(db, from, to - 1) {
         Ok(t) => t,
         Err(_) => return,
     };

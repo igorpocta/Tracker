@@ -17,6 +17,7 @@ import { initSentry } from "./lib/sentry";
 import Audit from "./routes/Audit";
 import Calendar from "./routes/Calendar";
 import Goals from "./routes/Goals";
+import JiraDashboard from "./routes/JiraDashboard";
 import Reports from "./routes/Reports";
 import Settings from "./routes/Settings";
 import Setup from "./routes/Setup";
@@ -108,6 +109,7 @@ export default function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/goals" element={<Goals />} />
+              <Route path="/jira-dashboard" element={<JiraDashboard />} />
               <Route path="/audit" element={<Audit />} />
               <Route path="/settings" element={<Settings />} />
             </Route>

@@ -63,6 +63,11 @@ anyhow = "1"
 # Image processing (used by tray_pulse to alpha-modulate the recording dot at runtime)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# SVG → PNG rendering pro idle tray icon (white "Zzz" silueta).
+resvg = { version = "0.44", default-features = false }
+usvg = { version = "0.44", default-features = false }
+tiny-skia = "0.11"
+
 # Phase 19: opt-in Sentry crash + error reporting. `rustls` mirrors the rest
 # of the project's TLS stack (see `reqwest` above). `default-features = false`
 # disables `release-health` / `debug-images` / `transport=native-tls` so we
@@ -73,6 +78,13 @@ sentry = { version = "0.48", default-features = false, features = ["backtrace", 
 # generator; `serde` lets us round-trip through `app_settings` JSON if
 # anyone ever wants to.
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Dock-icon swap potřebuje NSApplication.setApplicationIconImage.
+# Verze sjednocená s Tauri 2.11 transitive deps (Cargo.lock).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
 
 [dev-dependencies]
 wiremock = "0.6"

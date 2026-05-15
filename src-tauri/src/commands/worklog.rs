@@ -55,8 +55,11 @@ pub async fn get_worklogs_for_range(
     to_unix_s: i64,
     with_author: Option<String>,
 ) -> Result<Vec<WorklogRow>, String> {
-    cache::worklogs::for_date_range(&state.db, from_unix_s, to_unix_s, with_author.as_deref())
-        .map_err(|e| e.to_string())
+    // `with_author` is no longer honoured at the SQL layer — the application
+    // is single-user and every row in the DB belongs to "me". The argument
+    // is kept on the IPC surface for backwards compatibility with the FE.
+    let _ = with_author;
+    cache::worklogs::for_date_range(&state.db, from_unix_s, to_unix_s).map_err(|e| e.to_string())
 }
 
 /// Result payload of [`refresh_all`].
@@ -66,88 +69,309 @@ pub struct RefreshAllResult {
     pub worklogs: usize,
 }
 
-/// Sync both issues AND worklogs (for the last `from_days` days) in one go,
-/// across all enabled connections (Jira + Freelo).
+/// Co se má syncovat. `Full` stáhne dlouhou historii — typicky první
+/// spuštění nebo manuální "Stáhnout celou historii". `Incremental` jede
+/// rolling 30denní okno worklogů — bleskové a stačí na běžný provoz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    Full,
+    Incremental,
+}
+
+impl SyncMode {
+    pub fn from_optional_str(s: Option<&str>) -> Self {
+        match s {
+            Some("full") => Self::Full,
+            // Default i pro neznámý string — incremental je levný a
+            // safe-by-default; full musí být explicitně vyžádán.
+            _ => Self::Incremental,
+        }
+    }
+
+    fn worklog_window_days(self) -> i64 {
+        match self {
+            // Full = 10 let zpět = v praxi vše. Incremental = rolling 30 dní,
+            // dle data záznamu (`started_at` / `worklogDate`).
+            Self::Full => 3650,
+            Self::Incremental => 30,
+        }
+    }
+}
+
+/// Klíč v `app_settings` pro persistovaný posledně viděný error per connection.
+/// Hodnota je JSON `{ phase, error, at }`; `at` je unix sec.
+fn sync_error_key(connection_id: i64) -> String {
+    format!("last_sync_error:{connection_id}")
+}
+
+fn store_sync_error(db: &cache::Db, connection_id: i64, phase: &str, error: &str) {
+    let payload = serde_json::json!({
+        "phase": phase,
+        "error": error,
+        "at": Utc::now().timestamp(),
+    });
+    let _ = cache::settings::set(db, &sync_error_key(connection_id), &payload.to_string());
+}
+
+fn clear_sync_error(db: &cache::Db, connection_id: i64) {
+    let _ = cache::settings::remove(db, &sync_error_key(connection_id));
+}
+
+/// Sync issues + worklogs pro **jedno** připojení a stáhne progress eventy.
+/// Vrací `(issues_count, worklogs_count)`. Chyby fáze emituje s `error: <msg>`
+/// a vrací 0 pro tu fázi (worklog sync se přeskočí, když issues fail).
 ///
-/// Errors per connection are tolerated — we keep going so a misconfigured
-/// Freelo connection doesn't block the Jira sync (and vice versa). The
-/// totals returned cover all connections that succeeded.
-#[tauri::command]
-pub async fn refresh_all(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    from_days: Option<u32>,
-) -> Result<RefreshAllResult, String> {
-    let days = from_days.unwrap_or(30);
+/// Veřejné, protože ho používá i background auto-sync v `lib.rs` —
+/// předtím měl vlastní inline loop, který neuměl vyčistit
+/// `last_sync_error`. Sdílením této funkce držíme store/clear logiku na
+/// jednom místě.
+/// Zaznamenat audit záznam o dokončeném syncu do `sync_runs`. Volá se na
+/// konci `sync_one_connection`; jeden řádek per dokončený běh.
+#[allow(clippy::too_many_arguments)]
+fn record_sync_run(
+    db: &cache::Db,
+    connection_id: i64,
+    connection_name: &str,
+    provider: &str,
+    mode: SyncMode,
+    started_at: i64,
+    finished_at: i64,
+    issues_count: usize,
+    worklogs_count: usize,
+) {
+    // Error pro tenhle běh — pokud existuje `last_sync_error:{id}` PO běhu
+    // (tj. něco padlo a my jsme to nevyčistili), znamená to že běh failed.
+    let (error_phase, error_message) = read_sync_error(db, connection_id);
+    let row = cache::sync_log::SyncRunRow {
+        id: None,
+        connection_id: Some(connection_id),
+        connection_name: Some(connection_name.to_string()),
+        provider: Some(provider.to_string()),
+        mode: match mode {
+            SyncMode::Full => "full".into(),
+            SyncMode::Incremental => "incremental".into(),
+        },
+        started_at,
+        finished_at,
+        issues_count: issues_count as i64,
+        worklogs_count: worklogs_count as i64,
+        error_phase,
+        error_message,
+    };
+    let _ = cache::sync_log::record(db, &row);
+}
+
+fn read_sync_error(db: &cache::Db, connection_id: i64) -> (Option<String>, Option<String>) {
+    let raw = match cache::settings::get(db, &sync_error_key(connection_id)) {
+        Ok(Some(v)) => v,
+        _ => return (None, None),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
+    let phase = v
+        .get("phase")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    let error = v
+        .get("error")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    (phase, error)
+}
+
+pub async fn sync_one_connection(
+    app: &tauri::AppHandle,
+    db: &cache::Db,
+    conn: crate::state::ActiveConnection,
+    idx: usize,
+    total_conns: usize,
+    mode: SyncMode,
+) -> (usize, usize) {
+    let conn_id = conn.id;
+    let conn_name = conn.name.clone();
+    let provider = match &conn.client {
+        ProviderClient::Jira(_) => "jira",
+        ProviderClient::Freelo(_, _) => "freelo",
+    };
     let today = Local::now().date_naive();
-    let from = today - Duration::days(days as i64);
+    let from = today - Duration::days(mode.worklog_window_days());
+    let started_at = Utc::now().timestamp();
 
-    let mut total_issues = 0usize;
-    let mut total_worklogs = 0usize;
+    let emit = |phase: &str, count: Option<usize>, error: Option<&str>| {
+        let _ = app.emit(
+            "auto-sync-progress",
+            serde_json::json!({
+                "phase": phase,
+                "current": idx + 1,
+                "total": total_conns,
+                "connection_id": conn_id,
+                "connection_name": conn_name,
+                "provider": provider,
+                "count": count,
+                "error": error,
+                "mode": match mode {
+                    SyncMode::Full => "full",
+                    SyncMode::Incremental => "incremental",
+                },
+            }),
+        );
+    };
 
-    let active = state.connections.read().unwrap().clone();
-    for conn in active {
-        match conn.client {
-            ProviderClient::Jira(client) => {
-                if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db).await {
-                    total_issues += n;
+    emit("connection", None, None);
+
+    // `issues_n` se nastaví v každé větvi match-e (oba providers); init = 0
+    // jen pro `record_sync_run` v chybové cestě, kdy match vrátí brzy.
+    #[allow(unused_assignments)]
+    let mut issues_n = 0usize;
+    let mut worklogs_n = 0usize;
+    let mut any_error = false;
+
+    match conn.client {
+        ProviderClient::Jira(client) => {
+            emit("issues", None, None);
+            match jira::sync_issues_from_jira(&client, db, conn_id).await {
+                Ok(n) => {
+                    issues_n = n;
+                    emit("issues", Some(n), None);
                 }
-                if let Ok(me) = client.myself().await {
-                    if let Ok(n) = jira::worklog_sync::sync_worklogs_for_range(
-                        &client,
-                        &state.db,
-                        &me.account_id,
-                        from,
-                        today,
-                    )
+                Err(e) => {
+                    let msg = e.to_string();
+                    store_sync_error(db, conn_id, "issues", &msg);
+                    emit("issues", None, Some(&msg));
+                    return (0, 0);
+                }
+            }
+
+            if client.myself().await.is_ok() {
+                emit("worklogs", None, None);
+                match jira::worklog_sync::sync_worklogs_for_range(&client, db, conn_id, from, today)
                     .await
-                    {
-                        total_worklogs += n;
+                {
+                    Ok(n) => {
+                        worklogs_n = n;
+                        emit("worklogs", Some(n), None);
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        store_sync_error(db, conn_id, "worklogs", &msg);
+                        emit("worklogs", None, Some(&msg));
+                        any_error = true;
                     }
                 }
             }
-            ProviderClient::Freelo(client, cfg) => {
-                if let Ok(n) = freelo::sync::sync_issues_for_connection(
+        }
+        ProviderClient::Freelo(client, cfg) => {
+            emit("issues", None, None);
+            match freelo::sync::sync_issues_for_connection(
+                &client,
+                db,
+                conn_id,
+                &cfg.selected_project_ids,
+            )
+            .await
+            {
+                Ok(n) => {
+                    issues_n = n;
+                    emit("issues", Some(n), None);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    store_sync_error(db, conn_id, "issues", &msg);
+                    emit("issues", None, Some(&msg));
+                    return (0, 0);
+                }
+            }
+
+            if let Some(user_id) = cfg.sync_user_id {
+                emit("worklogs", None, None);
+                match freelo::sync::sync_worklogs_for_range(
                     &client,
-                    &state.db,
+                    db,
+                    conn_id,
+                    user_id,
+                    from,
+                    today,
                     &cfg.selected_project_ids,
                 )
                 .await
                 {
-                    total_issues += n;
-                }
-                if let Some(user_id) = cfg.sync_user_id {
-                    if let Ok(n) = freelo::sync::sync_worklogs_for_range(
-                        &client,
-                        &state.db,
-                        user_id,
-                        from,
-                        today,
-                        &cfg.selected_project_ids,
-                    )
-                    .await
-                    {
-                        total_worklogs += n;
+                    Ok(n) => {
+                        worklogs_n = n;
+                        emit("worklogs", Some(n), None);
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        store_sync_error(db, conn_id, "worklogs", &msg);
+                        emit("worklogs", None, Some(&msg));
+                        any_error = true;
                     }
                 }
             }
         }
     }
 
-    // Fallback for the legacy single-Jira shim if no connections are
-    // configured but a legacy client is set up.
+    // Když všechny fáze proběhly bez chyby, vyčistíme persistovaný error
+    // — od teď je connection "zdravá". Pokud cokoli padlo, persistujeme to
+    // (už jsme to udělali výš) a necháváme tam.
+    if !any_error {
+        clear_sync_error(db, conn_id);
+    }
+
+    // Zapsat audit záznam do sync_runs (pro UI „Historie synchronizací").
+    record_sync_run(
+        db,
+        conn_id,
+        &conn_name,
+        provider,
+        mode,
+        started_at,
+        Utc::now().timestamp(),
+        issues_n,
+        worklogs_n,
+    );
+
+    (issues_n, worklogs_n)
+}
+
+/// Sync issues + worklogs across all enabled connections.
+///
+/// `mode = "full"` táhne 10 let historie; cokoli jiného (`"incremental"` nebo
+/// nezadáno) jede 30denní rolling okno. Per-connection chyby tolerujeme.
+#[tauri::command]
+pub async fn refresh_all(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: Option<String>,
+) -> Result<RefreshAllResult, String> {
+    let mode = SyncMode::from_optional_str(mode.as_deref());
+
+    let mut total_issues = 0usize;
+    let mut total_worklogs = 0usize;
+
+    let active = state.connections.read().unwrap().clone();
+    let total_conns = active.len();
+
+    for (idx, conn) in active.into_iter().enumerate() {
+        let (i_n, w_n) = sync_one_connection(&app, &state.db, conn, idx, total_conns, mode).await;
+        total_issues += i_n;
+        total_worklogs += w_n;
+    }
+
+    // Legacy single-Jira shim: bez multi-connection rows, ale s legacy
+    // klientem v paměti — použijeme connection_id = 0 jako sentinel.
     if state.connections.read().unwrap().is_empty() {
         if let Some(client) = state.jira_client_cloned() {
-            if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db).await {
+            let conn_id: i64 = 0;
+            let today = Local::now().date_naive();
+            let from = today - Duration::days(mode.worklog_window_days());
+            if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db, conn_id).await {
                 total_issues += n;
             }
-            if let Ok(me) = client.myself().await {
+            if client.myself().await.is_ok() {
                 if let Ok(n) = jira::worklog_sync::sync_worklogs_for_range(
-                    &client,
-                    &state.db,
-                    &me.account_id,
-                    from,
-                    today,
+                    &client, &state.db, conn_id, from, today,
                 )
                 .await
                 {
@@ -161,8 +385,200 @@ pub async fn refresh_all(
         issues: total_issues,
         worklogs: total_worklogs,
     };
+    let _ = app.emit(
+        "auto-sync-complete",
+        serde_json::json!({
+            "issues": total_issues,
+            "worklogs": total_worklogs,
+        }),
+    );
     let _ = app.emit("cache-refreshed", total_issues);
     let _ = app.emit("worklogs-refreshed", total_worklogs);
+    Ok(result)
+}
+
+/// Split worklog: existující záznam rozdělit na dvě části — první kus
+/// zůstane na původním úkolu, druhý kus dostane nový `new_issue_key`.
+///
+/// Limitace MVP: funguje **jen pro lokální worklogy** (žádný `remote_id`).
+/// Pro synced záznamy by bylo nutné DELETE + 2× POST s rollbackem, což je
+/// větší úkol než inline split.
+#[tauri::command]
+pub async fn split_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    local_id: i64,
+    split_at_ms: i64,
+    new_issue_key: Option<String>,
+) -> Result<Vec<WorklogRow>, String> {
+    let before = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen".to_string())?;
+    if before.remote_id.is_some() || before.is_synced {
+        return Err("Split je zatím podporován jen pro lokální (nesyncované) záznamy.".into());
+    }
+
+    let split_at_s = split_at_ms / 1000;
+    if split_at_s <= before.started_at || split_at_s >= before.ended_at {
+        return Err("Bod rozdělení musí být uvnitř záznamu".into());
+    }
+
+    // 1) zkrátíme původní záznam.
+    cache::worklogs::update_fields(
+        &state.db,
+        local_id,
+        before.issue_key.as_deref(),
+        before.description.as_deref(),
+        before.started_at,
+        split_at_s,
+        None,
+    )
+    .map_err(|e| e.to_string())?;
+
+    // 2) vytvoříme druhý kus.
+    let new_key = new_issue_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let now = Utc::now().timestamp();
+    let connection_id = match new_key.as_deref() {
+        Some(k) => {
+            cache::issues::get_connection_id_by_key(&state.db, k).map_err(|e| e.to_string())?
+        }
+        None => before.connection_id,
+    };
+    let second = WorklogRow {
+        id: None,
+        connection_id,
+        issue_key: new_key,
+        description: before.description.clone(),
+        started_at: split_at_s,
+        ended_at: before.ended_at,
+        logged_at: now,
+        updated_at: now,
+        is_synced: false,
+        synced_at: None,
+        remote_id: None,
+        pending_delete_at: None,
+        tombstoned_at: None,
+        summary: None,
+    };
+    let new_id = cache::worklogs::record(&state.db, &second).map_err(|e| e.to_string())?;
+
+    let first_after = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam zmizel po split".to_string())?;
+    let second_after = cache::worklogs::get_by_id(&state.db, new_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Druhý záznam zmizel po split".to_string())?;
+
+    let _ = app.emit(
+        "worklog-split",
+        serde_json::json!({
+            "first_id": local_id,
+            "second_id": new_id,
+        }),
+    );
+    Ok(vec![first_after, second_after])
+}
+
+/// Historie syncov — read-only seznam pro UI "Historie synchronizací".
+#[tauri::command]
+pub async fn list_sync_runs(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<cache::sync_log::SyncRunRow>, String> {
+    let limit = limit.unwrap_or(100).clamp(1, 1000);
+    cache::sync_log::list_recent(&state.db, limit).map_err(|e| e.to_string())
+}
+
+/// DTO: poslední neúspěšná fáze syncu pro danou connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncErrorEntry {
+    pub connection_id: i64,
+    pub phase: String,
+    pub error: String,
+    pub at: i64,
+}
+
+/// Vrátí seznam connections s persistovaným posledním sync errorem.
+/// Když je seznam prázdný, nic nepadlo. Po úspěšném syncu connection
+/// automaticky zmizí z výsledku — `sync_one_connection` ji při úspěchu
+/// vyčistí.
+#[tauri::command]
+pub async fn get_sync_errors(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SyncErrorEntry>, String> {
+    let rows = cache::settings::list_with_prefix(&state.db, "last_sync_error:")
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (key, value) in rows {
+        let connection_id: i64 = match key.strip_prefix("last_sync_error:") {
+            Some(s) => s.parse().unwrap_or(0),
+            None => continue,
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&value) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        out.push(SyncErrorEntry {
+            connection_id,
+            phase: parsed
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            error: parsed
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            at: parsed.get("at").and_then(|v| v.as_i64()).unwrap_or(0),
+        });
+    }
+    Ok(out)
+}
+
+/// Sync issues + worklogs jen pro jednu vybranou connection.
+///
+/// Z UI volá tlačítko „Stáhnout celou historii" v nastavení integrace
+/// (`mode = "full"`). Hodí se i pro per-account incremental refresh když
+/// uživatel chce ručně zatáhnout změny jen v jedné Jiře/Freelu, aniž by
+/// dráždil ostatní providery.
+#[tauri::command]
+pub async fn refresh_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    connection_id: i64,
+    mode: Option<String>,
+) -> Result<RefreshAllResult, String> {
+    let mode = SyncMode::from_optional_str(mode.as_deref());
+
+    let conn = {
+        let conns = state.connections.read().unwrap();
+        conns
+            .iter()
+            .find(|c| c.id == connection_id && c.enabled)
+            .cloned()
+            .ok_or_else(|| "Připojení nenalezeno nebo není aktivní".to_string())?
+    };
+
+    let (issues_n, worklogs_n) = sync_one_connection(&app, &state.db, conn, 0, 1, mode).await;
+
+    let result = RefreshAllResult {
+        issues: issues_n,
+        worklogs: worklogs_n,
+    };
+    let _ = app.emit(
+        "auto-sync-complete",
+        serde_json::json!({
+            "issues": issues_n,
+            "worklogs": worklogs_n,
+        }),
+    );
+    let _ = app.emit("cache-refreshed", issues_n);
+    let _ = app.emit("worklogs-refreshed", worklogs_n);
     Ok(result)
 }
 
@@ -332,41 +748,29 @@ pub async fn create_manual_worklog(
         }
     };
 
-    // Pull author + summary from local caches (best-effort).
-    let author = state
-        .jira_config_cloned()
-        .map(|c| c.email)
-        .unwrap_or_default();
-    let (issue_id, summary) =
-        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
-            Some(row) => (row.issue_id, Some(row.summary)),
-            None => (resp.issue_id.clone(), None),
-        };
+    let connection_id = cache::issues::get_connection_id_by_key(&state.db, &issue_key)
+        .map_err(|e| e.to_string())?;
 
     let started_at_s = started_at_ms / 1000;
     let now_s = Utc::now().timestamp();
     let row = WorklogRow {
         id: None,
-        issue_key: issue_key.clone(),
-        issue_id,
-        summary,
-        duration_s: duration_seconds,
+        connection_id,
+        issue_key: Some(issue_key.clone()),
+        description: comment.clone(),
         started_at: started_at_s,
+        ended_at: started_at_s.saturating_add(duration_seconds.max(0)),
         logged_at: now_s,
-        comment: comment.clone(),
-        jira_worklog_id: Some(resp.id.clone()),
-        author_account_id: if author.is_empty() {
-            None
-        } else {
-            Some(author)
-        },
-        source: "jira".to_string(),
-        updated_at_jira: Some(now_s),
+        updated_at: now_s,
+        is_synced: true,
+        synced_at: Some(now_s),
+        remote_id: Some(resp.id.clone()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment: false,
+        summary: None,
     };
-    let local_id = cache::worklogs::upsert_from_jira(&state.db, &row).map_err(|e| e.to_string())?;
+    let local_id =
+        cache::worklogs::upsert_from_remote(&state.db, &row).map_err(|e| e.to_string())?;
     let mut saved = row.clone();
     saved.id = Some(local_id);
 
@@ -438,7 +842,7 @@ async fn create_freelo_worklog(
         &state.db,
         AuditOp::Create,
         Some(&issue_key),
-        saved.jira_worklog_id.as_deref(),
+        saved.remote_id.as_deref(),
         None,
         Some(&saved),
     );
@@ -490,24 +894,27 @@ pub async fn update_local_worklog(
         Some(ms) => ms / 1000,
         None => before.started_at,
     };
-    let next_duration = new_duration_seconds.unwrap_or(before.duration_s);
-    let next_comment = match new_comment {
+    let next_duration = new_duration_seconds.unwrap_or(before.duration_s());
+    let next_description = match new_comment {
         Some(s) if s.is_empty() => None,
         Some(s) => Some(s),
-        None => before.comment.clone(),
+        None => before.description.clone(),
     };
-    let next_issue_key = new_issue_key.unwrap_or_else(|| before.issue_key.clone());
+    let next_issue_key = match new_issue_key {
+        Some(k) if k.is_empty() => None,
+        Some(k) => Some(k),
+        None => before.issue_key.clone(),
+    };
+    let next_ended_at = next_started_at.saturating_add(next_duration.max(0));
 
     cache::worklogs::update_fields(
         &state.db,
         local_id,
-        &next_issue_key,
-        before.issue_id.as_deref(),
-        before.summary.as_deref(),
-        next_duration,
+        next_issue_key.as_deref(),
+        next_description.as_deref(),
         next_started_at,
-        next_comment.as_deref(),
-        before.updated_at_jira,
+        next_ended_at,
+        None,
     )
     .map_err(|e| e.to_string())?;
 
@@ -560,7 +967,7 @@ pub async fn update_worklog(
         .jira_client_cloned()
         .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
 
-    let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
+    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
 
@@ -614,23 +1021,22 @@ pub async fn update_worklog(
     let new_started = new_started_at_ms
         .map(|ms| ms / 1000)
         .unwrap_or(before.started_at);
-    let new_duration = new_duration_seconds.unwrap_or(before.duration_s);
-    let new_comment_for_db = match &new_comment {
+    let new_duration = new_duration_seconds.unwrap_or(before.duration_s());
+    let new_description_for_db = match &new_comment {
         Some(s) if s.trim().is_empty() => None,
         Some(s) => Some(s.clone()),
-        None => before.comment.clone(),
+        None => before.description.clone(),
     };
     let now_s = Utc::now().timestamp();
+    let new_ended = new_started.saturating_add(new_duration.max(0));
 
     cache::worklogs::update_fields(
         &state.db,
         local_id,
-        &issue_key,
-        before.issue_id.as_deref(),
-        before.summary.as_deref(),
-        new_duration,
+        Some(&issue_key),
+        new_description_for_db.as_deref(),
         new_started,
-        new_comment_for_db.as_deref(),
+        new_ended,
         Some(now_s),
     )
     .map_err(|e| e.to_string())?;
@@ -662,7 +1068,7 @@ async fn update_freelo_worklog(
     new_duration_seconds: Option<i64>,
     new_comment: Option<String>,
 ) -> Result<WorklogRow, String> {
-    let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
+    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
     let local_id = before
@@ -734,7 +1140,7 @@ pub async fn delete_worklog(
     worklog_id: String,
     issue_key: String,
 ) -> Result<(), String> {
-    let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
+    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
     let local_id = before
@@ -773,7 +1179,7 @@ pub async fn undo_delete_worklog(
     state: tauri::State<'_, AppState>,
     worklog_id: String,
 ) -> Result<(), String> {
-    let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
+    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
     let local_id = before
@@ -785,7 +1191,7 @@ pub async fn undo_delete_worklog(
     audit_success(
         &state.db,
         AuditOp::Undo,
-        Some(&before.issue_key),
+        before.issue_key.as_deref(),
         Some(&worklog_id),
         Some(&before),
         None,
@@ -828,10 +1234,8 @@ pub async fn move_worklog(
         .single()
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
 
-    let before =
-        cache::worklogs::get_by_jira_id(&state.db, &old_worklog_id).map_err(|e| e.to_string())?;
-
-    let account_id = before.as_ref().and_then(|b| b.author_account_id.clone());
+    let before = cache::worklogs::get_by_remote_id_any(&state.db, &old_worklog_id)
+        .map_err(|e| e.to_string())?;
 
     let args = MoveWorklogArgs {
         old_issue_key: &old_issue_key,
@@ -840,7 +1244,6 @@ pub async fn move_worklog(
         started: started_dt,
         time_spent_seconds: duration_seconds,
         comment: comment.as_deref(),
-        author_account_id: account_id.as_deref(),
     };
 
     match jira::worklog_ops::move_worklog(&client, &state.db, args).await {
@@ -957,6 +1360,56 @@ fn reconstruct_err_to_string(e: jira::reconstruct::ReconstructError) -> String {
     }
 }
 
+fn freelo_reconstruct_err_to_string(e: freelo::reconstruct::ReconstructError) -> String {
+    match e {
+        freelo::reconstruct::ReconstructError::Freelo(fe) => format!("Freelo: {fe}"),
+        other => other.to_string(),
+    }
+}
+
+/// Audit entries jsou cross-provider. Rozlišíme jen podle issue_key prefixu —
+/// `FREELO-` → Freelo. Kdyby v audit entry chyběl issue_key, padáme zpět na
+/// snapshot (`before_json` / `after_json`) a snažíme se odtud vyčíst klíč.
+fn audit_is_freelo(db: &cache::Db, audit_id: i64) -> bool {
+    let Ok(Some(entry)) = cache::audit::get_by_id(db, audit_id) else {
+        return false;
+    };
+    if let Some(k) = entry.issue_key.as_deref() {
+        if freelo::is_freelo_key(k) {
+            return true;
+        }
+        if !k.is_empty() {
+            return false;
+        }
+    }
+    // Fallback — vytáhni issue_key z JSON snapshotu.
+    for src in [entry.before_json.as_deref(), entry.after_json.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(src) {
+            if let Some(k) = v.get("issue_key").and_then(|x| x.as_str()) {
+                return freelo::is_freelo_key(k);
+            }
+        }
+    }
+    false
+}
+
+/// Vrátí first-active Freelo klient ze state pro audit reconstruct calls.
+fn first_freelo_client(
+    state: &tauri::State<'_, AppState>,
+) -> Result<crate::freelo::client::FreeloClient, String> {
+    let conns = state.connections.read().unwrap();
+    conns
+        .iter()
+        .find_map(|c| match &c.client {
+            ProviderClient::Freelo(client, _) => Some(client.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "Freelo klient není nakonfigurován".to_string())
+}
+
 /// Phase 16 — re-create a worklog in Jira from a previous audit entry's
 /// `before_json` snapshot.
 ///
@@ -977,12 +1430,19 @@ pub async fn restore_deleted_worklog(
     state: tauri::State<'_, AppState>,
     audit_id: i64,
 ) -> Result<WorklogRow, String> {
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
-    let saved = jira::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
-        .await
-        .map_err(reconstruct_err_to_string)?;
+    let saved = if audit_is_freelo(&state.db, audit_id) {
+        let client = first_freelo_client(&state)?;
+        freelo::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
+            .await
+            .map_err(freelo_reconstruct_err_to_string)?
+    } else {
+        let client = state
+            .jira_client_cloned()
+            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        jira::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
+            .await
+            .map_err(reconstruct_err_to_string)?
+    };
     let _ = app.emit("worklog-created", &saved);
     Ok(saved)
 }
@@ -999,12 +1459,19 @@ pub async fn revert_worklog_update(
     state: tauri::State<'_, AppState>,
     audit_id: i64,
 ) -> Result<WorklogRow, String> {
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
-    let after = jira::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
-        .await
-        .map_err(reconstruct_err_to_string)?;
+    let after = if audit_is_freelo(&state.db, audit_id) {
+        let client = first_freelo_client(&state)?;
+        freelo::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
+            .await
+            .map_err(freelo_reconstruct_err_to_string)?
+    } else {
+        let client = state
+            .jira_client_cloned()
+            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        jira::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
+            .await
+            .map_err(reconstruct_err_to_string)?
+    };
     let _ = app.emit("worklog-updated", &after);
     Ok(after)
 }
@@ -1024,12 +1491,19 @@ pub async fn retry_failed_audit_action(
     state: tauri::State<'_, AppState>,
     audit_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
-    let result = jira::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
-        .await
-        .map_err(reconstruct_err_to_string)?;
+    let result = if audit_is_freelo(&state.db, audit_id) {
+        let client = first_freelo_client(&state)?;
+        freelo::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
+            .await
+            .map_err(freelo_reconstruct_err_to_string)?
+    } else {
+        let client = state
+            .jira_client_cloned()
+            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        jira::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
+            .await
+            .map_err(reconstruct_err_to_string)?
+    };
     // Emit the corresponding event so the UI invalidates the right queries.
     match result.get("op").and_then(|v| v.as_str()) {
         Some("create") => {
@@ -1068,16 +1542,17 @@ pub async fn push_local_worklog(
     let before = cache::worklogs::get_by_id(&state.db, local_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
-    if before.jira_worklog_id.is_some() {
+    if before.is_synced || before.remote_id.is_some() {
         return Err("Záznam je již synchronizovaný".into());
     }
-    if before.issue_key.trim().is_empty() {
-        return Err("Záznam nemá přiřazený úkol — nejprve ho přiřaďte".into());
-    }
-    let issue_key = before.issue_key.clone();
+    let issue_key = before
+        .issue_key
+        .clone()
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| "Záznam nemá přiřazený úkol — nejprve ho přiřaďte".to_string())?;
 
     if freelo::is_freelo_key(&issue_key) {
-        let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
+        let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
         let (client, cfg) = match client {
             ProviderClient::Freelo(c, cfg) => (c, cfg),
             _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
@@ -1090,9 +1565,9 @@ pub async fn push_local_worklog(
             &state.db,
             &issue_key,
             before.started_at.saturating_mul(1000),
-            before.duration_s,
-            before.comment.as_deref(),
-            0,
+            before.duration_s(),
+            before.description.as_deref(),
+            conn_id,
             user_id,
         )
         .await
@@ -1100,8 +1575,6 @@ pub async fn push_local_worklog(
             Ok(r) => r,
             Err(e) => return Err(format!("Freelo: {e}")),
         };
-        // The freelo upsert created a NEW row keyed by freelo:N. Remove the
-        // old local-only row so we don't end up with duplicates.
         let _ = cache::worklogs::delete_local_only(&state.db, local_id);
         let _ = app.emit("worklog-updated", &saved);
         return Ok(saved);
@@ -1119,23 +1592,19 @@ pub async fn push_local_worklog(
         .add_worklog(
             &issue_key,
             started_dt,
-            before.duration_s,
-            before.comment.as_deref(),
+            before.duration_s(),
+            before.description.as_deref(),
         )
         .await
         .map_err(|e| format!("Jira: {e}"))?;
 
-    let (issue_id, summary) =
-        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
-            Some(row) => (row.issue_id, Some(row.summary)),
-            None => (resp.issue_id.clone(), None),
-        };
+    let connection_id = cache::issues::get_connection_id_by_key(&state.db, &issue_key)
+        .map_err(|e| e.to_string())?;
     cache::worklogs::assign_issue(
         &state.db,
         local_id,
+        connection_id,
         &issue_key,
-        issue_id.as_deref(),
-        summary.as_deref(),
         Some(&resp.id),
     )
     .map_err(|e| e.to_string())?;
@@ -1163,13 +1632,12 @@ pub async fn assign_worklog_issue(
     let before = cache::worklogs::get_by_id(&state.db, worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
-    if !before.pending_assignment {
+    if before.issue_key.is_some() {
         return Err("Záznam již má přiřazený úkol".into());
     }
 
     if freelo::is_freelo_key(&issue_key) {
-        // Freelo path: build a work-report and link its id locally.
-        let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
+        let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
         let (client, cfg) = match client {
             ProviderClient::Freelo(c, cfg) => (c, cfg),
             _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
@@ -1182,9 +1650,9 @@ pub async fn assign_worklog_issue(
             &state.db,
             &issue_key,
             before.started_at.saturating_mul(1000),
-            before.duration_s,
-            before.comment.as_deref(),
-            0,
+            before.duration_s(),
+            before.description.as_deref(),
+            conn_id,
             user_id,
         )
         .await
@@ -1202,15 +1670,12 @@ pub async fn assign_worklog_issue(
                 return Err(format!("Freelo: {e}"));
             }
         };
-        // The freelo upsert created a NEW row keyed by freelo:N. We now need
-        // to remove the old (local-only) pending-assignment row to avoid
-        // having two rows for the same logical entry.
         let _ = cache::worklogs::delete_local_only(&state.db, worklog_id);
         audit_success(
             &state.db,
             AuditOp::Update,
             Some(&issue_key),
-            saved.jira_worklog_id.as_deref(),
+            saved.remote_id.as_deref(),
             Some(&before),
             Some(&saved),
         );
@@ -1231,8 +1696,8 @@ pub async fn assign_worklog_issue(
         .add_worklog(
             &issue_key,
             started_dt,
-            before.duration_s,
-            before.comment.as_deref(),
+            before.duration_s(),
+            before.description.as_deref(),
         )
         .await
     {
@@ -1250,18 +1715,14 @@ pub async fn assign_worklog_issue(
         }
     };
 
-    let (issue_id, summary) =
-        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
-            Some(row) => (row.issue_id, Some(row.summary)),
-            None => (resp.issue_id.clone(), None),
-        };
+    let connection_id = cache::issues::get_connection_id_by_key(&state.db, &issue_key)
+        .map_err(|e| e.to_string())?;
 
     cache::worklogs::assign_issue(
         &state.db,
         worklog_id,
+        connection_id,
         &issue_key,
-        issue_id.as_deref(),
-        summary.as_deref(),
         Some(&resp.id),
     )
     .map_err(|e| e.to_string())?;
@@ -1300,9 +1761,9 @@ pub async fn delete_local_only_worklog(
     let before = cache::worklogs::get_by_id(&state.db, worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
-    if before.jira_worklog_id.is_some() {
+    if before.remote_id.is_some() || before.is_synced {
         return Err(
-            "Tento záznam je synchronizovaný s Jirou — použijte standardní smazání.".into(),
+            "Tento záznam je synchronizovaný s providerem — použijte standardní smazání.".into(),
         );
     }
     cache::worklogs::delete_local_only(&state.db, worklog_id).map_err(|e| e.to_string())?;
@@ -1310,7 +1771,7 @@ pub async fn delete_local_only_worklog(
     audit_success(
         &state.db,
         AuditOp::Delete,
-        Some(&before.issue_key),
+        before.issue_key.as_deref(),
         None,
         Some(&before),
         None,

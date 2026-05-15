@@ -11,10 +11,12 @@
 //!    any error to `String` (Tauri requires the error type to be `Serialize`).
 
 pub mod activity;
+pub mod backup;
 pub mod browser;
 pub mod calendar;
 pub mod config;
 pub mod connections;
+pub mod dashboard;
 pub mod favorites;
 pub mod freelo;
 pub mod issues;
@@ -22,6 +24,8 @@ pub mod misc;
 pub mod prefs;
 pub mod rounding;
 pub mod sentry;
+pub mod streaks;
+pub mod suggestions;
 pub mod timer;
 pub mod tray;
 pub mod worklog;
@@ -42,7 +46,8 @@ pub use timer::{
 };
 pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
 pub use worklog::{
-    create_manual_worklog, delete_worklog, get_audit_log, get_worklog_issues,
-    get_worklogs_for_range, move_worklog, push_local_worklog, refresh_all, undo_delete_worklog,
-    update_local_worklog, update_worklog, MoveWorklogResultDto, RefreshAllResult,
+    create_manual_worklog, delete_worklog, get_audit_log, get_sync_errors, get_worklog_issues,
+    get_worklogs_for_range, move_worklog, push_local_worklog, refresh_all, refresh_connection,
+    undo_delete_worklog, update_local_worklog, update_worklog, MoveWorklogResultDto,
+    RefreshAllResult,
 };

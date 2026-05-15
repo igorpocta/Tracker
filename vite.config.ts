@@ -54,6 +54,12 @@ export default defineConfig(async ({ mode }) => {
       "import.meta.env.VITE_TRACKER_SENTRY_DSN_FRONTEND": JSON.stringify(sentryDsn),
     },
     build: {
+      // Production: žádné sourcemaps, ať se z bundlu nedá triviálně
+      // zrekonstruovat zdroj. `scripts/build-release.sh` (Sentry release)
+      // si je zapne přes `VITE_RELEASE` — generují se jako `hidden`
+      // (vznikají vedle bundlu, ale script je po uploadu do Sentry maže
+      // z dist/, tj. nešíří se v aplikační instalaci).
+      sourcemap: env.VITE_RELEASE ? "hidden" : false,
       rollupOptions: {
         input: {
           main: resolve(__dirname, "index.html"),
@@ -61,5 +67,10 @@ export default defineConfig(async ({ mode }) => {
         },
       },
     },
+    // Production build: esbuild zahodí všechna `console.*` volání a
+    // `debugger` statementy. V dev módu (`npm run dev`) zůstávají, ať
+    // máme logy při ladění.
+    esbuild:
+      mode === "production" ? { drop: ["console", "debugger"] } : undefined,
   };
 });

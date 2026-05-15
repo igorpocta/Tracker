@@ -1,101 +1,140 @@
-use super::db::{Db, DbError};
-use serde::{Deserialize, Serialize};
+//! Worklogs cache layer — operates against the multi-provider `worklogs`
+//! table introduced in migration 0012.
+//!
+//! Each row holds one work entry. The schema is intentionally provider-
+//! agnostic: the owning provider is derived from `connection_id`, never
+//! stored on the worklog itself. Sync state lives in three columns:
+//! `is_synced`, `synced_at`, `remote_id` (provider's worklog id, no prefix).
+//!
+//! `issue_key` is `NULL` for stopped-but-unassigned entries; otherwise it
+//! joins to `issues_v2.issue_key` for display. Tombstoned rows are kept
+//! forever (no retention sweep) as forensic / audit trail.
 
-/// One row in `recent_worklogs`.
+use super::db::{Db, DbError};
+use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
+
+/// One row in `worklogs`.
 ///
-/// This table is the "all worklogs" cache: it holds entries created locally by
-/// the timer-stop flow ([`source = "local"`]) as well as entries fetched from
-/// Jira ([`source = "jira"`]), e.g. worklogs the user added directly via the
-/// Jira web UI. Locally-created entries that also get pushed to Jira carry
-/// `jira_worklog_id` so the next sync can dedupe via the unique index.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// `summary` is a transient field populated from the `issues_v2` join when
+/// the row is read — it never round-trips to the DB. Serialization to the
+/// frontend includes derived fields (`duration_s`) and legacy aliases
+/// (`comment`, `jira_worklog_id`, `source`, `pending_assignment`) so the
+/// existing TS code keeps working without a rewrite.
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct WorklogRow {
     pub id: Option<i64>,
-    pub issue_key: String,
-    pub issue_id: Option<String>,
-    pub summary: Option<String>,
-    pub duration_s: i64,
-    /// Unix seconds — when the work was started (Jira's `started`).
+    pub connection_id: Option<i64>,
+    /// Provider-specific issue key (`"DEV-792"`, `"FREELO-12345"`).
+    /// `None` for entries stopped without picking a task.
+    pub issue_key: Option<String>,
+    #[serde(alias = "comment")]
+    pub description: Option<String>,
     pub started_at: i64,
-    /// Unix seconds — when the entry was logged (locally or in Jira).
+    pub ended_at: i64,
     pub logged_at: i64,
-    pub comment: Option<String>,
-    pub jira_worklog_id: Option<String>,
-    /// Jira `author.accountId` when source = "jira"; copied from the current
-    /// user for source = "local".
-    pub author_account_id: Option<String>,
-    /// `"local"` or `"jira"`. Defaults to `"local"`.
-    pub source: String,
-    /// Jira's `updated` timestamp (Unix seconds) for entries pulled from Jira.
-    pub updated_at_jira: Option<i64>,
-    /// Phase 15: Unix seconds set when the user clicks trash on a worklog. A
-    /// background task waits 5s before actually firing the Jira DELETE; the
-    /// frontend optimistically hides the row in the meantime. Cleared by the
-    /// undo flow.
-    pub pending_delete_at: Option<i64>,
-    /// Phase 15: Unix seconds set after a worklog has been deleted in Jira
-    /// (either by us or detected via mark-and-sweep). Rows with this set are
-    /// hidden from the default `for_date_range` query but kept for audit.
-    pub tombstoned_at: Option<i64>,
-    /// Phase 18A: true (1) for unassigned-timer worklogs (stopped without an
-    /// issue selected). They have `issue_key = ""`, `source = "local"`, and no
-    /// `jira_worklog_id`. The user assigns an issue later via
-    /// `assign_worklog_issue` — at which point this flag is cleared and the
-    /// row is POSTed to Jira.
     #[serde(default)]
-    pub pending_assignment: bool,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub is_synced: bool,
+    pub synced_at: Option<i64>,
+    /// Provider's worklog id, without any synthetic prefix.
+    #[serde(alias = "jira_worklog_id")]
+    pub remote_id: Option<String>,
+    pub pending_delete_at: Option<i64>,
+    pub tombstoned_at: Option<i64>,
+    /// Transient — populated by SELECTs that JOIN `issues_v2`.
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
-/// Insert a new locally-created worklog. The row is appended; no dedup is
-/// attempted because timer stops always produce a unique entry.
+impl WorklogRow {
+    /// Derived duration in seconds.
+    pub fn duration_s(&self) -> i64 {
+        (self.ended_at - self.started_at).max(0)
+    }
+}
+
+impl Serialize for WorklogRow {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut m = s.serialize_struct("WorklogRow", 19)?;
+        m.serialize_field("id", &self.id)?;
+        m.serialize_field("connection_id", &self.connection_id)?;
+        m.serialize_field("issue_key", &self.issue_key)?;
+        m.serialize_field("description", &self.description)?;
+        m.serialize_field("started_at", &self.started_at)?;
+        m.serialize_field("ended_at", &self.ended_at)?;
+        m.serialize_field("logged_at", &self.logged_at)?;
+        m.serialize_field("updated_at", &self.updated_at)?;
+        m.serialize_field("is_synced", &self.is_synced)?;
+        m.serialize_field("synced_at", &self.synced_at)?;
+        m.serialize_field("remote_id", &self.remote_id)?;
+        m.serialize_field("pending_delete_at", &self.pending_delete_at)?;
+        m.serialize_field("tombstoned_at", &self.tombstoned_at)?;
+        m.serialize_field("summary", &self.summary)?;
+        // Derived (computed from started/ended).
+        m.serialize_field("duration_s", &self.duration_s())?;
+        // Legacy aliases for FE backwards-compat. Once the FE is on
+        // {description, remote_id, is_synced}, these can go away.
+        m.serialize_field("comment", &self.description)?;
+        m.serialize_field("jira_worklog_id", &self.remote_id)?;
+        m.serialize_field("source", if self.is_synced { "remote" } else { "local" })?;
+        m.serialize_field("pending_assignment", &self.issue_key.is_none())?;
+        m.end()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Inserts / upserts
+// -----------------------------------------------------------------------------
+
+/// Insert a fresh row. Used by every code path: timer-stop, manual entry,
+/// provider sync. The caller controls `is_synced`/`synced_at`/`remote_id`.
 pub fn record(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
     let conn = db.pool().get()?;
-    let source = if w.source.is_empty() {
-        "local"
-    } else {
-        w.source.as_str()
-    };
     conn.execute(
-        "INSERT INTO recent_worklogs (
-            issue_key, issue_id, summary, duration_s, started_at, logged_at,
-            comment, jira_worklog_id, author_account_id, source, updated_at,
-            pending_assignment
+        "INSERT INTO worklogs (
+            connection_id, issue_key, description,
+            started_at, ended_at, logged_at, updated_at,
+            is_synced, synced_at, remote_id,
+            pending_delete_at, tombstoned_at
          )
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         rusqlite::params![
+            w.connection_id,
             w.issue_key,
-            w.issue_id,
-            w.summary,
-            w.duration_s,
+            w.description,
             w.started_at,
+            w.ended_at,
             w.logged_at,
-            w.comment,
-            w.jira_worklog_id,
-            w.author_account_id,
-            source,
-            w.updated_at_jira,
-            if w.pending_assignment { 1 } else { 0 },
+            w.updated_at,
+            if w.is_synced { 1 } else { 0 },
+            w.synced_at,
+            w.remote_id,
+            w.pending_delete_at,
+            w.tombstoned_at,
         ],
     )?;
     Ok(conn.last_insert_rowid())
 }
 
-/// Upsert a worklog fetched from Jira, keyed by `jira_worklog_id`.
+/// Upsert a worklog pulled from a provider, keyed by `(connection_id,
+/// remote_id)`. Both must be `Some(_)`; the function errors otherwise.
 ///
-/// Replaces any existing row with the same `jira_worklog_id`. Caller must
-/// populate `jira_worklog_id`; this function returns the rowid of the
-/// inserted/replaced row.
-pub fn upsert_from_jira(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
-    let jira_id = w
-        .jira_worklog_id
+/// On UPDATE we preserve `logged_at` (the moment the row first appeared
+/// locally) and refresh `updated_at` and `synced_at`.
+pub fn upsert_from_remote(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
+    let connection_id = w
+        .connection_id
+        .ok_or_else(|| DbError::Migration("upsert_from_remote: connection_id required".into()))?;
+    let remote_id = w
+        .remote_id
         .as_deref()
-        .ok_or_else(|| DbError::Migration("upsert_from_jira: jira_worklog_id required".into()))?;
+        .ok_or_else(|| DbError::Migration("upsert_from_remote: remote_id required".into()))?;
 
     let conn = db.pool().get()?;
-    // Find existing row with this jira id, if any.
     let existing: Option<i64> = match conn.query_row(
-        "SELECT id FROM recent_worklogs WHERE jira_worklog_id = ?1",
-        [jira_id],
+        "SELECT id FROM worklogs WHERE connection_id = ?1 AND remote_id = ?2",
+        rusqlite::params![connection_id, remote_id],
         |r| r.get(0),
     ) {
         Ok(id) => Some(id),
@@ -103,222 +142,141 @@ pub fn upsert_from_jira(db: &Db, w: &WorklogRow) -> Result<i64, DbError> {
         Err(e) => return Err(e.into()),
     };
 
-    let source = if w.source.is_empty() {
-        "jira"
-    } else {
-        w.source.as_str()
-    };
-
     if let Some(id) = existing {
         conn.execute(
-            "UPDATE recent_worklogs SET
+            "UPDATE worklogs SET
                 issue_key = ?2,
-                issue_id = ?3,
-                summary = ?4,
-                duration_s = ?5,
-                started_at = ?6,
-                logged_at = ?7,
-                comment = ?8,
-                author_account_id = ?9,
-                source = ?10,
-                updated_at = ?11
+                description = ?3,
+                started_at = ?4,
+                ended_at = ?5,
+                updated_at = ?6,
+                is_synced = 1,
+                synced_at = ?7
              WHERE id = ?1",
             rusqlite::params![
                 id,
                 w.issue_key,
-                w.issue_id,
-                w.summary,
-                w.duration_s,
+                w.description,
                 w.started_at,
-                w.logged_at,
-                w.comment,
-                w.author_account_id,
-                source,
-                w.updated_at_jira,
+                w.ended_at,
+                w.updated_at,
+                w.synced_at,
             ],
         )?;
         Ok(id)
     } else {
         conn.execute(
-            "INSERT INTO recent_worklogs (
-                issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at
+            "INSERT INTO worklogs (
+                connection_id, issue_key, description,
+                started_at, ended_at, logged_at, updated_at,
+                is_synced, synced_at, remote_id
              )
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",
             rusqlite::params![
+                connection_id,
                 w.issue_key,
-                w.issue_id,
-                w.summary,
-                w.duration_s,
+                w.description,
                 w.started_at,
+                w.ended_at,
                 w.logged_at,
-                w.comment,
-                jira_id,
-                w.author_account_id,
-                source,
-                w.updated_at_jira,
+                w.updated_at,
+                w.synced_at,
+                remote_id,
             ],
         )?;
         Ok(conn.last_insert_rowid())
     }
 }
 
-/// Total number of worklog rows currently in the local cache.
+// -----------------------------------------------------------------------------
+// Reads
+// -----------------------------------------------------------------------------
+
+/// All columns from `worklogs` plus the joined `issues_v2.name` as
+/// `summary`. Use this with `FROM worklogs LEFT JOIN issues_v2 ON ...` so
+/// reads expose the task title without an extra round trip.
+const SELECT_COLS: &str = "w.id, w.connection_id, w.issue_key, w.description,
+                           w.started_at, w.ended_at, w.logged_at, w.updated_at,
+                           w.is_synced, w.synced_at, w.remote_id,
+                           w.pending_delete_at, w.tombstoned_at,
+                           i.name";
+
+const FROM_JOIN: &str = "FROM worklogs w
+                          LEFT JOIN issues_v2 i
+                            ON i.issue_key = w.issue_key
+                           AND (i.connection_id = w.connection_id
+                                OR w.connection_id IS NULL)";
+
 pub fn count(db: &Db) -> Result<i64, DbError> {
     let conn = db.pool().get()?;
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM recent_worklogs", [], |r| r.get(0))?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM worklogs", [], |r| r.get(0))?;
     Ok(n)
 }
 
 pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at, pending_assignment
-         FROM recent_worklogs
-         WHERE tombstoned_at IS NULL
-         ORDER BY logged_at DESC LIMIT ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.tombstoned_at IS NULL
+         ORDER BY w.logged_at DESC LIMIT ?1"
+    ))?;
     let rows = stmt.query_map([limit], row_to_worklog)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Worklogs with `started_at` in `[from_unix_s, to_unix_s]`, ordered most
-/// recent first. If `author_account_id` is `Some(_)`, restricts to that author
-/// (typically the current user). `None` returns all authors.
-///
-/// **Excludes tombstoned rows by default** (Phase 15). Use
-/// [`for_date_range_including_tombstoned`] for forensic / debug queries.
+/// recent first. Tombstoned rows are excluded.
 pub fn for_date_range(
     db: &Db,
     from_unix_s: i64,
     to_unix_s: i64,
-    author_account_id: Option<&str>,
 ) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let rows: Vec<WorklogRow> = match author_account_id {
-        Some(account) => {
-            let mut stmt = conn.prepare(
-                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at, pending_assignment
-                 FROM recent_worklogs
-                 WHERE started_at BETWEEN ?1 AND ?2
-                   AND author_account_id = ?3
-                   AND tombstoned_at IS NULL
-                 ORDER BY started_at DESC",
-            )?;
-            let mapped = stmt.query_map(
-                rusqlite::params![from_unix_s, to_unix_s, account],
-                row_to_worklog,
-            )?;
-            mapped.collect::<Result<Vec<_>, _>>()?
-        }
-        None => {
-            let mut stmt = conn.prepare(
-                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at, pending_assignment
-                 FROM recent_worklogs
-                 WHERE started_at BETWEEN ?1 AND ?2
-                   AND tombstoned_at IS NULL
-                 ORDER BY started_at DESC",
-            )?;
-            let mapped =
-                stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
-            mapped.collect::<Result<Vec<_>, _>>()?
-        }
-    };
-    Ok(rows)
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.started_at BETWEEN ?1 AND ?2
+           AND w.tombstoned_at IS NULL
+         ORDER BY w.started_at DESC"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Diagnostic / audit variant of [`for_date_range`] that includes tombstoned
-/// rows. Used by the mark-and-sweep logic and any future audit UI.
+/// Diagnostic variant that includes tombstoned rows. Used by the
+/// mark-and-sweep logic and audit views.
 pub fn for_date_range_including_tombstoned(
     db: &Db,
     from_unix_s: i64,
     to_unix_s: i64,
-    author_account_id: Option<&str>,
 ) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let rows: Vec<WorklogRow> = match author_account_id {
-        Some(account) => {
-            let mut stmt = conn.prepare(
-                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at, pending_assignment
-                 FROM recent_worklogs
-                 WHERE started_at BETWEEN ?1 AND ?2
-                   AND author_account_id = ?3
-                 ORDER BY started_at DESC",
-            )?;
-            let mapped = stmt.query_map(
-                rusqlite::params![from_unix_s, to_unix_s, account],
-                row_to_worklog,
-            )?;
-            mapped.collect::<Result<Vec<_>, _>>()?
-        }
-        None => {
-            let mut stmt = conn.prepare(
-                "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                        comment, jira_worklog_id, author_account_id, source, updated_at,
-                        pending_delete_at, tombstoned_at, pending_assignment
-                 FROM recent_worklogs
-                 WHERE started_at BETWEEN ?1 AND ?2
-                 ORDER BY started_at DESC",
-            )?;
-            let mapped =
-                stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
-            mapped.collect::<Result<Vec<_>, _>>()?
-        }
-    };
-    Ok(rows)
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.started_at BETWEEN ?1 AND ?2
+         ORDER BY w.started_at DESC"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params![from_unix_s, to_unix_s], row_to_worklog)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Sum of `duration_s` for worklogs in `[from, to]` (optionally filtered by
-/// author). Tombstoned rows are excluded.
-pub fn total_seconds_for_range(
-    db: &Db,
-    from_unix_s: i64,
-    to_unix_s: i64,
-    author_account_id: Option<&str>,
-) -> Result<i64, DbError> {
+/// Sum of derived duration for worklogs in `[from, to]`, excluding tombstones.
+pub fn total_seconds_for_range(db: &Db, from_unix_s: i64, to_unix_s: i64) -> Result<i64, DbError> {
     let conn = db.pool().get()?;
-    let total: i64 = match author_account_id {
-        Some(account) => conn.query_row(
-            "SELECT COALESCE(SUM(duration_s), 0) FROM recent_worklogs
-             WHERE started_at BETWEEN ?1 AND ?2
-               AND author_account_id = ?3
-               AND tombstoned_at IS NULL",
-            rusqlite::params![from_unix_s, to_unix_s, account],
-            |r| r.get(0),
-        )?,
-        None => conn.query_row(
-            "SELECT COALESCE(SUM(duration_s), 0) FROM recent_worklogs
-             WHERE started_at BETWEEN ?1 AND ?2
-               AND tombstoned_at IS NULL",
-            rusqlite::params![from_unix_s, to_unix_s],
-            |r| r.get(0),
-        )?,
-    };
+    let total: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN ended_at > started_at
+                                 THEN ended_at - started_at ELSE 0 END), 0)
+         FROM worklogs
+         WHERE started_at BETWEEN ?1 AND ?2
+           AND tombstoned_at IS NULL",
+        rusqlite::params![from_unix_s, to_unix_s],
+        |r| r.get(0),
+    )?;
     Ok(total)
 }
 
-// -----------------------------------------------------------------------------
-// Phase 15: lookups + mutations used by the two-way sync commands.
-// -----------------------------------------------------------------------------
-
-/// Look up a row by its local rowid. Returns `None` if the row was hard-deleted
-/// (tombstoned rows are still returned — callers need them for audit / undo).
 pub fn get_by_id(db: &Db, id: i64) -> Result<Option<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at, pending_assignment
-         FROM recent_worklogs WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!("SELECT {SELECT_COLS} {FROM_JOIN} WHERE w.id = ?1"))?;
     match stmt.query_row([id], row_to_worklog) {
         Ok(r) => Ok(Some(r)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -326,179 +284,185 @@ pub fn get_by_id(db: &Db, id: i64) -> Result<Option<WorklogRow>, DbError> {
     }
 }
 
-/// Look up a row by its Jira worklog id. Returns `None` if there is no such
-/// row locally (e.g. the row was hard-deleted, or never synced).
-pub fn get_by_jira_id(db: &Db, jira_id: &str) -> Result<Option<WorklogRow>, DbError> {
+/// Look up a row by provider remote id within a specific connection.
+pub fn get_by_remote_id(
+    db: &Db,
+    connection_id: i64,
+    remote_id: &str,
+) -> Result<Option<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at, pending_assignment
-         FROM recent_worklogs WHERE jira_worklog_id = ?1",
-    )?;
-    match stmt.query_row([jira_id], row_to_worklog) {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.connection_id = ?1 AND w.remote_id = ?2"
+    ))?;
+    match stmt.query_row(rusqlite::params![connection_id, remote_id], row_to_worklog) {
         Ok(r) => Ok(Some(r)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
-/// Update the mutable fields (issue_key, duration_s, started_at, comment) on a
-/// local row. Used by the `update_worklog` and `move_worklog` Tauri commands.
-#[allow(clippy::too_many_arguments)]
+/// Look up a row by `remote_id` across all connections. Used by command
+/// dispatchers that only know the upstream id — the unique index guarantees
+/// at most one match.
+pub fn get_by_remote_id_any(db: &Db, remote_id: &str) -> Result<Option<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN} WHERE w.remote_id = ?1 LIMIT 1"
+    ))?;
+    match stmt.query_row([remote_id], row_to_worklog) {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Mutations used by the two-way sync commands
+// -----------------------------------------------------------------------------
+
+/// Update the editable fields on a worklog (issue_key, description,
+/// start/end, optional sync stamp). When `synced_at` is `Some(_)` we also
+/// set `is_synced = 1`.
 pub fn update_fields(
     db: &Db,
     id: i64,
-    issue_key: &str,
-    issue_id: Option<&str>,
-    summary: Option<&str>,
-    duration_s: i64,
+    issue_key: Option<&str>,
+    description: Option<&str>,
     started_at: i64,
-    comment: Option<&str>,
-    updated_at_jira: Option<i64>,
+    ended_at: i64,
+    synced_at: Option<i64>,
 ) -> Result<(), DbError> {
     let conn = db.pool().get()?;
+    let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "UPDATE recent_worklogs SET
-            issue_key = ?2,
-            issue_id = ?3,
-            summary = ?4,
-            duration_s = ?5,
-            started_at = ?6,
-            comment = ?7,
-            updated_at = ?8
+        "UPDATE worklogs SET
+            issue_key   = ?2,
+            description = ?3,
+            started_at  = ?4,
+            ended_at    = ?5,
+            updated_at  = ?6,
+            is_synced   = CASE WHEN ?7 IS NOT NULL THEN 1 ELSE is_synced END,
+            synced_at   = COALESCE(?7, synced_at)
          WHERE id = ?1",
         rusqlite::params![
             id,
             issue_key,
-            issue_id,
-            summary,
-            duration_s,
+            description,
             started_at,
-            comment,
-            updated_at_jira,
+            ended_at,
+            now,
+            synced_at,
         ],
     )?;
     Ok(())
 }
 
-/// Mark a row as pending-delete. The frontend optimistically hides the row,
-/// then 5 seconds later a background task either commits the delete (calling
-/// `Jira DELETE` and setting `tombstoned_at`) or — if the user pressed undo,
-/// clearing `pending_delete_at` — does nothing.
+/// Soft-delete window. The 5s undo banner watches this column; if it stays
+/// non-null at expiry the background task commits the actual remote DELETE
+/// and then calls [`mark_tombstoned`].
 pub fn mark_pending_delete(db: &Db, id: i64, now_unix_s: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
-        "UPDATE recent_worklogs SET pending_delete_at = ?2 WHERE id = ?1",
+        "UPDATE worklogs SET pending_delete_at = ?2, updated_at = ?2 WHERE id = ?1",
         rusqlite::params![id, now_unix_s],
     )?;
     Ok(())
 }
 
-/// Clear the `pending_delete_at` column (user pressed undo, or background
-/// task already fired the delete).
 pub fn clear_pending_delete(db: &Db, id: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
+    let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "UPDATE recent_worklogs SET pending_delete_at = NULL WHERE id = ?1",
-        [id],
+        "UPDATE worklogs SET pending_delete_at = NULL, updated_at = ?2 WHERE id = ?1",
+        rusqlite::params![id, now],
     )?;
     Ok(())
 }
 
-/// Mark a row as tombstoned (deleted in Jira). The row is retained for ~30
-/// days as a forensic audit trail; `purge_old_tombstoned` will hard-delete it
-/// on the next sync after the retention window.
+/// Mark a row tombstoned. Rows stay forever (no retention sweep) so the
+/// audit trail is complete even after the provider drops the original.
 pub fn mark_tombstoned(db: &Db, id: i64, now_unix_s: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
-        "UPDATE recent_worklogs SET
+        "UPDATE worklogs SET
             tombstoned_at = ?2,
-            pending_delete_at = NULL
+            pending_delete_at = NULL,
+            updated_at = ?2
          WHERE id = ?1",
         rusqlite::params![id, now_unix_s],
     )?;
     Ok(())
 }
 
-/// Mark a row tombstoned by Jira worklog id. Convenience wrapper for the
-/// mark-and-sweep code path in `worklog_sync`.
-pub fn mark_tombstoned_by_jira_id(db: &Db, jira_id: &str, now_unix_s: i64) -> Result<(), DbError> {
+/// Mark tombstoned by `(connection_id, remote_id)`. Used by mark-and-sweep
+/// after a sync pass to flag entries the provider no longer returns.
+pub fn mark_tombstoned_by_remote_id(
+    db: &Db,
+    connection_id: i64,
+    remote_id: &str,
+    now_unix_s: i64,
+) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
-        "UPDATE recent_worklogs SET
-            tombstoned_at = ?2,
-            pending_delete_at = NULL
-         WHERE jira_worklog_id = ?1
+        "UPDATE worklogs SET
+            tombstoned_at = ?3,
+            pending_delete_at = NULL,
+            updated_at = ?3
+         WHERE connection_id = ?1
+           AND remote_id = ?2
            AND tombstoned_at IS NULL",
-        rusqlite::params![jira_id, now_unix_s],
+        rusqlite::params![connection_id, remote_id, now_unix_s],
     )?;
     Ok(())
 }
 
-/// Hard-delete rows whose `tombstoned_at` is older than `older_than_unix_s`.
-/// Returns the number of rows actually removed.
-pub fn purge_old_tombstoned(db: &Db, older_than_unix_s: i64) -> Result<usize, DbError> {
-    let conn = db.pool().get()?;
-    let n = conn.execute(
-        "DELETE FROM recent_worklogs
-         WHERE tombstoned_at IS NOT NULL
-           AND tombstoned_at < ?1",
-        [older_than_unix_s],
-    )?;
-    Ok(n)
-}
-
-/// Hard-delete a single row. Used by `move_worklog` after a successful
-/// composite operation to discard the old row entirely.
+/// Hard-delete a single row. Used after a successful `move_worklog`
+/// composite operation that needs to discard the old entry entirely.
 pub fn delete_row(db: &Db, id: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
-    conn.execute("DELETE FROM recent_worklogs WHERE id = ?1", [id])?;
+    conn.execute("DELETE FROM worklogs WHERE id = ?1", [id])?;
     Ok(())
 }
 
-/// Return all rows currently in pending-delete state (used by startup recovery
-/// to fire deletes that didn't get committed before the app crashed).
+/// Rows whose `pending_delete_at` is older than `older_than_unix_s` and that
+/// haven't been tombstoned yet. Used by startup recovery to fire deletes
+/// that didn't get committed before the app crashed.
 pub fn pending_deletes_older_than(
     db: &Db,
     older_than_unix_s: i64,
 ) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, issue_key, issue_id, summary, duration_s, started_at, logged_at,
-                comment, jira_worklog_id, author_account_id, source, updated_at,
-                pending_delete_at, tombstoned_at, pending_assignment
-         FROM recent_worklogs
-         WHERE pending_delete_at IS NOT NULL
-           AND pending_delete_at < ?1
-           AND tombstoned_at IS NULL
-         ORDER BY pending_delete_at ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.pending_delete_at IS NOT NULL
+           AND w.pending_delete_at < ?1
+           AND w.tombstoned_at IS NULL
+         ORDER BY w.pending_delete_at ASC"
+    ))?;
     let mapped = stmt.query_map([older_than_unix_s], row_to_worklog)?;
     mapped.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Return all `jira_worklog_id` values for `source='jira'` rows whose
-/// `started_at` falls inside the given range, for the given author. Used by
-/// the mark-and-sweep pass: anything in this set that the next Jira fetch
-/// did NOT return is presumed deleted upstream.
-pub fn jira_ids_in_range(
+/// All `remote_id` values for a given connection whose `started_at` falls
+/// inside the range. Used by mark-and-sweep: anything in this set that the
+/// provider didn't return on the latest sync is presumed deleted upstream.
+pub fn remote_ids_in_range(
     db: &Db,
+    connection_id: i64,
     from_unix_s: i64,
     to_unix_s: i64,
-    author_account_id: &str,
 ) -> Result<Vec<String>, DbError> {
     let conn = db.pool().get()?;
     let mut stmt = conn.prepare(
-        "SELECT jira_worklog_id FROM recent_worklogs
-         WHERE source = 'jira'
+        "SELECT remote_id FROM worklogs
+         WHERE connection_id = ?1
+           AND remote_id IS NOT NULL
            AND tombstoned_at IS NULL
-           AND jira_worklog_id IS NOT NULL
-           AND started_at BETWEEN ?1 AND ?2
-           AND author_account_id = ?3",
+           AND started_at BETWEEN ?2 AND ?3",
     )?;
     let mapped = stmt.query_map(
-        rusqlite::params![from_unix_s, to_unix_s, author_account_id],
+        rusqlite::params![connection_id, from_unix_s, to_unix_s],
         |r| r.get::<_, Option<String>>(0),
     )?;
     let mut out = Vec::new();
@@ -510,61 +474,59 @@ pub fn jira_ids_in_range(
     Ok(out)
 }
 
-fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
-    Ok(WorklogRow {
-        id: r.get(0)?,
-        issue_key: r.get(1)?,
-        issue_id: r.get(2)?,
-        summary: r.get(3)?,
-        duration_s: r.get(4)?,
-        started_at: r.get(5)?,
-        logged_at: r.get(6)?,
-        comment: r.get(7)?,
-        jira_worklog_id: r.get(8)?,
-        author_account_id: r.get(9)?,
-        source: r.get(10)?,
-        updated_at_jira: r.get(11)?,
-        pending_delete_at: r.get(12)?,
-        tombstoned_at: r.get(13)?,
-        pending_assignment: r.get::<_, i64>(14).unwrap_or(0) != 0,
-    })
-}
-
-/// Assign an issue to a previously-unassigned worklog. Clears the
-/// `pending_assignment` flag and stamps a fresh `updated_at`.
+/// Attach an issue to a previously-unassigned worklog. If `remote_id` is
+/// `Some(_)` we also stamp `is_synced = 1` and `synced_at = now`.
 pub fn assign_issue(
     db: &Db,
     id: i64,
+    connection_id: Option<i64>,
     issue_key: &str,
-    issue_id: Option<&str>,
-    summary: Option<&str>,
-    jira_worklog_id: Option<&str>,
+    remote_id: Option<&str>,
 ) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "UPDATE recent_worklogs SET
-            issue_key = ?2,
-            issue_id = ?3,
-            summary = ?4,
-            jira_worklog_id = ?5,
-            source = CASE WHEN ?5 IS NOT NULL THEN 'jira' ELSE source END,
-            pending_assignment = 0,
-            updated_at = ?6
+        "UPDATE worklogs SET
+            connection_id = COALESCE(?2, connection_id),
+            issue_key     = ?3,
+            remote_id     = COALESCE(?4, remote_id),
+            is_synced     = CASE WHEN ?4 IS NOT NULL THEN 1 ELSE is_synced END,
+            synced_at     = CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE synced_at END,
+            updated_at    = ?5
          WHERE id = ?1",
-        rusqlite::params![id, issue_key, issue_id, summary, jira_worklog_id, now,],
+        rusqlite::params![id, connection_id, issue_key, remote_id, now],
     )?;
     Ok(())
 }
 
-/// Hard-delete a local-only row (no Jira-side delete). The caller is
-/// responsible for ensuring `jira_worklog_id IS NULL` — this function does
-/// not check.
+/// Hard-delete a row that has never been synced (no `remote_id`). Used by
+/// the timer-discard / local-only delete flow.
 pub fn delete_local_only(db: &Db, id: i64) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
-        "DELETE FROM recent_worklogs WHERE id = ?1 AND jira_worklog_id IS NULL",
+        "DELETE FROM worklogs WHERE id = ?1 AND remote_id IS NULL",
         [id],
     )?;
     Ok(())
+}
+
+fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
+    Ok(WorklogRow {
+        id: r.get(0)?,
+        connection_id: r.get(1)?,
+        issue_key: r.get(2)?,
+        description: r.get(3)?,
+        started_at: r.get(4)?,
+        ended_at: r.get(5)?,
+        logged_at: r.get(6)?,
+        updated_at: r.get(7)?,
+        is_synced: r.get::<_, i64>(8)? != 0,
+        synced_at: r.get(9)?,
+        remote_id: r.get(10)?,
+        pending_delete_at: r.get(11)?,
+        tombstoned_at: r.get(12)?,
+        // From the LEFT JOIN with `issues_v2`. `None` if the task hasn't
+        // been synced into the issues cache yet.
+        summary: r.get(13)?,
+    })
 }

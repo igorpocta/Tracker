@@ -10,16 +10,18 @@
  * the Time Log route. The other two opinions remain local-only in
  * `localStorage` until we have a real need to sync them across windows.
  */
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  exportBackup,
   getActivityThresholdMin,
   getAutostart,
   getInstallId,
   getRoundingIntervalMinutes,
   getRoundingMode,
   getSentryEnabled,
+  importBackup,
   purgeAuditLog,
   setActivityThresholdMin,
   setAutostart,
@@ -160,7 +162,7 @@ export default function General() {
   };
 
   return (
-    <div className="flex flex-col gap-8 max-w-xl">
+    <div className="flex flex-col gap-8 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Obecné
@@ -399,7 +401,113 @@ export default function General() {
           </p>
         </div>
       </Section>
+
+      <BackupSection />
     </div>
+  );
+}
+
+function BackupSection() {
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const handleExport = async () => {
+    setStatus(null);
+    setBusy(true);
+    try {
+      const bundle = await exportBackup();
+      const json = JSON.stringify(bundle, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      a.href = url;
+      a.download = `tracker-backup-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setStatus("Export hotov.");
+    } catch (e) {
+      setStatus(`Export selhal: ${typeof e === "string" ? e : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImport = async (file: File) => {
+    if (
+      !window.confirm(
+        `Importovat „${file.name}"?\n\n` +
+          `POZOR: existující data v aplikaci budou přepsána. Pokračovat?`,
+      )
+    ) {
+      return;
+    }
+    setStatus(null);
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+      const stats = await importBackup(bundle);
+      setStatus(
+        `Importováno: ${stats.worklogs} worklog(s), ${stats.issues_v2} úkol(s), ${stats.connections} připojení.`,
+      );
+    } catch (e) {
+      setStatus(`Import selhal: ${typeof e === "string" ? e : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Záloha a obnova"
+      description="Export všech lokálních dat (worklogy, úkoly, nastavení) do JSON. Tokeny se neukládají — po obnově je nutné znovu zadat. Import přepíše stávající data."
+    >
+      <div className="flex flex-col gap-2 max-w-md">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-[var(--radius-md)]
+                       text-xs text-[var(--accent)] border border-[var(--accent-soft)]
+                       bg-transparent hover:bg-[var(--accent-soft)]
+                       transition-colors duration-150 disabled:opacity-60"
+          >
+            Stáhnout zálohu (.json)
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-[var(--radius-md)]
+                       text-xs text-[var(--text-primary)] border border-[var(--border-default)]
+                       hover:bg-[var(--bg-hover)] transition-colors duration-150
+                       disabled:opacity-60"
+          >
+            Obnovit ze souboru…
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleImport(file);
+              // Reset value, ať jde vybrat ten samý soubor znovu po pokusu.
+              e.currentTarget.value = "";
+            }}
+          />
+        </div>
+        {status && (
+          <p className="text-[11px] text-[var(--text-tertiary)]">{status}</p>
+        )}
+      </div>
+    </Section>
   );
 }
 

@@ -1,80 +1,48 @@
 /**
- * Pure-function tests for the Reports TSV export — Phase 18B Item 11.
+ * Pure-function tests pro Reports XLSX export.
  *
- * We don't render the React component here; instead we exercise the
- * helpers that the user's spec hinges on:
- *   - formatHoursCs    → Czech decimal-comma hours
- *   - formatExcelTime  → `DD.MM.YYYY HH:MM:SS`
- *   - buildTsv         → tab-separated rows with the right column order
+ * SheetJS samotný netestujeme; testujeme `buildRowsForExport`, který připravuje
+ * data pro `XLSX.utils.aoa_to_sheet`.
  */
 import { describe, expect, it } from "vitest";
 
 import type { IssueRow, WorklogRow } from "../../api/types";
-import { buildTsv, formatExcelTime, formatHoursCs } from "./ExportButton";
+import { buildRowsForExport } from "./ExportButton";
 
-describe("formatHoursCs", () => {
-  it("formats 15 minutes as 0,25", () => {
-    expect(formatHoursCs(15 * 60)).toBe("0,25");
-  });
+function wl(
+  issueKey: string | undefined,
+  summary: string,
+  startedAt: Date,
+  durSec: number,
+  description?: string,
+): WorklogRow {
+  return {
+    issue_key: issueKey,
+    duration_s: durSec,
+    started_at: Math.floor(startedAt.getTime() / 1000),
+    logged_at: 0,
+    summary,
+    description,
+  };
+}
 
-  it("formats 2h 13m as 2,22", () => {
-    expect(formatHoursCs(2 * 3600 + 13 * 60)).toBe("2,22");
-  });
+function iss(
+  key: string,
+  summary: string,
+  parentKey?: string,
+  parentSummary?: string,
+): IssueRow {
+  return {
+    issue_key: key,
+    summary,
+    updated_at: 0,
+    parent_key: parentKey,
+    parent_summary: parentSummary,
+  };
+}
 
-  it("rounds to 2 decimals", () => {
-    // 9792s = 2.72h
-    expect(formatHoursCs(9792)).toBe("2,72");
-  });
-
-  it("clamps negative to 0,00", () => {
-    expect(formatHoursCs(-100)).toBe("0,00");
-  });
-});
-
-describe("formatExcelTime", () => {
-  it("emits DD.MM.YYYY HH:MM:SS", () => {
-    const d = new Date(2026, 4, 14, 15, 46, 0);
-    expect(formatExcelTime(d)).toBe("14.05.2026 15:46:00");
-  });
-
-  it("pads single-digit components", () => {
-    const d = new Date(2026, 0, 3, 7, 5, 9);
-    expect(formatExcelTime(d)).toBe("03.01.2026 07:05:09");
-  });
-});
-
-describe("buildTsv", () => {
-  function wl(
-    issueKey: string,
-    summary: string,
-    startedAt: Date,
-    durSec: number,
-  ): WorklogRow {
-    return {
-      issue_key: issueKey,
-      duration_s: durSec,
-      started_at: Math.floor(startedAt.getTime() / 1000),
-      logged_at: 0,
-      summary,
-    };
-  }
-
-  function iss(
-    key: string,
-    summary: string,
-    epicKey?: string,
-    epicSummary?: string,
-  ): IssueRow {
-    return {
-      issue_key: key,
-      summary,
-      updated_at: 0,
-      epic_key: epicKey,
-      epic_summary: epicSummary,
-    };
-  }
-
-  it("emits header + tab-separated rows, sorted by started_at", () => {
+describe("buildRowsForExport", () => {
+  it("sortuje podle started_at vzestupně", () => {
     const rows = [
       wl("DEV-792", "Portál synchronizace", new Date(2026, 4, 14, 15, 46), 900),
       wl("DEV-304", "Úpravy", new Date(2026, 4, 14, 10, 0), 7200),
@@ -83,22 +51,62 @@ describe("buildTsv", () => {
       ["DEV-792", iss("DEV-792", "Portál synchronizace", "STREAM-4", "myDOCK")],
       ["DEV-304", iss("DEV-304", "Úpravy", "STREAM-4", "myDOCK")],
     ]);
-    const tsv = buildTsv(rows, issueMap);
-    const lines = tsv.split("\r\n");
-    expect(lines[0]).toBe("Initiative\tIssues\tWork start time\tTime spent (hours)");
-    // Sorted by started_at — DEV-304 (10:00) first.
-    expect(lines[1]).toBe(
-      "STREAM-4: myDOCK\tDEV-304: Úpravy\t14.05.2026 10:00:00\t2,00",
-    );
-    expect(lines[2]).toBe(
-      "STREAM-4: myDOCK\tDEV-792: Portál synchronizace\t14.05.2026 15:46:00\t0,25",
-    );
+    const out = buildRowsForExport(rows, issueMap);
+    expect(out).toHaveLength(2);
+    expect(out[0].issueLabel).toBe("DEV-304: Úpravy");
+    expect(out[1].issueLabel).toBe("DEV-792: Portál synchronizace");
   });
 
-  it("falls back to row summary when issue is uncached", () => {
-    const rows = [wl("DEV-1", "fallback", new Date(2026, 4, 14, 9, 0), 1800)];
-    const tsv = buildTsv(rows, new Map());
-    const lines = tsv.split("\r\n");
-    expect(lines[1]).toBe("\tDEV-1: fallback\t14.05.2026 09:00:00\t0,50");
+  it("skládá Initiative z parent_key + parent_summary", () => {
+    const rows = [wl("DEV-1", "x", new Date(2026, 4, 14, 9, 0), 1800)];
+    const issueMap = new Map<string, IssueRow>([
+      ["DEV-1", iss("DEV-1", "x", "EPIC-9", "Big epic")],
+    ]);
+    const out = buildRowsForExport(rows, issueMap);
+    expect(out[0].initiative).toBe("EPIC-9: Big epic");
+  });
+
+  it("Initiative je prázdné, když parent chybí", () => {
+    const rows = [wl("DEV-1", "x", new Date(2026, 4, 14, 9, 0), 1800)];
+    const issueMap = new Map<string, IssueRow>([["DEV-1", iss("DEV-1", "x")]]);
+    const out = buildRowsForExport(rows, issueMap);
+    expect(out[0].initiative).toBe("");
+  });
+
+  it("fallback na row.summary, když issue není v cache", () => {
+    const rows = [wl("DEV-1", "fallback summary", new Date(2026, 4, 14, 9, 0), 1800)];
+    const out = buildRowsForExport(rows, new Map());
+    expect(out[0].issueLabel).toBe("DEV-1: fallback summary");
+  });
+
+  it("(bez úkolu) když issue_key chybí", () => {
+    const rows = [wl(undefined, "x", new Date(2026, 4, 14, 9, 0), 1800)];
+    const out = buildRowsForExport(rows, new Map());
+    expect(out[0].issueLabel).toBe("(bez úkolu)");
+  });
+
+  it("hours na 2 desetinná místa", () => {
+    expect(buildRowsForExport([wl("X", "x", new Date(), 15 * 60)], new Map())[0].hours).toBe(0.25);
+    expect(buildRowsForExport([wl("X", "x", new Date(), 2 * 3600 + 13 * 60)], new Map())[0].hours).toBe(2.22);
+    expect(buildRowsForExport([wl("X", "x", new Date(), 9792)], new Map())[0].hours).toBe(2.72);
+  });
+
+  it("start je Date z started_at × 1000", () => {
+    const d = new Date(2026, 4, 14, 15, 46, 0);
+    const out = buildRowsForExport([wl("X", "x", d, 3600)], new Map());
+    expect(out[0].start.getTime()).toBe(d.getTime());
+  });
+
+  it("description preferuje description před comment", () => {
+    const r: WorklogRow = {
+      issue_key: "X",
+      duration_s: 3600,
+      started_at: 0,
+      logged_at: 0,
+      summary: "x",
+      description: "popis-d",
+      comment: "popis-c",
+    };
+    expect(buildRowsForExport([r], new Map())[0].description).toBe("popis-d");
   });
 });

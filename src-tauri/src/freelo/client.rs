@@ -493,9 +493,19 @@ impl FreeloClient {
             let mut url = self.url("/work-reports")?;
             {
                 let mut q = url.query_pairs_mut();
-                q.append_pair("date_from", &from.format("%Y-%m-%d").to_string())
-                    .append_pair("date_to", &to.format("%Y-%m-%d").to_string())
-                    .append_pair("p", &page.to_string());
+                // Per Freelo v1 docs: filtr na `date_reported` se předává jako
+                // `date_reported_range[date_from]` / `[date_to]`. Předchozí
+                // `date_from` / `date_to` server ignoroval a vracel default
+                // (vše), takže klient pak musel filtrovat lokálně.
+                q.append_pair(
+                    "date_reported_range[date_from]",
+                    &from.format("%Y-%m-%d").to_string(),
+                )
+                .append_pair(
+                    "date_reported_range[date_to]",
+                    &to.format("%Y-%m-%d").to_string(),
+                )
+                .append_pair("p", &page.to_string());
                 if user_id > 0 {
                     q.append_pair("users_ids[]", &user_id.to_string());
                 }
@@ -574,9 +584,11 @@ impl FreeloClient {
             "minutes": minutes,
             "date_reported": date_s,
         });
+        // Pole se na Freelo API jmenuje `note` — ne `description`. Bez tohoto
+        // se uživatelská poznámka tiše ztrácela mezi naší DB a Freelem.
         if let Some(d) = description {
             if !d.trim().is_empty() {
-                body["description"] = json!(d);
+                body["note"] = json!(d);
             }
         }
         let body_clone = body.clone();
@@ -656,7 +668,9 @@ impl FreeloClient {
             );
         }
         if let Some(d) = description {
-            body.insert("description".into(), json!(d));
+            // Stejný důvod jako v `create_work_report` — Freelo API očekává
+            // `note`, ne `description`.
+            body.insert("note".into(), json!(d));
         }
         let body = Value::Object(body);
         let body_clone = body.clone();
@@ -717,6 +731,7 @@ impl FreeloClient {
 /// Flatten the canonical `/work-reports` response shape into the flat fields
 /// `FreeloWorkReport` deserializes. Inserts:
 ///   - `task_id`   ← `task.id`
+///   - `task_name` ← `task.name`
 ///   - `user_id`   ← `author.id` (preferred) or `worker.id`
 ///   - `description` ← `note`
 fn flatten_work_report_fields(v: &mut Value) {
@@ -724,6 +739,17 @@ fn flatten_work_report_fields(v: &mut Value) {
         if let Some(tid) = v.pointer("/task/id").and_then(|x| x.as_i64()) {
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("task_id".into(), json!(tid));
+            }
+        }
+    }
+    if v.get("task_name").is_none() {
+        if let Some(name) = v
+            .pointer("/task/name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+        {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("task_name".into(), json!(name));
             }
         }
     }

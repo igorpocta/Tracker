@@ -23,6 +23,7 @@
 pub mod client;
 pub mod models;
 pub mod ops;
+pub mod reconstruct;
 pub mod sync;
 
 pub use client::{FreeloClient, FreeloError};

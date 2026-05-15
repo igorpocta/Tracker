@@ -18,7 +18,6 @@ import { useSearchParams } from "react-router-dom";
 
 import Appearance from "../components/Settings/Appearance";
 import Connection from "../components/Settings/Connection";
-import Extensions from "../components/Settings/Extensions";
 import General from "../components/Settings/General";
 import Reporting from "../components/Settings/Reporting";
 import SettingsGoals from "../components/Settings/SettingsGoals";
@@ -28,8 +27,7 @@ type TabId =
   | "general"
   | "reporting"
   | "goals"
-  | "appearance"
-  | "extensions";
+  | "appearance";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "connection", label: "Připojení" },
@@ -37,7 +35,6 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "reporting", label: "Reporting" },
   { id: "goals", label: "Cíle" },
   { id: "appearance", label: "Vzhled" },
-  { id: "extensions", label: "Rozšíření" },
 ];
 
 const TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
@@ -89,7 +86,6 @@ export default function Settings() {
         {active === "reporting" && <Reporting />}
         {active === "goals" && <SettingsGoals />}
         {active === "appearance" && <Appearance />}
-        {active === "extensions" && <Extensions />}
       </main>
     </div>
   );

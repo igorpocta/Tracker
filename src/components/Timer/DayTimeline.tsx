@@ -1,16 +1,22 @@
 /**
- * Day overview timeline — Phase 18B Item 31.
+ * Day overview timeline — Canvas-rendered.
  *
- * Renders today's worklogs as labeled bars on a 06:00–22:00 axis. Each bar
- * shows the issue key (truncated as needed), the user can hover for the full
- * summary + duration, and clicking a bar fires `onSelect(worklog)` so the
- * outer view can scroll/focus the matching row in the worklog list.
+ * Renders today's worklogs as colored segments on a 06:00–22:00 axis. Místo
+ * DOM elementů jeden `<canvas>` (Skia / CoreGraphics backed), aby drag a
+ * hover nebyly limitovaný React render cyklem.
+ *
+ * Interakce:
+ *   - hover → tooltip přes DOM (jeden absolutně pozicovaný div, nepotřebuje
+ *     se rerender canvasu).
+ *   - klik na segment → `onSelect(row)`.
+ *   - **drag** uvnitř lokálního (nesyncovaného) segmentu → split. Při
+ *     release pošle callback `onSplitRequest(row, splitAtMs)` který otevře
+ *     dialog s pickerem druhého úkolu.
  *
  *   06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22
  *           [DEV-792==========][DEV-304========][DEV-926=]
  */
-import { clsx } from "clsx";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { WorklogRow } from "../../api/types";
 import { formatDurationShort } from "../../lib/format";
@@ -20,136 +26,336 @@ const START_HOUR = 6;
 /** Last hour shown (exclusive). */
 const END_HOUR = 22;
 
+const ROW_HEIGHT = 28;
+const AXIS_HEIGHT = 16;
+const SEGMENT_RADIUS = 3;
+const MIN_DRAG_PX = 6;
+
 export interface DayTimelineProps {
   rows: WorklogRow[];
-  /** The day represented by the timeline (used for clamping). */
   day: Date;
-  /** Optional callback when the user clicks a bar. */
   onSelect?: (row: WorklogRow) => void;
+  onSplitRequest?: (row: WorklogRow, splitAtMs: number) => void;
+  /**
+   * Tažením na prázdném místě uživatel definuje nový worklog. Callback
+   * dostane unixovou hranici v ms (start + end zaokrouhlené dle taženého
+   * intervalu) a parent route otevře dialog pro výběr úkolu.
+   */
+  onCreateRequest?: (startedAtMs: number, endedAtMs: number) => void;
 }
 
 interface Segment {
   row: WorklogRow;
-  /** Bar start in fractional hours from START_HOUR. */
   leftFrac: number;
-  /** Bar width in fractional hours. */
   widthFrac: number;
 }
 
-export function DayTimeline({ rows, day, onSelect }: DayTimelineProps) {
-  const segments = buildSegments(rows, day);
-  const totalHours = END_HOUR - START_HOUR;
-  const [hover, setHover] = useState<number | null>(null);
+interface Hover {
+  segIdx: number;
+  /** Canvas X v px (uvnitř <canvas>). */
+  canvasX: number;
+}
+
+/** Drag uvnitř existujícího segmentu — split-request flow. */
+interface SplitDragState {
+  kind: "split";
+  segIdx: number;
+  startCanvasX: number;
+  currentCanvasX: number;
+}
+
+/** Drag přes prázdné místo — create-request flow. */
+interface CreateDragState {
+  kind: "create";
+  startCanvasX: number;
+  currentCanvasX: number;
+}
+
+type DragState = SplitDragState | CreateDragState;
+
+export function DayTimeline({
+  rows,
+  day,
+  onSelect,
+  onSplitRequest,
+  onCreateRequest,
+}: DayTimelineProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const segmentsRef = useRef<Segment[]>([]);
+  const [hover, setHover] = useState<Hover | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+
+  // Segmenty se přepočítají při změně rows / day.
+  segmentsRef.current = buildSegments(rows, day);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = wrapper.clientWidth;
+    const cssHeight = AXIS_HEIGHT + ROW_HEIGHT;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const totalHours = END_HOUR - START_HOUR;
+    const hourW = cssWidth / totalHours;
+    const accent = readCssVar("--accent") || "#14B8A6";
+    const accentHover = readCssVar("--accent-hover") || accent;
+    const muted = readCssVar("--text-tertiary") || "#71717a";
+    const border = readCssVar("--border-subtle") || "rgba(0,0,0,0.1)";
+    const bgApp = readCssVar("--bg-app") || "#ffffff";
+
+    // Hour labels (osa).
+    ctx.fillStyle = muted;
+    ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.textBaseline = "top";
+    for (let i = 0; i < totalHours; i++) {
+      ctx.fillText(String(START_HOUR + i), i * hourW + 2, 0);
+    }
+
+    // Track background.
+    const trackY = AXIS_HEIGHT;
+    ctx.fillStyle = bgApp;
+    roundRect(ctx, 0, trackY, cssWidth, ROW_HEIGHT, 4);
+    ctx.fill();
+
+    // Hour grid lines.
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    for (let i = 1; i < totalHours; i++) {
+      const x = Math.round(i * hourW) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, trackY);
+      ctx.lineTo(x, trackY + ROW_HEIGHT);
+      ctx.stroke();
+    }
+
+    // Segments.
+    ctx.font = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.textBaseline = "middle";
+    for (let idx = 0; idx < segmentsRef.current.length; idx++) {
+      const seg = segmentsRef.current[idx];
+      const x = (seg.leftFrac / totalHours) * cssWidth;
+      const w = Math.max((seg.widthFrac / totalHours) * cssWidth, 1);
+      const isHovered = hover?.segIdx === idx;
+      ctx.fillStyle = isHovered ? accentHover : accent;
+      roundRect(ctx, x, trackY + 2, w, ROW_HEIGHT - 4, SEGMENT_RADIUS);
+      ctx.fill();
+
+      // Label (issue key) — truncate by width.
+      const label = seg.row.issue_key ?? "—";
+      if (w > 24) {
+        ctx.fillStyle = readCssVar("--accent-text") || "#ffffff";
+        const trimmed = truncateToWidth(ctx, label, w - 8);
+        ctx.fillText(trimmed, x + 4, trackY + ROW_HEIGHT / 2);
+      }
+    }
+
+    // Drag overlay — vizuál závisí na kind:
+    //   - split: tenká vertikální čára uvnitř existujícího segmentu.
+    //   - create: poloprůhledný obdélník mezi start a current X.
+    if (drag) {
+      if (drag.kind === "split") {
+        const seg = segmentsRef.current[drag.segIdx];
+        if (seg) {
+          const x = drag.currentCanvasX;
+          const segLeftPx = (seg.leftFrac / totalHours) * cssWidth;
+          const segRightPx =
+            ((seg.leftFrac + seg.widthFrac) / totalHours) * cssWidth;
+          const clampedX = Math.max(segLeftPx + 2, Math.min(segRightPx - 2, x));
+          ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+          ctx.fillRect(clampedX - 1, trackY, 2, ROW_HEIGHT);
+        }
+      } else {
+        // create — protmavělý overlay v accent barvě s opacity.
+        const x1 = Math.min(drag.startCanvasX, drag.currentCanvasX);
+        const x2 = Math.max(drag.startCanvasX, drag.currentCanvasX);
+        ctx.fillStyle = withAlpha(accent, 0.35);
+        roundRect(ctx, x1, trackY + 2, Math.max(2, x2 - x1), ROW_HEIGHT - 4, SEGMENT_RADIUS);
+        ctx.fill();
+        // Tenké hranice levé/pravé (clearer visual feedback).
+        ctx.fillStyle = accent;
+        ctx.fillRect(x1 - 0.5, trackY, 1, ROW_HEIGHT);
+        ctx.fillRect(x2 - 0.5, trackY, 1, ROW_HEIGHT);
+      }
+    }
+  }, [drag, hover]);
+
+  // Redraw při změně props i okenní velikosti.
+  useEffect(() => {
+    draw();
+  }, [draw, rows, day]);
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const obs = new ResizeObserver(() => draw());
+    obs.observe(wrapper);
+    return () => obs.disconnect();
+  }, [draw]);
+
+  const segAtPoint = useCallback((canvasX: number, canvasY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return -1;
+    const cssWidth = canvas.clientWidth;
+    const totalHours = END_HOUR - START_HOUR;
+    if (canvasY < AXIS_HEIGHT || canvasY > AXIS_HEIGHT + ROW_HEIGHT) return -1;
+    for (let i = 0; i < segmentsRef.current.length; i++) {
+      const s = segmentsRef.current[i];
+      const x = (s.leftFrac / totalHours) * cssWidth;
+      const w = (s.widthFrac / totalHours) * cssWidth;
+      if (canvasX >= x && canvasX <= x + w) return i;
+    }
+    return -1;
+  }, []);
 
   return (
     <div
+      ref={wrapperRef}
       className="rounded-[var(--radius-md)] border border-[var(--border-subtle)]
                  bg-[var(--bg-surface)] p-3"
       aria-label="Časová osa dne"
     >
-      <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-3">
+      <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-2">
         Časová osa dne
       </h3>
-
-      {/* Hour labels */}
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: `repeat(${totalHours}, minmax(0, 1fr))`,
-        }}
-      >
-        {Array.from({ length: totalHours }, (_, i) => (
-          <div
-            key={`h-${i}`}
-            className="text-[10px] font-mono text-[var(--text-tertiary)] text-left tabular-nums"
-          >
-            {START_HOUR + i}
-          </div>
-        ))}
-      </div>
-
-      {/* Bar track */}
-      <div className="relative h-7 mt-1 rounded-[var(--radius-sm)] bg-[var(--bg-app)]">
-        {/* Hour-line grid (subtle) */}
-        <div
-          aria-hidden
-          className="absolute inset-0 grid pointer-events-none"
-          style={{
-            gridTemplateColumns: `repeat(${totalHours}, minmax(0, 1fr))`,
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          className="w-full block cursor-pointer"
+          style={{ height: `${AXIS_HEIGHT + ROW_HEIGHT}px` }}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const idx = segAtPoint(x, y);
+            if (drag) {
+              setDrag({ ...drag, currentCanvasX: x });
+            } else if (idx !== hover?.segIdx) {
+              setHover(idx >= 0 ? { segIdx: idx, canvasX: x } : null);
+            } else if (idx >= 0) {
+              setHover({ segIdx: idx, canvasX: x });
+            }
           }}
-        >
-          {Array.from({ length: totalHours }, (_, i) => (
-            <div
-              key={`grid-${i}`}
-              className={clsx(
-                i > 0 && "border-l border-[var(--border-subtle)]",
-              )}
-            />
-          ))}
-        </div>
-
-        {segments.map((seg, idx) => {
-          const leftPct = (seg.leftFrac / totalHours) * 100;
-          const widthPct = (seg.widthFrac / totalHours) * 100;
-          const isHovered = hover === idx;
-          return (
-            <button
-              key={`${seg.row.id ?? seg.row.jira_worklog_id ?? idx}-${seg.leftFrac}`}
-              type="button"
-              onMouseEnter={() => setHover(idx)}
-              onMouseLeave={() => setHover(null)}
-              onClick={() => onSelect?.(seg.row)}
-              className="absolute top-0 bottom-0 rounded-[3px] overflow-hidden flex items-center
-                         px-1.5 text-[10px] font-mono uppercase tracking-[0.04em] whitespace-nowrap
-                         transition-all duration-150"
-              style={{
-                left: `${leftPct}%`,
-                width: `${Math.max(widthPct, 0.2)}%`,
-                background: isHovered
-                  ? "var(--accent-hover, var(--accent))"
-                  : "var(--accent)",
-                color: "var(--accent-text, white)",
-                minWidth: 0,
-              }}
-              title={tooltipFor(seg.row)}
-              aria-label={tooltipFor(seg.row)}
-            >
-              <span className="truncate">{seg.row.issue_key || "?"}</span>
-              {isHovered && (
-                <BarTooltip leftPct={leftPct} widthPct={widthPct} row={seg.row} />
-              )}
-            </button>
-          );
-        })}
+          onMouseLeave={() => {
+            setHover(null);
+            // Don't clear drag — uživatel může cursor vyjet ven a vrátit zpět.
+          }}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const idx = segAtPoint(x, y);
+            if (idx >= 0) {
+              const seg = segmentsRef.current[idx];
+              // Drag-to-split jen u lokálních (nesyncovaných) záznamů.
+              if (seg.row.remote_id || seg.row.is_synced) return;
+              setDrag({
+                kind: "split",
+                segIdx: idx,
+                startCanvasX: x,
+                currentCanvasX: x,
+              });
+            } else if (
+              y >= AXIS_HEIGHT &&
+              y <= AXIS_HEIGHT + ROW_HEIGHT &&
+              onCreateRequest
+            ) {
+              // Prázdné místo v tracku → start create drag.
+              setDrag({
+                kind: "create",
+                startCanvasX: x,
+                currentCanvasX: x,
+              });
+            }
+          }}
+          onMouseUp={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            if (drag) {
+              const distance = Math.abs(x - drag.startCanvasX);
+              if (drag.kind === "split") {
+                const seg = segmentsRef.current[drag.segIdx];
+                if (distance >= MIN_DRAG_PX && seg && onSplitRequest) {
+                  const splitAtMs = canvasXToTimeMs(
+                    x,
+                    e.currentTarget.clientWidth,
+                    day,
+                  );
+                  onSplitRequest(seg.row, splitAtMs);
+                } else if (seg && onSelect) {
+                  onSelect(seg.row);
+                }
+              } else if (drag.kind === "create" && onCreateRequest) {
+                if (distance >= MIN_DRAG_PX) {
+                  const cssWidth = e.currentTarget.clientWidth;
+                  const startMs = canvasXToTimeMs(
+                    Math.min(drag.startCanvasX, x),
+                    cssWidth,
+                    day,
+                  );
+                  const endMs = canvasXToTimeMs(
+                    Math.max(drag.startCanvasX, x),
+                    cssWidth,
+                    day,
+                  );
+                  onCreateRequest(startMs, endMs);
+                }
+              }
+              setDrag(null);
+            } else {
+              const idx = segAtPoint(x, e.clientY - rect.top);
+              if (idx >= 0 && onSelect) {
+                onSelect(segmentsRef.current[idx].row);
+              }
+            }
+          }}
+        />
+        {hover && (
+          <CanvasTooltip
+            row={segmentsRef.current[hover.segIdx]?.row}
+            x={hover.canvasX}
+          />
+        )}
       </div>
       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
-        Klikněte na záznam pro zvýraznění v seznamu níže.
+        Klikni pro zvýraznění. U lokálních záznamů můžeš tažením rozdělit
+        blok na dva úkoly.
       </div>
     </div>
   );
 }
 
-function BarTooltip({
+function CanvasTooltip({
   row,
+  x,
 }: {
-  leftPct: number;
-  widthPct: number;
-  row: WorklogRow;
+  row: WorklogRow | undefined;
+  x: number;
 }) {
+  if (!row) return null;
   return (
     <div
       role="tooltip"
-      className="absolute left-1/2 -translate-x-1/2 top-[calc(100%+4px)] z-20
-                 px-2 py-1.5 rounded-[var(--radius-sm)] text-[11px] whitespace-nowrap
-                 pointer-events-none"
+      className="absolute pointer-events-none z-20 px-2 py-1.5
+                 rounded-[var(--radius-sm)] text-[11px] whitespace-nowrap"
       style={{
+        left: `${x}px`,
+        transform: "translate(-50%, calc(-100% - 6px))",
         background: "var(--bg-elevated)",
         color: "var(--text-primary)",
         border: "1px solid var(--border-default)",
         boxShadow: "var(--shadow-sm)",
       }}
     >
-      <div className="font-medium">{row.issue_key}</div>
+      <div className="font-medium">{row.issue_key ?? "(bez úkolu)"}</div>
       {row.summary && (
         <div className="text-[var(--text-tertiary)] max-w-[260px] truncate">
           {row.summary}
@@ -162,8 +368,85 @@ function BarTooltip({
   );
 }
 
-function tooltipFor(row: WorklogRow): string {
-  return `${row.issue_key}${row.summary ? ` — ${row.summary}` : ""} (${formatDurationShort(row.duration_s)})`;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a CSS color string to one with alpha. Bere `#rrggbb`, `rgb(...)`,
+ * nebo CSS variable hodnotu. Pokud nevíme jak parsovat, vrátí semi-průhledný
+ * black jako fallback (lepší než crash).
+ */
+function withAlpha(color: string, alpha: number): string {
+  const trimmed = color.trim();
+  // #RRGGBB → rgba(r,g,b,a).
+  if (trimmed.startsWith("#") && trimmed.length === 7) {
+    const r = parseInt(trimmed.slice(1, 3), 16);
+    const g = parseInt(trimmed.slice(3, 5), 16);
+    const b = parseInt(trimmed.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (trimmed.startsWith("rgb(") && trimmed.endsWith(")")) {
+    return trimmed.replace("rgb(", "rgba(").replace(")", `, ${alpha})`);
+  }
+  // Unknown — fall through to a neutral overlay. (Tauri webview umí `color-mix`,
+  // ale ne všechny prohlížeče.)
+  return `rgba(0, 0, 0, ${alpha})`;
+}
+
+function readCssVar(name: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+  return v ? v.trim() : undefined;
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.lineTo(x + w - rad, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+  ctx.lineTo(x + w, y + h - rad);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rad, y + h);
+  ctx.lineTo(x + rad, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rad);
+  ctx.lineTo(x, y + rad);
+  ctx.quadraticCurveTo(x, y, x + rad, y);
+  ctx.closePath();
+}
+
+function truncateToWidth(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxW: number,
+): string {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    if (ctx.measureText(text.slice(0, mid) + "…").width <= maxW) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo > 0 ? text.slice(0, lo) + "…" : "";
+}
+
+function canvasXToTimeMs(canvasX: number, cssWidth: number, day: Date): number {
+  const totalHours = END_HOUR - START_HOUR;
+  const frac = Math.max(0, Math.min(1, canvasX / cssWidth));
+  const dayStart = new Date(day);
+  dayStart.setHours(0, 0, 0, 0);
+  return dayStart.getTime() + (START_HOUR + frac * totalHours) * 3_600_000;
 }
 
 export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {
@@ -179,20 +462,17 @@ export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {
     const clampA = Math.max(a, windowStartMs);
     const clampB = Math.min(b, windowEndMs);
     if (clampB <= clampA) continue;
-
     const leftFrac = (clampA - windowStartMs) / 3_600_000;
     const widthFrac = (clampB - clampA) / 3_600_000;
     out.push({ row: r, leftFrac, widthFrac });
   }
-  // Sort by start so longer-overlapping ones don't cover shorter ones.
   out.sort((x, y) => x.leftFrac - y.leftFrac);
   return out;
 }
 
 /**
- * Phase 18A — Item 8: re-exported "bucketize" for the legacy hour-fill
- * computation; some older tests still consume it. The new view renders
- * `buildSegments` instead.
+ * Hour-fill computation pro starší testy (`bucketize` se v aplikaci už
+ * aktivně nepoužívá — Canvas timeline má vlastní render path).
  */
 export function bucketize(
   rows: WorklogRow[],

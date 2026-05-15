@@ -55,7 +55,9 @@ export const hourlyRateSchema = z
   .number()
   .refine((n) => Number.isFinite(n), "musí být platné číslo")
   .refine((n) => n >= 0, "nesmí být záporná")
-  .refine((n) => n <= 100_000, "je příliš vysoká (max 100 000)");
+  // Shoduje se s `MAX_HOURLY_RATE` v `commands/prefs.rs`. Pokud někdy
+  // přijde měna s hyperinflací, šplhne to per-currency.
+  .refine((n) => n <= 99_999, "je příliš vysoká (max 99 999)");
 
 /**
  * Daily goal in hours. 0.5..=24, matching the backend.

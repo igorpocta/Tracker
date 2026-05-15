@@ -37,6 +37,8 @@ pub struct JiraIssueFields {
     #[serde(default)]
     pub assignee: Option<JiraAssignee>,
     #[serde(default)]
+    pub reporter: Option<JiraAssignee>,
+    #[serde(default)]
     pub parent: Option<JiraParent>,
     #[serde(default)]
     pub issuetype: Option<JiraIssueType>,
@@ -44,6 +46,11 @@ pub struct JiraIssueFields {
     pub timetracking: Option<JiraTimeTracking>,
     #[serde(default)]
     pub updated: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
+    /// ISO date YYYY-MM-DD nebo null.
+    #[serde(default)]
+    pub duedate: Option<String>,
     /// Epic Link — Jira's classic custom field.
     #[serde(default, rename = "customfield_10014")]
     pub customfield_10014: Option<Value>,
@@ -82,6 +89,22 @@ pub struct JiraAssignee {
     pub display_name: Option<String>,
     #[serde(default, rename = "emailAddress")]
     pub email_address: Option<String>,
+    /// Mapa avatar URL z Jiry (`"16x16"`, `"24x24"`, `"32x32"`, `"48x48"`).
+    /// Pro UI rendering bere FE nejvyšší dostupnou velikost.
+    #[serde(default, rename = "avatarUrls")]
+    pub avatar_urls: Option<JiraAvatarUrls>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct JiraAvatarUrls {
+    #[serde(default, rename = "16x16")]
+    pub size_16: Option<String>,
+    #[serde(default, rename = "24x24")]
+    pub size_24: Option<String>,
+    #[serde(default, rename = "32x32")]
+    pub size_32: Option<String>,
+    #[serde(default, rename = "48x48")]
+    pub size_48: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -253,79 +276,55 @@ fn parse_jira_timestamp(s: &str) -> Option<i64> {
 ///
 /// Missing optional fields map to `None`; an unparseable `updated` falls back
 /// to `0` so the row is still insertable.
-pub fn map_issue_to_row(issue: &JiraIssue) -> IssueRow {
+/// Map a Jira issue into the multi-provider `issues_v2` row.
+///
+/// `connection_id` ties the row to the integration that fetched it; `now` is
+/// the wall-clock timestamp the row should record as `updated_at` (the
+/// caller passes one value for the whole batch to keep diagnostics tidy).
+pub fn map_issue_to_row(issue: &JiraIssue, connection_id: i64, now: i64) -> IssueRow {
     let fields = &issue.fields;
 
-    let summary = fields.summary.clone().unwrap_or_default();
+    let name = fields.summary.clone().unwrap_or_default();
 
-    let status_category = fields
+    // Status: prefer the human-readable name, fall back to category key.
+    let status = fields.status.as_ref().and_then(|s| {
+        s.name
+            .clone()
+            .or_else(|| s.status_category.as_ref().and_then(|c| c.key.clone()))
+    });
+
+    // Treat Jira's "done" status category as archived; the picker hides it
+    // by default. Other categories (`new`, `indeterminate`) stay visible.
+    let is_archived = fields
         .status
         .as_ref()
         .and_then(|s| s.status_category.as_ref())
-        .and_then(|c| c.key.clone());
-
-    let priority_order = fields
-        .priority
-        .as_ref()
-        .and_then(|p| p.id.as_ref())
-        .and_then(|s| s.parse::<i64>().ok());
-
-    let (assignee_email, assignee_account_id) = match &fields.assignee {
-        Some(a) => (a.email_address.clone(), a.account_id.clone()),
-        None => (None, None),
-    };
+        .and_then(|c| c.key.as_deref())
+        .map(|k| k.eq_ignore_ascii_case("done"))
+        .unwrap_or(false);
 
     let parent_key = fields.parent.as_ref().and_then(|p| p.key.clone());
-    let parent_summary = fields
+    let parent_name = fields
         .parent
         .as_ref()
         .and_then(|p| p.fields.as_ref())
         .and_then(|f| f.summary.clone());
 
-    let issue_type = fields.issuetype.as_ref().and_then(|t| t.name.clone());
-
-    let time_spent = fields
-        .timetracking
-        .as_ref()
-        .and_then(|tt| tt.time_spent_seconds);
-    let time_original_estimate = fields
-        .timetracking
-        .as_ref()
-        .and_then(|tt| tt.original_estimate_seconds);
-    let time_estimate = fields
-        .timetracking
-        .as_ref()
-        .and_then(|tt| tt.remaining_estimate_seconds);
-
-    // Jira's "Epic Link" classic custom field is a plain string key like "EPIC-1".
-    let epic_key = fields
-        .customfield_10014
-        .as_ref()
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    let updated_at = fields
-        .updated
-        .as_deref()
-        .and_then(parse_jira_timestamp)
-        .unwrap_or(0);
+    let remote_updated_at = fields.updated.as_deref().and_then(parse_jira_timestamp);
 
     IssueRow {
+        id: None,
+        connection_id,
+        issue_id: issue.id.clone(),
         issue_key: issue.key.clone(),
-        issue_id: Some(issue.id.clone()),
-        summary,
-        status_category,
-        priority_order,
-        assignee_email,
-        assignee_account_id,
+        name,
         parent_key,
-        parent_summary,
-        issue_type,
-        time_spent,
-        aggregate_time_spent: time_spent,
-        time_original_estimate,
-        time_estimate,
-        epic_key,
-        epic_summary: None,
-        updated_at,
+        parent_name,
+        status,
+        is_archived,
+        created_at: now,
+        updated_at: now,
+        remote_updated_at,
+        last_synced_at: Some(now),
     }
 }

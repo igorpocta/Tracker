@@ -287,12 +287,222 @@ export function signOut(): Promise<void> {
 // Worklog data (Phase 11A)
 // -----------------------------------------------------------------------------
 
+export type SyncMode = "full" | "incremental";
+
 /**
- * `refresh_all(from_days): { issues, worklogs }` — pull latest issues and the
- * last `from_days` of worklogs from Jira.
+ * `refresh_all(mode?): { issues, worklogs }` — sync issues + worklogs napříč
+ * všemi aktivními integracemi.
+ *
+ * - `mode = "full"`: 10 let historie. Použij pro první spuštění nebo když
+ *   uživatel ručně klepne na „Stáhnout celou historii".
+ * - `mode = "incremental"` (default): rolling 30denní okno worklogů. Levné,
+ *   běhá ze sidebar tlačítka a z auto-syncu.
  */
-export function refreshAll(fromDays: number): Promise<RefreshAllResult> {
-  return invoke<RefreshAllResult>("refresh_all", { fromDays });
+export function refreshAll(mode?: SyncMode): Promise<RefreshAllResult> {
+  return invoke<RefreshAllResult>("refresh_all", { mode });
+}
+
+/**
+ * `refresh_connection(connection_id, mode?): { issues, worklogs }` — sync
+ * jen jedné konkrétní integrace. Defaultně `incremental`.
+ */
+export function refreshConnection(
+  connectionId: number,
+  mode?: SyncMode,
+): Promise<RefreshAllResult> {
+  return invoke<RefreshAllResult>("refresh_connection", {
+    connectionId,
+    mode,
+  });
+}
+
+/** Split lokálního worklogu na dvě části (první stejný úkol, druhý nový). */
+export function splitWorklog(
+  localId: number,
+  splitAtMs: number,
+  newIssueKey: string | null,
+): Promise<WorklogRow[]> {
+  return invoke<WorklogRow[]>("split_worklog", {
+    localId,
+    splitAtMs,
+    newIssueKey,
+  });
+}
+
+/** Audit záznam jednoho dokončeného syncu. */
+export interface SyncRun {
+  id: number;
+  connection_id?: number | null;
+  connection_name?: string | null;
+  provider?: string | null;
+  mode: string;
+  started_at: number;
+  finished_at: number;
+  issues_count: number;
+  worklogs_count: number;
+  error_phase?: string | null;
+  error_message?: string | null;
+}
+
+export function listSyncRuns(limit?: number): Promise<SyncRun[]> {
+  return invoke<SyncRun[]>("list_sync_runs", { limit: limit ?? null });
+}
+
+/** Backup / restore — DB → JSON → DB. */
+export interface BackupBundle {
+  version: number;
+  generated_at: number;
+  tables: Record<string, Array<Record<string, unknown>>>;
+}
+
+export function exportBackup(): Promise<BackupBundle> {
+  return invoke<BackupBundle>("export_backup");
+}
+
+export interface ImportStats {
+  worklogs: number;
+  issues_v2: number;
+  connections: number;
+  audit_log: number;
+  app_settings: number;
+}
+
+export function importBackup(bundle: BackupBundle): Promise<ImportStats> {
+  return invoke<ImportStats>("import_backup", { bundle });
+}
+
+/** Pomodoro fokus nastavení. */
+export interface PomodoroConfig {
+  enabled: boolean;
+  work_min: number;
+  break_min: number;
+}
+
+export function getPomodoroConfig(): Promise<PomodoroConfig> {
+  return invoke<PomodoroConfig>("get_pomodoro");
+}
+
+export function setPomodoroConfig(config: PomodoroConfig): Promise<void> {
+  return invoke<void>("set_pomodoro", { config });
+}
+
+/** Volitelná barva per projekt key (např. `DEV`, `FREELO-P-12`). */
+export interface ProjectColor {
+  project_key: string;
+  color: string;
+  updated_at: number;
+}
+
+export function listProjectColors(): Promise<ProjectColor[]> {
+  return invoke<ProjectColor[]>("list_project_colors");
+}
+
+/** `color = null` smaže override. */
+export function setProjectColor(
+  projectKey: string,
+  color: string | null,
+): Promise<void> {
+  return invoke<void>("set_project_color", { projectKey, color });
+}
+
+/** Návrh úkolu od smart suggestion engine („jako včera"). */
+export interface Suggestion {
+  issue_key: string;
+  summary?: string | null;
+  occurrences: number;
+  bucket_hour: number;
+}
+
+export function getSuggestions(): Promise<Suggestion[]> {
+  return invoke<Suggestion[]>("get_suggestions");
+}
+
+/** Streak — počet po sobě jdoucích pracovních dní se splněným daily goal. */
+export interface Streaks {
+  current: number;
+  longest: number;
+  today_met: boolean;
+}
+
+export function getStreaks(): Promise<Streaks> {
+  return invoke<Streaks>("get_streaks");
+}
+
+/** Statistika jedné connection (trust signal v Connection cardě). */
+export interface ConnectionStats {
+  connection_id: number;
+  issue_count: number;
+  worklog_count: number;
+  last_synced_at?: number | null;
+}
+
+export function getConnectionStats(
+  connectionId: number,
+): Promise<ConnectionStats> {
+  return invoke<ConnectionStats>("get_connection_stats", { connectionId });
+}
+
+/** Jeden řádek JIRA Dashboard přehledu (cross-connection agregace). */
+export interface JiraDashboardPerson {
+  display_name: string;
+  account_id?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface JiraDashboardRow {
+  connection_id: number;
+  connection_name: string;
+  base_url: string;
+  issue_key: string;
+  summary: string;
+  assignee?: JiraDashboardPerson | null;
+  reporter?: JiraDashboardPerson | null;
+  priority?: string | null;
+  status?: string | null;
+  status_category?: string | null;
+  /** ISO 8601 string (Jira's `created`). */
+  created?: string | null;
+  /** YYYY-MM-DD or null. */
+  due_date?: string | null;
+}
+
+export interface JiraDashboardError {
+  connection_id: number;
+  connection_name: string;
+  error: string;
+}
+
+export interface JiraDashboardResponse {
+  rows: JiraDashboardRow[];
+  errors: JiraDashboardError[];
+}
+
+/**
+ * `get_jira_dashboard_issues(): JiraDashboardResponse` — fetch issues z
+ * každé enabled Jira connection s `dashboard_enabled = true`, podle uložené
+ * `dashboard_jql`. Per-connection chyby se vrací v `errors` (nezhasí celý
+ * fetch).
+ */
+export function getJiraDashboardIssues(): Promise<JiraDashboardResponse> {
+  return invoke<JiraDashboardResponse>("get_jira_dashboard_issues");
+}
+
+/** Poslední neúspěšná fáze syncu per connection. */
+export interface SyncErrorEntry {
+  connection_id: number;
+  phase: "connection" | "issues" | "worklogs" | string;
+  error: string;
+  /** Unix sec. */
+  at: number;
+}
+
+/**
+ * `get_sync_errors(): SyncErrorEntry[]` — vrací jen connections s posledním
+ * persistovaným fail-em. Po úspěšném resync se entry zmizí.
+ */
+export function getSyncErrors(): Promise<SyncErrorEntry[]> {
+  return invoke<SyncErrorEntry[]>("get_sync_errors");
 }
 
 /**
@@ -679,6 +889,14 @@ export function listMyIssues(
     connectionId,
     limit: limit ?? null,
   });
+}
+
+/**
+ * Vrátí abecedně seřazený seznam názvů Jira statusů viditelných pro toto
+ * připojení. Globální nadmnožina napříč workflow všech projektů.
+ */
+export function listJiraStatuses(connectionId: number): Promise<string[]> {
+  return invoke<string[]>("list_jira_statuses", { connectionId });
 }
 
 // -----------------------------------------------------------------------------

@@ -25,10 +25,12 @@ import { useLocation, useOutletContext } from "react-router-dom";
 
 import {
   assignWorklogIssue,
+  createManualWorklog,
   deleteWorklog,
   deleteLocalOnlyWorklog,
   getWorklogsForRange,
   pushLocalWorklog,
+  splitWorklog,
   undoDeleteWorklog,
   updateLocalWorklog,
   updateWorklog,
@@ -38,6 +40,7 @@ import type { ShellOutletContext } from "../components/Layout/AppShell";
 import { IssuePill } from "../components/common/IssuePill";
 import { IssuePicker } from "../components/Worklog/IssuePicker";
 import { DayTimeline } from "../components/Timer/DayTimeline";
+import { SuggestionBanner } from "../components/Timer/SuggestionBanner";
 import {
   addDays,
   dayEndUnixS,
@@ -80,6 +83,14 @@ export default function TimeLog() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   /** Phase 18B — Item 31: row id flashed by the day-timeline click. */
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [splitRequest, setSplitRequest] = useState<{
+    row: ApiWorklogRow;
+    splitAtMs: number;
+  } | null>(null);
+  const [createRequest, setCreateRequest] = useState<{
+    startedAtMs: number;
+    endedAtMs: number;
+  } | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   /** Today, recomputed when the day rolls over so "Dnes" / disabled-next stay accurate. */
@@ -170,7 +181,7 @@ export default function TimeLog() {
         return next;
       });
       try {
-        await deleteWorklog(jiraId, row.issue_key);
+        await deleteWorklog(jiraId, row.issue_key ?? "");
       } catch (e) {
         // Failure to even mark pending → un-hide + show error.
         setHiddenIds((prev) => {
@@ -228,7 +239,7 @@ export default function TimeLog() {
         if (remoteId) {
           await updateWorklog({
             worklogId: remoteId,
-            issueKey: row.issue_key,
+            issueKey: row.issue_key ?? "",
             newStartedAtMs: patch.startedAtMs ?? null,
             newDurationSeconds: patch.durationSeconds ?? null,
             newComment: patch.comment ?? null,
@@ -285,6 +296,7 @@ export default function TimeLog() {
 
   return (
     <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
+      <SuggestionBanner />
       {/* Header row ----------------------------------------------------- */}
       <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-center gap-3 flex-wrap">
@@ -361,8 +373,71 @@ export default function TimeLog() {
               behavior: "smooth",
               block: "center",
             });
-            // Clear highlight after a short flash.
             window.setTimeout(() => setHighlightId(null), 1500);
+          }}
+          onSplitRequest={(row, splitAtMs) => {
+            setSplitRequest({ row, splitAtMs });
+          }}
+          onCreateRequest={(startedAtMs, endedAtMs) => {
+            setCreateRequest({ startedAtMs, endedAtMs });
+          }}
+        />
+      )}
+      {createRequest && (
+        <CreateWorklogDialog
+          startedAtMs={createRequest.startedAtMs}
+          endedAtMs={createRequest.endedAtMs}
+          onCancel={() => setCreateRequest(null)}
+          onConfirm={async (issueKey) => {
+            try {
+              const durationSeconds = Math.round(
+                (createRequest.endedAtMs - createRequest.startedAtMs) / 1000,
+              );
+              await createManualWorklog({
+                issueKey: issueKey,
+                startedAtMs: createRequest.startedAtMs,
+                durationSeconds,
+                comment: null,
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["worklogs-range"],
+              });
+            } catch (e) {
+              ctx.pushToast(
+                "error",
+                typeof e === "string" ? e : "Nepodařilo se vytvořit záznam",
+              );
+            } finally {
+              setCreateRequest(null);
+            }
+          }}
+        />
+      )}
+      {splitRequest && (
+        <SplitWorklogDialog
+          row={splitRequest.row}
+          splitAtMs={splitRequest.splitAtMs}
+          onCancel={() => setSplitRequest(null)}
+          onConfirm={async (newIssueKey) => {
+            try {
+              if (splitRequest.row.id != null) {
+                await splitWorklog(
+                  splitRequest.row.id,
+                  splitRequest.splitAtMs,
+                  newIssueKey || null,
+                );
+                queryClient.invalidateQueries({
+                  queryKey: ["worklogs-range"],
+                });
+              }
+            } catch (e) {
+              ctx.pushToast(
+                "error",
+                typeof e === "string" ? e : "Split selhal",
+              );
+            } finally {
+              setSplitRequest(null);
+            }
           }}
         />
       )}
@@ -790,3 +865,173 @@ export function parseDurationToSeconds(s: string): number | null {
   if (!matched) return null;
   return Math.round(total);
 }
+
+
+function SplitWorklogDialog({
+  row,
+  splitAtMs,
+  onCancel,
+  onConfirm,
+}: {
+  row: ApiWorklogRow;
+  splitAtMs: number;
+  onCancel: () => void;
+  onConfirm: (newIssueKey: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  const splitDate = new Date(splitAtMs);
+  const hh = String(splitDate.getHours()).padStart(2, "0");
+  const mm = String(splitDate.getMinutes()).padStart(2, "0");
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Rozdělit záznam"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.4)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        className="w-[420px] max-w-[92vw] p-5 rounded-[var(--radius-lg)] flex flex-col gap-3"
+        style={{
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border-default)",
+        }}
+      >
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">
+          Rozdělit záznam v {hh}:{mm}
+        </h3>
+        <p className="text-xs text-[var(--text-secondary)]">
+          První kus zůstane na úkolu <span className="font-mono">{row.issue_key ?? "(bez úkolu)"}</span>.
+          Druhý kus přiřaď k jinému úkolu (nech prázdné pro 'bez úkolu').
+        </p>
+        <input
+          type="text"
+          value={key}
+          autoFocus
+          placeholder="DEV-792"
+          onChange={(e) => setKey(e.target.value.toUpperCase().trim())}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onConfirm(key);
+            if (e.key === "Escape") onCancel();
+          }}
+          className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent
+                     border border-[var(--border-default)] text-sm font-mono
+                     text-[var(--text-primary)] focus:outline-none
+                     focus:border-[var(--accent)]"
+        />
+        <div className="flex justify-end gap-2 mt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-8 px-3 rounded-[var(--radius-md)] text-sm
+                       text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          >
+            Zrušit
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(key)}
+            className="h-8 px-3 rounded-[var(--radius-md)] text-sm font-semibold"
+            style={{ background: "var(--accent)", color: "var(--accent-text, #fff)" }}
+          >
+            Rozdělit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function CreateWorklogDialog({
+  startedAtMs,
+  endedAtMs,
+  onCancel,
+  onConfirm,
+}: {
+  startedAtMs: number;
+  endedAtMs: number;
+  onCancel: () => void;
+  onConfirm: (issueKey: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  const start = new Date(startedAtMs);
+  const end = new Date(endedAtMs);
+  const startLabel = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
+  const endLabel = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+  const durMin = Math.max(1, Math.round((endedAtMs - startedAtMs) / 60000));
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Vytvořit záznam z časové osy"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.4)" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        className="w-[420px] max-w-[92vw] p-5 rounded-[var(--radius-lg)] flex flex-col gap-3"
+        style={{
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border-default)",
+        }}
+      >
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">
+          Vytvořit záznam {startLabel}–{endLabel}
+          <span className="text-[var(--text-tertiary)] font-normal text-sm">
+            {" "}· {durMin} min
+          </span>
+        </h3>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Zadej úkol — záznam bude rovnou odeslán do providera (Jira / Freelo
+          podle prefixu klíče). Pro lokální placeholder nech prázdné.
+        </p>
+        <input
+          type="text"
+          value={key}
+          autoFocus
+          placeholder="DEV-792"
+          onChange={(e) => setKey(e.target.value.toUpperCase().trim())}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && key) onConfirm(key);
+            if (e.key === "Escape") onCancel();
+          }}
+          className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent
+                     border border-[var(--border-default)] text-sm font-mono
+                     text-[var(--text-primary)] focus:outline-none
+                     focus:border-[var(--accent)]"
+        />
+        <div className="flex justify-end gap-2 mt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-8 px-3 rounded-[var(--radius-md)] text-sm
+                       text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          >
+            Zrušit
+          </button>
+          <button
+            type="button"
+            disabled={!key}
+            onClick={() => onConfirm(key)}
+            className="h-8 px-3 rounded-[var(--radius-md)] text-sm font-semibold
+                       disabled:opacity-50"
+            style={{
+              background: "var(--accent)",
+              color: "var(--accent-text, #fff)",
+            }}
+          >
+            Vytvořit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

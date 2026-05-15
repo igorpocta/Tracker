@@ -47,7 +47,7 @@ export default function Appearance() {
   const palettes = paletteMode === "dual" ? DUAL_PALETTES : MONO_PALETTES;
 
   return (
-    <div className="flex flex-col gap-8 max-w-2xl">
+    <div className="flex flex-col gap-8 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Vzhled

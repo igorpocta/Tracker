@@ -171,6 +171,33 @@ function IdleBar({
     onStartUnassigned(c);
   };
 
+  // Sjednocené Start tlačítko: pokud uživatel něco hledá (query neprázdná),
+  // bere označený výsledek; jinak spustí časomíru bez úkolu. Tím se elimi-
+  // nuje bug, kdy prázdný query + Start vybral první "naposledy trackováno"
+  // issue, aniž by ho uživatel označil.
+  const hasQuery = debounced.length > 0;
+  const hasResult = results.length > 0;
+  const canStartIssue = hasQuery && hasResult;
+  const canStartUnassigned = !hasQuery && !!onStartUnassigned;
+  const startEnabled = canStartIssue || canStartUnassigned;
+  const startLabel = canStartIssue
+    ? "Spustit"
+    : canStartUnassigned
+      ? "Spustit bez úkolu"
+      : "Spustit";
+  const startTitle = canStartIssue
+    ? "Spustit časomíru pro označený úkol"
+    : canStartUnassigned
+      ? "Spustit časomíru bez úkolu — můžete přiřadit později"
+      : "Vyhledejte úkol nebo zadejte poznámku";
+  const onStartClick = () => {
+    if (canStartIssue) {
+      onSubmit();
+    } else if (canStartUnassigned) {
+      onStartBlank();
+    }
+  };
+
   const clock = formatClock(now);
 
   return (
@@ -197,7 +224,7 @@ function IdleBar({
               setHighlight((h) => Math.max(0, h - 1));
             } else if (e.key === "Enter") {
               e.preventDefault();
-              onSubmit();
+              onStartClick();
             }
           }}
           placeholder="Začít stopovat…"
@@ -246,11 +273,7 @@ function IdleBar({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              if (results.length > 0) {
-                onSubmit();
-              } else if (onStartUnassigned) {
-                onStartBlank();
-              }
+              onStartClick();
             }
           }}
           placeholder="Poznámka (volitelné)"
@@ -266,35 +289,28 @@ function IdleBar({
 
       <button
         type="button"
-        onClick={onSubmit}
-        disabled={results.length === 0}
+        onClick={onStartClick}
+        disabled={!startEnabled}
+        title={startTitle}
         className={clsx(
           "shrink-0 inline-flex items-center justify-center gap-1.5 px-4 h-11 rounded-[var(--radius-md)]",
-          "border border-[var(--border-subtle)] text-sm",
-          "transition-colors duration-150",
-          results.length === 0
-            ? "text-[var(--text-tertiary)] cursor-not-allowed"
-            : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+          "border text-sm transition-colors duration-150",
+          startEnabled
+            ? "text-[var(--accent-text,#fff)] border-transparent"
+            : "text-[var(--text-tertiary)] border-[var(--border-subtle)] cursor-not-allowed",
         )}
-        aria-label="Spustit časomíru pro vybraný úkol"
+        style={
+          startEnabled
+            ? {
+                background: "var(--accent)",
+              }
+            : undefined
+        }
+        aria-label={startTitle}
       >
         <Play className="w-3.5 h-3.5" aria-hidden />
-        Start
+        {startLabel}
       </button>
-      {onStartUnassigned && (
-        <button
-          type="button"
-          onClick={onStartBlank}
-          className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3 h-11
-                     rounded-[var(--radius-md)] border border-[var(--border-subtle)]
-                     text-xs text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]
-                     transition-colors duration-150"
-          aria-label="Spustit časomíru bez úkolu (přiřadit později)"
-          title="Spustit bez úkolu — můžete přiřadit později"
-        >
-          ⚠ Bez úkolu
-        </button>
-      )}
     </div>
   );
 }

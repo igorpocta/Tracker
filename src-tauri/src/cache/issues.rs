@@ -1,77 +1,121 @@
-use super::db::{Db, DbError};
-use serde::{Deserialize, Serialize};
+//! Issues cache layer — operates against the multi-provider `issues_v2`
+//! table introduced in migration 0012.
+//!
+//! Stores a minimal, provider-agnostic representation of tasks pulled from
+//! whichever provider owns each connection. Worklogs reference issues via
+//! `(connection_id, issue_key)`; the relation is purely logical (no SQL
+//! foreign key) because keys can change upstream and we'd rather keep the
+//! historical worklog than cascade-orphan it.
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+use super::db::{Db, DbError};
+use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
+
+/// One row in `issues_v2`.
+///
+/// Serialization vystaví navíc legacy alias `summary` (= `name`) a
+/// `parent_summary` (= `parent_name`) pro frontend, který tato pole stále
+/// používá. Až FE přejde na nová jména, aliasy můžou pryč.
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct IssueRow {
+    pub id: Option<i64>,
+    pub connection_id: i64,
+    /// Provider's native id (numeric for Freelo, alphanumeric for Jira).
+    #[serde(default)]
+    pub issue_id: String,
+    /// Human-readable key (`"DEV-792"`, `"FREELO-12345"`).
     pub issue_key: String,
-    pub issue_id: Option<String>,
-    pub summary: String,
-    pub status_category: Option<String>,
-    pub priority_order: Option<i64>,
-    pub assignee_email: Option<String>,
-    pub assignee_account_id: Option<String>,
+    #[serde(alias = "summary", default)]
+    pub name: String,
     pub parent_key: Option<String>,
-    pub parent_summary: Option<String>,
-    pub issue_type: Option<String>,
-    pub time_spent: Option<i64>,
-    pub aggregate_time_spent: Option<i64>,
-    pub time_original_estimate: Option<i64>,
-    pub time_estimate: Option<i64>,
-    pub epic_key: Option<String>,
-    pub epic_summary: Option<String>,
+    #[serde(alias = "parent_summary", default)]
+    pub parent_name: Option<String>,
+    /// Last-known status string from the provider, e.g. `"In Progress"`.
+    pub status: Option<String>,
+    /// `true` for closed/archived tasks (suppressed in the picker).
+    #[serde(default)]
+    pub is_archived: bool,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
     pub updated_at: i64,
+    /// Provider's `updated`/`date_edited_at` timestamp, used for incremental
+    /// sync and for the "recently changed" sort in the task picker.
+    pub remote_updated_at: Option<i64>,
+    pub last_synced_at: Option<i64>,
 }
 
+impl Serialize for IssueRow {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut m = s.serialize_struct("IssueRow", 15)?;
+        m.serialize_field("id", &self.id)?;
+        m.serialize_field("connection_id", &self.connection_id)?;
+        m.serialize_field("issue_id", &self.issue_id)?;
+        m.serialize_field("issue_key", &self.issue_key)?;
+        m.serialize_field("name", &self.name)?;
+        m.serialize_field("parent_key", &self.parent_key)?;
+        m.serialize_field("parent_name", &self.parent_name)?;
+        m.serialize_field("status", &self.status)?;
+        m.serialize_field("is_archived", &self.is_archived)?;
+        m.serialize_field("created_at", &self.created_at)?;
+        m.serialize_field("updated_at", &self.updated_at)?;
+        m.serialize_field("remote_updated_at", &self.remote_updated_at)?;
+        m.serialize_field("last_synced_at", &self.last_synced_at)?;
+        // Legacy aliasy pro FE.
+        m.serialize_field("summary", &self.name)?;
+        m.serialize_field("parent_summary", &self.parent_name)?;
+        m.end()
+    }
+}
+
+const SELECT_COLS: &str = "id, connection_id, issue_id, issue_key, name,
+                           parent_key, parent_name, status, is_archived,
+                           created_at, updated_at, remote_updated_at, last_synced_at";
+
+/// Insert or update keyed by `(connection_id, issue_key)`. On UPDATE the
+/// `created_at` and `id` are preserved.
 pub fn upsert(db: &Db, issue: &IssueRow) -> Result<(), DbError> {
     let conn = db.pool().get()?;
     conn.execute(
-        "INSERT INTO issues (
-            issue_key, issue_id, summary, status_category, priority_order,
-            assignee_email, assignee_account_id, parent_key, parent_summary,
-            issue_type, time_spent, aggregate_time_spent, time_original_estimate,
-            time_estimate, epic_key, epic_summary, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-        ON CONFLICT(issue_key) DO UPDATE SET
-            issue_id=excluded.issue_id, summary=excluded.summary,
-            status_category=excluded.status_category, priority_order=excluded.priority_order,
-            assignee_email=excluded.assignee_email, assignee_account_id=excluded.assignee_account_id,
-            parent_key=excluded.parent_key, parent_summary=excluded.parent_summary,
-            issue_type=excluded.issue_type, time_spent=excluded.time_spent,
-            aggregate_time_spent=excluded.aggregate_time_spent,
-            time_original_estimate=excluded.time_original_estimate,
-            time_estimate=excluded.time_estimate, epic_key=excluded.epic_key,
-            epic_summary=excluded.epic_summary, updated_at=excluded.updated_at",
+        "INSERT INTO issues_v2 (
+            connection_id, issue_id, issue_key, name,
+            parent_key, parent_name, status, is_archived,
+            created_at, updated_at, remote_updated_at, last_synced_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+         ON CONFLICT(connection_id, issue_key) DO UPDATE SET
+            issue_id          = excluded.issue_id,
+            name              = excluded.name,
+            parent_key        = excluded.parent_key,
+            parent_name       = excluded.parent_name,
+            status            = excluded.status,
+            is_archived       = excluded.is_archived,
+            updated_at        = excluded.updated_at,
+            remote_updated_at = excluded.remote_updated_at,
+            last_synced_at    = excluded.last_synced_at",
         rusqlite::params![
-            issue.issue_key,
+            issue.connection_id,
             issue.issue_id,
-            issue.summary,
-            issue.status_category,
-            issue.priority_order,
-            issue.assignee_email,
-            issue.assignee_account_id,
+            issue.issue_key,
+            issue.name,
             issue.parent_key,
-            issue.parent_summary,
-            issue.issue_type,
-            issue.time_spent,
-            issue.aggregate_time_spent,
-            issue.time_original_estimate,
-            issue.time_estimate,
-            issue.epic_key,
-            issue.epic_summary,
+            issue.parent_name,
+            issue.status,
+            if issue.is_archived { 1 } else { 0 },
+            issue.created_at,
             issue.updated_at,
+            issue.remote_updated_at,
+            issue.last_synced_at,
         ],
     )?;
     Ok(())
 }
 
+/// Look up by issue key. If the key is unique across all connections
+/// (current invariant — both providers use prefixed keys), the first match
+/// wins.
 pub fn get_by_key(db: &Db, key: &str) -> Result<Option<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let row = conn.query_row(
-        "SELECT issue_key, issue_id, summary, status_category, priority_order,
-                assignee_email, assignee_account_id, parent_key, parent_summary,
-                issue_type, time_spent, aggregate_time_spent, time_original_estimate,
-                time_estimate, epic_key, epic_summary, updated_at
-         FROM issues WHERE issue_key = ?1",
+        &format!("SELECT {SELECT_COLS} FROM issues_v2 WHERE issue_key = ?1 LIMIT 1"),
         [key],
         row_to_issue,
     );
@@ -82,38 +126,40 @@ pub fn get_by_key(db: &Db, key: &str) -> Result<Option<IssueRow>, DbError> {
     }
 }
 
+/// Issues that were updated most recently upstream, excluding archived and
+/// Freelo project pseudo-issues. Used by the empty-state task picker.
 pub fn recent(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
-    let mut stmt = conn.prepare(
-        "SELECT issue_key, issue_id, summary, status_category, priority_order,
-                assignee_email, assignee_account_id, parent_key, parent_summary,
-                issue_type, time_spent, aggregate_time_spent, time_original_estimate,
-                time_estimate, epic_key, epic_summary, updated_at
-         FROM issues
-         WHERE NOT (issue_key LIKE 'FREELO-P-%' OR issue_key LIKE 'FRL-P-%')
-         ORDER BY updated_at DESC LIMIT ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS}
+         FROM issues_v2
+         WHERE is_archived = 0
+           AND issue_key NOT LIKE 'FREELO-P-%'
+         ORDER BY COALESCE(remote_updated_at, updated_at) DESC
+         LIMIT ?1"
+    ))?;
     let rows = stmt.query_map([limit], row_to_issue)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Return issues that have at least one entry in `recent_worklogs`, ordered by
-/// the most recent worklog timestamp. Useful as a "suggested" / "frequently
-/// tracked" picker on the main window.
+/// Issues that have at least one worklog, ordered by the most recent
+/// worklog timestamp. Used as the empty-state "recently tracked" picker.
 pub fn suggested(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let mut stmt = conn.prepare(
-        "SELECT i.issue_key, i.issue_id, i.summary, i.status_category, i.priority_order,
-                i.assignee_email, i.assignee_account_id, i.parent_key, i.parent_summary,
-                i.issue_type, i.time_spent, i.aggregate_time_spent, i.time_original_estimate,
-                i.time_estimate, i.epic_key, i.epic_summary, i.updated_at
-         FROM issues i
+        "SELECT i.id, i.connection_id, i.issue_id, i.issue_key, i.name,
+                i.parent_key, i.parent_name, i.status, i.is_archived,
+                i.created_at, i.updated_at, i.remote_updated_at, i.last_synced_at
+         FROM issues_v2 i
          INNER JOIN (
             SELECT issue_key, MAX(logged_at) AS last_logged
-            FROM recent_worklogs
+            FROM worklogs
+            WHERE issue_key IS NOT NULL
+              AND tombstoned_at IS NULL
             GROUP BY issue_key
          ) w ON w.issue_key = i.issue_key
-         WHERE NOT (i.issue_key LIKE 'FREELO-P-%' OR i.issue_key LIKE 'FRL-P-%')
+         WHERE i.is_archived = 0
+           AND i.issue_key NOT LIKE 'FREELO-P-%'
          ORDER BY w.last_logged DESC
          LIMIT ?1",
     )?;
@@ -121,64 +167,59 @@ pub fn suggested(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Total number of issues currently cached.
 pub fn count(db: &Db) -> Result<i64, DbError> {
     let conn = db.pool().get()?;
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM issues", [], |r| r.get(0))?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM issues_v2", [], |r| r.get(0))?;
     Ok(n)
 }
 
-/// Look up the `connection_id` column for a given issue key. Returns `None`
-/// if the issue is unknown or has no associated connection (legacy rows).
+/// Look up the connection that owns an issue key.
 pub fn get_connection_id_by_key(db: &Db, key: &str) -> Result<Option<i64>, DbError> {
     let conn = db.pool().get()?;
     let r = conn.query_row(
-        "SELECT connection_id FROM issues WHERE issue_key = ?1",
+        "SELECT connection_id FROM issues_v2 WHERE issue_key = ?1 LIMIT 1",
         [key],
-        |r| r.get::<_, Option<i64>>(0),
+        |r| r.get::<_, i64>(0),
     );
     match r {
-        Ok(v) => Ok(v),
+        Ok(v) => Ok(Some(v)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
+/// Substring search across key + name. Archived and Freelo project
+/// pseudo-issues are excluded.
 pub fn search(db: &Db, query: &str, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let q = format!("%{}%", query.to_lowercase());
-    let mut stmt = conn.prepare(
-        "SELECT issue_key, issue_id, summary, status_category, priority_order,
-                assignee_email, assignee_account_id, parent_key, parent_summary,
-                issue_type, time_spent, aggregate_time_spent, time_original_estimate,
-                time_estimate, epic_key, epic_summary, updated_at
-         FROM issues
-         WHERE (lower(issue_key) LIKE ?1 OR lower(summary) LIKE ?1)
-           AND NOT (issue_key LIKE 'FREELO-P-%' OR issue_key LIKE 'FRL-P-%')
-         ORDER BY updated_at DESC LIMIT ?2",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS}
+         FROM issues_v2
+         WHERE (lower(issue_key) LIKE ?1 OR lower(name) LIKE ?1)
+           AND is_archived = 0
+           AND issue_key NOT LIKE 'FREELO-P-%'
+         ORDER BY COALESCE(remote_updated_at, updated_at) DESC
+         LIMIT ?2"
+    ))?;
     let rows = stmt.query_map(rusqlite::params![q, limit], row_to_issue)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 fn row_to_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<IssueRow> {
     Ok(IssueRow {
-        issue_key: r.get(0)?,
-        issue_id: r.get(1)?,
-        summary: r.get(2)?,
-        status_category: r.get(3)?,
-        priority_order: r.get(4)?,
-        assignee_email: r.get(5)?,
-        assignee_account_id: r.get(6)?,
-        parent_key: r.get(7)?,
-        parent_summary: r.get(8)?,
-        issue_type: r.get(9)?,
-        time_spent: r.get(10)?,
-        aggregate_time_spent: r.get(11)?,
-        time_original_estimate: r.get(12)?,
-        time_estimate: r.get(13)?,
-        epic_key: r.get(14)?,
-        epic_summary: r.get(15)?,
-        updated_at: r.get(16)?,
+        id: r.get(0)?,
+        connection_id: r.get(1)?,
+        issue_id: r.get(2)?,
+        issue_key: r.get(3)?,
+        name: r.get(4)?,
+        parent_key: r.get(5)?,
+        parent_name: r.get(6)?,
+        status: r.get(7)?,
+        is_archived: r.get::<_, i64>(8)? != 0,
+        created_at: r.get(9)?,
+        updated_at: r.get(10)?,
+        remote_updated_at: r.get(11)?,
+        last_synced_at: r.get(12)?,
     })
 }

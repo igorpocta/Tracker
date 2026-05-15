@@ -24,14 +24,21 @@ import {
   CalendarDays,
   Clock,
   History,
+  LayoutDashboard,
+  Loader2,
   Settings as SettingsIcon,
   Target,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
-import { getCacheStats } from "../../api/commands";
+import {
+  getCacheStats,
+  getSyncErrors,
+  listConnections,
+  refreshAll,
+} from "../../api/commands";
 import { useNow } from "../../hooks/useNow";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
@@ -43,7 +50,7 @@ export interface IconSidebarItem {
   end?: boolean;
 }
 
-const PRIMARY_NAV: IconSidebarItem[] = [
+const PRIMARY_NAV_BASE: IconSidebarItem[] = [
   { to: "/", label: "Časový záznam", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
   { to: "/reports", label: "Reporty", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
   { to: "/calendar", label: "Kalendář", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
@@ -55,11 +62,18 @@ const PRIMARY_NAV: IconSidebarItem[] = [
   },
 ];
 
+const JIRA_DASHBOARD_NAV: IconSidebarItem = {
+  to: "/jira-dashboard",
+  label: "JIRA Přehled",
+  icon: <LayoutDashboard className="w-5 h-5" aria-hidden />,
+};
+
 export function IconSidebar() {
   const active = useTimerStore((s) => s.active);
   const now = useNow(active ? 1000 : 60_000);
   const elapsed = elapsedSeconds(active, now);
   const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
 
   const statsQ = useQuery({
     queryKey: ["cache-stats"],
@@ -67,19 +81,74 @@ export function IconSidebar() {
     staleTime: 30_000,
   });
 
-  // Invalidate the cache-stats query when the backend tells us issues
-  // changed, so the ring number is always fresh after a sync.
+  // "JIRA Přehled" menu položka se zobrazí jen když existuje aspoň jedna
+  // Jira connection s `dashboard_enabled = true`. Bez toho by tlačítko
+  // vedlo na prázdnou stránku.
+  const connectionsQ = useQuery({
+    queryKey: ["connections"],
+    queryFn: listConnections,
+    staleTime: 60_000,
+  });
+  const hasDashboardConnection = (connectionsQ.data ?? []).some(
+    (c) =>
+      c.provider === "jira" &&
+      c.enabled &&
+      (c.config as Record<string, unknown>)?.["dashboard_enabled"] === true,
+  );
+  const primaryNav: IconSidebarItem[] = hasDashboardConnection
+    ? [...PRIMARY_NAV_BASE, JIRA_DASHBOARD_NAV]
+    : PRIMARY_NAV_BASE;
+
+  // Persistovaný stav posledně neúspěšného syncu — pokud je seznam neprázdný,
+  // ring se přebarví červeně a v tooltipu vidíš co padlo. Vyčistí se hned, jak
+  // další sync téhož připojení proběhne OK.
+  //
+  // `staleTime: 0` + `refetchInterval` zajistí, že po vyčištění chyby v DB
+  // (např. úspěšným auto-syncem na pozadí) UI rychle dohoní stav, i kdyby
+  // se invalidace přes `auto-sync-complete` event minula s React Query cache.
+  const syncErrorsQ = useQuery({
+    queryKey: ["sync-errors"],
+    queryFn: getSyncErrors,
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
   useTauriEvent<unknown>("cache-refreshed", () => {
     queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
   });
+  useTauriEvent<unknown>("auto-sync-progress", () => {
+    setSyncing(true);
+  });
   useTauriEvent<unknown>("auto-sync-complete", () => {
+    setSyncing(false);
     queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
+    queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+    queryClient.invalidateQueries({ queryKey: ["sync-errors"] });
+    queryClient.invalidateQueries({ queryKey: ["connections"] });
   });
   useEffect(() => {
     /* hook deps satisfied; statsQ kept implicit */
   }, []);
 
   const cachedIssues = statsQ.data?.issues ?? 0;
+
+  const handleRefresh = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      // Sidebar = rychlé tlačítko pro běžný refresh. Plnou historii lze
+      // vynutit v Nastavení → konkrétní integrace → „Stáhnout celou historii".
+      await refreshAll("incremental");
+    } catch {
+      // Errors surface via the SyncBanner / worklog-error toasts elsewhere;
+      // we just need to release the local flag so the user can retry.
+    } finally {
+      // Backend emits auto-sync-complete which will flip this off too — this
+      // is a safety net in case the command rejects before any event fires.
+      setSyncing(false);
+    }
+  };
 
   return (
     <aside
@@ -136,7 +205,7 @@ export function IconSidebar() {
 
       {/* Primary nav (top group) */}
       <nav className="flex flex-col items-stretch gap-1 w-full px-2">
-        {PRIMARY_NAV.map((item) => (
+        {primaryNav.map((item) => (
           <SidebarLink key={item.to} item={item} />
         ))}
       </nav>
@@ -158,6 +227,9 @@ export function IconSidebar() {
         elapsedSeconds={elapsed}
         running={active !== null}
         cachedIssues={cachedIssues}
+        syncing={syncing}
+        syncErrors={syncErrorsQ.data ?? []}
+        onRefresh={handleRefresh}
       />
     </aside>
   );
@@ -216,19 +288,27 @@ function SidebarTooltip({ label }: { label: string }) {
 }
 
 /**
- * Bottom ring chip. Either shows running-timer minutes (when a timer is
- * active) or the number of cached Jira issues. Phase 18B — Item 5: formats
- * large counts as `Nk+` (1k+, 2k+, … 10k+) so the chip stays compact across
- * very different cache sizes.
+ * Bottom ring chip — počet úkolů v cache. Kliknutí spustí kompletní sync
+ * (úkoly + worklogy ze všech connections). Když běží timer, ring místo
+ * počtu ukazuje uplynulé minuty, ale klik pořád funguje jako refresh.
+ *
+ * Když je `syncErrors` neprázdné, ring se přebarví na danger barvu a
+ * tooltip ukazuje, co padlo — vizuálně neuteče, že poslední sync selhal.
  */
 function CacheRing({
   elapsedSeconds,
   running,
   cachedIssues,
+  syncing,
+  syncErrors,
+  onRefresh,
 }: {
   elapsedSeconds: number;
   running: boolean;
   cachedIssues: number;
+  syncing: boolean;
+  syncErrors: import("../../api/commands").SyncErrorEntry[];
+  onRefresh: () => void;
 }) {
   let label: string;
   if (running) {
@@ -237,27 +317,70 @@ function CacheRing({
   } else {
     label = formatCacheCount(cachedIssues);
   }
+  const hasError = syncErrors.length > 0;
+  const errorTitle = hasError
+    ? syncErrors
+        .map((e) => `#${e.connection_id} ${e.phase}: ${e.error}`)
+        .join("\n")
+    : null;
+  const title = syncing
+    ? "Synchronizace probíhá…"
+    : hasError
+      ? `Poslední sync selhal · klikni pro nový pokus\n\n${errorTitle}`
+      : running
+        ? `Sledování běží · klikni pro sync (${cachedIssues} úkolů v cache)`
+        : `${cachedIssues} úkolů v cache · klikni pro sync`;
+  const ringColor = hasError ? "var(--danger, #c0392b)" : "var(--accent)";
+  // Inline styly mají vyšší specificitu než pseudo-classy v Tailwind preflight,
+  // ale `:focus` a `:disabled` v UA stylech přebíjí třídy, ne inline. Proto
+  // všechno barevné držíme inline — accent přežije focus, hover i disabled.
+  // Hover/active state simulujeme přes lokální `hovered` state, ne přes CSS,
+  // ať se vyhnem CSS variable resolveru, který někdy laguje při paletovém
+  // přepnutí.
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const background = hovered
+    ? "color-mix(in srgb, " + ringColor + " 14%, transparent)"
+    : "transparent";
+  const scale = pressed ? 0.95 : hovered ? 1.05 : 1;
   return (
-    <div
-      aria-label={
-        running
-          ? "Sledování běží"
-          : `V cache je ${cachedIssues} úkolů`
-      }
-      title={
-        running
-          ? "Sledování běží"
-          : `V cache je ${cachedIssues} úkolů`
-      }
-      className="w-9 h-9 rounded-full flex items-center justify-center"
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={syncing}
+      aria-label={title}
+      title={title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      className={clsx(
+        "w-9 h-9 rounded-full flex items-center justify-center",
+        "transition-all duration-150 cursor-pointer appearance-none",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+        "disabled:cursor-progress",
+        syncing && "animate-pulse",
+      )}
       style={{
-        border: `2px solid var(--accent)`,
-        color: "var(--accent)",
-        background: "transparent",
+        border: `2px solid ${ringColor}`,
+        color: ringColor,
+        background,
+        transform: `scale(${scale})`,
+        // Drží accent i při disabled — bez tohoto UA aplikuje `graytext`.
+        opacity: syncing ? 0.75 : 1,
       }}
     >
-      <span className="text-[10px] font-mono tabular-nums">{label}</span>
-    </div>
+      {syncing ? (
+        <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
+      ) : (
+        <span className="text-[10px] font-mono tabular-nums" style={{ color: ringColor }}>
+          {label}
+        </span>
+      )}
+    </button>
   );
 }
 

@@ -1,3 +1,4 @@
+pub mod app_icon;
 pub mod cache;
 pub mod commands;
 pub mod config;
@@ -16,7 +17,7 @@ pub mod validation;
 use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone};
 use tauri::{Emitter, Manager};
 
-use crate::state::{AppState, ProviderClient};
+use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -68,8 +69,7 @@ pub fn run() {
                         crate::commands::connections::JiraConnectionConfig {
                             base_url: cfg.base_url.clone(),
                             email: cfg.email.clone(),
-                            sync_jql: None,
-                            my_issues_jql: None,
+                            ..Default::default()
                         };
                     let cfg_json = serde_json::to_string(&connection_cfg)
                         .unwrap_or_else(|_| "{}".into());
@@ -156,16 +156,15 @@ pub fn run() {
                     Err(_) => return,
                 };
                 for row in pending {
-                    let (Some(local_id), Some(jira_id)) = (row.id, row.jira_worklog_id.clone())
-                    else {
-                        continue;
-                    };
+                    let Some(local_id) = row.id else { continue };
+                    let Some(remote_id) = row.remote_id.clone() else { continue };
+                    let issue_key = row.issue_key.clone().unwrap_or_default();
                     commands::worklog::commit_pending_delete(
                         &recovery_handle,
                         &state,
                         local_id,
-                        &row.issue_key,
-                        &jira_id,
+                        &issue_key,
+                        &remote_id,
                     )
                     .await;
                 }
@@ -198,23 +197,13 @@ pub fn run() {
                 let throttle_secs = throttle_min.max(0) * 60;
                 let now_unix = chrono::Utc::now().timestamp();
 
-                // Phase 18B — Item 19: emit progress so the UI can show a
-                // banner with "Synchronizuji s Jira…".
-                let _ = auto_handle.emit(
-                    "auto-sync-progress",
-                    serde_json::json!({
-                        "phase": "starting",
-                        "current": 0,
-                        "total": total,
-                    }),
-                );
+                // Delegate per-connection work to `sync_one_connection` so the
+                // store/clear logic for `last_sync_error` is identical to the
+                // manual `refresh_all` path. (Auto-sync původně měl vlastní
+                // inline loop, který neuměl persistovaný error vyčistit po
+                // úspěšném resyncu — proto sidebar ring zůstal červený.)
                 for (idx, active_conn) in active.into_iter().enumerate() {
-                    // Check throttle for this connection. The key combines
-                    // connection id so each provider/account has its own
-                    // cool-down (we don't skip Jira just because Freelo
-                    // synced recently, or vice versa).
-                    let throttle_key =
-                        format!("last_auto_sync_at:{}", active_conn.id);
+                    let throttle_key = format!("last_auto_sync_at:{}", active_conn.id);
                     if throttle_secs > 0 {
                         let last = cache::settings::get(&state.db, &throttle_key)
                             .ok()
@@ -232,76 +221,18 @@ pub fn run() {
                             continue;
                         }
                     }
-                    let _ = auto_handle.emit(
-                        "auto-sync-progress",
-                        serde_json::json!({
-                            "phase": "issues",
-                            "current": idx,
-                            "total": total,
-                        }),
-                    );
-                    match active_conn.client {
-                        ProviderClient::Jira(client) => {
-                            let _ = jira::sync_issues_from_jira(&client, &state.db).await;
 
-                            let me = match client.myself().await {
-                                Ok(u) => u.account_id,
-                                Err(_) => continue,
-                            };
-                            let today = chrono::Local::now().date_naive();
-                            let from = today - chrono::Duration::days(30);
-                            let _ = auto_handle.emit(
-                                "auto-sync-progress",
-                                serde_json::json!({
-                                    "phase": "worklogs",
-                                    "current": idx,
-                                    "total": total,
-                                }),
-                            );
-                            let _ = jira::worklog_sync::sync_worklogs_for_range(
-                                &client, &state.db, &me, from, today,
-                            )
-                            .await;
-                        }
-                        ProviderClient::Freelo(client, cfg) => {
-                            let _ = freelo::sync::sync_issues_for_connection(
-                                &client,
-                                &state.db,
-                                &cfg.selected_project_ids,
-                            )
-                            .await;
+                    let _ = commands::worklog::sync_one_connection(
+                        &auto_handle,
+                        &state.db,
+                        active_conn,
+                        idx,
+                        total,
+                        commands::worklog::SyncMode::Incremental,
+                    )
+                    .await;
 
-                            let user_id = match cfg.sync_user_id {
-                                Some(uid) => uid,
-                                None => match client.me().await {
-                                    Ok(u) => u.id,
-                                    Err(_) => continue,
-                                },
-                            };
-                            let today = chrono::Local::now().date_naive();
-                            let from = today - chrono::Duration::days(30);
-                            let _ = auto_handle.emit(
-                                "auto-sync-progress",
-                                serde_json::json!({
-                                    "phase": "worklogs",
-                                    "current": idx,
-                                    "total": total,
-                                }),
-                            );
-                            let _ = freelo::sync::sync_worklogs_for_range(
-                                &client,
-                                &state.db,
-                                user_id,
-                                from,
-                                today,
-                                &cfg.selected_project_ids,
-                            )
-                            .await;
-                        }
-                    }
-
-                    // Stamp the last-synced-at for this connection so the
-                    // dev throttle (above) can short-circuit the next boot.
+                    // Stamp throttle key so next boot in dev can short-circuit.
                     let _ = cache::settings::set(
                         &state.db,
                         &throttle_key,
@@ -351,6 +282,8 @@ pub fn run() {
             commands::connections::enable_connection,
             commands::connections::test_connection_for_provider,
             commands::connections::list_my_issues,
+            commands::connections::list_jira_statuses,
+            commands::connections::get_connection_stats,
             // Freelo (Phase 18E)
             commands::freelo::list_freelo_projects,
             commands::freelo::set_freelo_selected_projects,
@@ -379,6 +312,15 @@ pub fn run() {
             commands::worklog::get_worklog_issues,
             commands::worklog::get_worklogs_for_range,
             commands::worklog::refresh_all,
+            commands::worklog::refresh_connection,
+            commands::worklog::get_sync_errors,
+            commands::worklog::list_sync_runs,
+            commands::worklog::split_worklog,
+            commands::dashboard::get_jira_dashboard_issues,
+            commands::streaks::get_streaks,
+            commands::suggestions::get_suggestions,
+            commands::backup::export_backup,
+            commands::backup::import_backup,
             commands::worklog::create_manual_worklog,
             commands::worklog::update_worklog,
             commands::worklog::update_local_worklog,
@@ -400,6 +342,10 @@ pub fn run() {
             // Prefs
             commands::prefs::get_daily_goal,
             commands::prefs::set_daily_goal,
+            commands::prefs::get_pomodoro,
+            commands::prefs::set_pomodoro,
+            commands::prefs::list_project_colors,
+            commands::prefs::set_project_color,
             commands::prefs::set_widget_format,
             commands::prefs::set_app_icon,
             commands::prefs::get_hourly_rate,
@@ -446,6 +392,7 @@ pub fn run() {
             commands::tray::hide_tray_popover,
             commands::tray::toggle_tray_popover,
             commands::tray::set_tray_available,
+            commands::tray::set_app_icon_accent,
             commands::misc::haptic_feedback,
             // Phase 19 — Sentry opt-in
             commands::sentry::get_sentry_enabled,

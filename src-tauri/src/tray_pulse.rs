@@ -25,6 +25,32 @@ use std::sync::OnceLock;
 
 use image::{ImageBuffer, ImageError, Rgba};
 
+/// Bílé „Zzz" silueta pro idle tray ikonu. Renderuje se z přiloženého SVG
+/// jednou (cached), 44×44 px ať odpovídá `tray-rec-base.png`. Když render
+/// selže (jiná platforma, exotická Tauri konfigurace), caller se vrátí na
+/// předchozí monochrome template ikonu.
+const ZZZ_SVG: &str = include_str!("../icons/tray-idle-zzz.svg");
+static ZZZ_PNG: OnceLock<Vec<u8>> = OnceLock::new();
+
+pub fn idle_zzz_png() -> Option<&'static [u8]> {
+    let v = ZZZ_PNG.get_or_init(|| render_svg_to_png(ZZZ_SVG, 44, 44).unwrap_or_default());
+    if v.is_empty() {
+        None
+    } else {
+        Some(v.as_slice())
+    }
+}
+
+fn render_svg_to_png(svg: &str, width: u32, height: u32) -> Option<Vec<u8>> {
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
+    let sx = width as f32 / tree.size().width();
+    let sy = height as f32 / tree.size().height();
+    let transform = tiny_skia::Transform::from_scale(sx, sy);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    pixmap.encode_png().ok()
+}
+
 /// Alpha multipliers, one per pulse phase. Approximates a sine wave:
 /// `0.5 + 0.5 * sin(2π · i / N)` for `i ∈ {1, 2, 3, 4, 5, 6, 0}` to start
 /// dim, peak in the middle, end dim.

@@ -56,7 +56,17 @@ pub async fn refresh_cache(
     let client = state
         .jira_client_cloned()
         .ok_or_else(|| "jira client not configured".to_string())?;
-    let n = jira::sync_issues_from_jira(&client, &state.db)
+    // Legacy single-Jira shim: when no multi-connection rows are configured,
+    // use connection_id = 0 as a sentinel for the legacy path.
+    let conn_id: i64 = state
+        .connections
+        .read()
+        .unwrap()
+        .iter()
+        .find(|c| matches!(c.client, crate::state::ProviderClient::Jira(_)))
+        .map(|c| c.id)
+        .unwrap_or(0);
+    let n = jira::sync_issues_from_jira(&client, &state.db, conn_id)
         .await
         .map_err(|e| e.to_string())?;
     let _ = app.emit("cache-refreshed", n);
@@ -99,9 +109,23 @@ mod tests {
     #[test]
     fn cache_stats_reflects_inserts() {
         let db = open_db();
+        // issues_v2 has a FK to connections — create one first.
+        let conn_id = cache::connections::insert(
+            &db,
+            cache::connections::NewConnection {
+                provider: "jira",
+                name: "test",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
         let issue = cache::issues::IssueRow {
+            connection_id: conn_id,
+            issue_id: "1".into(),
             issue_key: "ABC-1".into(),
-            summary: "hello".into(),
+            name: "hello".into(),
+            created_at: 0,
             updated_at: 0,
             ..Default::default()
         };

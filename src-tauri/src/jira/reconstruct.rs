@@ -112,12 +112,14 @@ pub async fn restore_deleted_worklog(
         .single()
         .ok_or(ReconstructError::BadTimestamp)?;
 
+    let issue_key = before.issue_key.clone().unwrap_or_default();
+    let duration_s = before.duration_s();
     let resp = match client
         .add_worklog(
-            &before.issue_key,
+            &issue_key,
             started_dt,
-            before.duration_s,
-            before.comment.as_deref(),
+            duration_s,
+            before.description.as_deref(),
         )
         .await
     {
@@ -126,7 +128,7 @@ pub async fn restore_deleted_worklog(
             record_linked(
                 db,
                 AuditOp::Restore,
-                Some(&before.issue_key),
+                Some(&issue_key),
                 entry.worklog_id.as_deref(),
                 Some(&before),
                 None,
@@ -138,37 +140,32 @@ pub async fn restore_deleted_worklog(
         }
     };
 
-    let (issue_id, summary) = match cache::issues::get_by_key(db, &before.issue_key)? {
-        Some(row) => (row.issue_id, Some(row.summary)),
-        None => (resp.issue_id.clone(), before.summary.clone()),
-    };
-
     let now_s = now_unix();
+    let connection_id = cache::issues::get_connection_id_by_key(db, &issue_key)?;
     let row = WorklogRow {
         id: None,
-        issue_key: before.issue_key.clone(),
-        issue_id,
-        summary,
-        duration_s: before.duration_s,
+        connection_id,
+        issue_key: Some(issue_key.clone()),
+        description: before.description.clone(),
         started_at: before.started_at,
+        ended_at: before.started_at.saturating_add(duration_s.max(0)),
         logged_at: now_s,
-        comment: before.comment.clone(),
-        jira_worklog_id: Some(resp.id.clone()),
-        author_account_id: before.author_account_id.clone(),
-        source: "jira".to_string(),
-        updated_at_jira: Some(now_s),
+        updated_at: now_s,
+        is_synced: true,
+        synced_at: Some(now_s),
+        remote_id: Some(resp.id.clone()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment: false,
+        summary: None,
     };
-    let local_id = cache::worklogs::upsert_from_jira(db, &row)?;
+    let local_id = cache::worklogs::upsert_from_remote(db, &row)?;
     let mut saved = row.clone();
     saved.id = Some(local_id);
 
     record_linked(
         db,
         AuditOp::Restore,
-        Some(&before.issue_key),
+        Some(&issue_key),
         Some(&resp.id),
         Some(&before),
         Some(&saved),
@@ -206,10 +203,10 @@ pub async fn revert_worklog_update(
         .worklog_id
         .as_deref()
         .ok_or(ReconstructError::SnapshotMissing)?;
-    let issue_key = before.issue_key.as_str();
+    let issue_key = before.issue_key.clone().unwrap_or_default();
 
-    let current =
-        cache::worklogs::get_by_jira_id(db, worklog_id)?.ok_or(ReconstructError::WorklogGone)?;
+    let current = cache::worklogs::get_by_remote_id_any(db, worklog_id)?
+        .ok_or(ReconstructError::WorklogGone)?;
     if current.tombstoned_at.is_some() {
         return Err(ReconstructError::WorklogGone);
     }
@@ -218,14 +215,15 @@ pub async fn revert_worklog_update(
         .timestamp_opt(before.started_at, 0)
         .single()
         .ok_or(ReconstructError::BadTimestamp)?;
+    let duration_s = before.duration_s();
 
     match client
         .update_worklog(
-            issue_key,
+            &issue_key,
             worklog_id,
             Some(started_dt),
-            Some(before.duration_s),
-            before.comment.as_deref(),
+            Some(duration_s),
+            before.description.as_deref(),
         )
         .await
     {
@@ -234,7 +232,7 @@ pub async fn revert_worklog_update(
             record_linked(
                 db,
                 AuditOp::Revert,
-                Some(issue_key),
+                Some(&issue_key),
                 Some(worklog_id),
                 Some(&current),
                 None,
@@ -248,7 +246,7 @@ pub async fn revert_worklog_update(
             record_linked(
                 db,
                 AuditOp::Revert,
-                Some(issue_key),
+                Some(&issue_key),
                 Some(worklog_id),
                 Some(&current),
                 None,
@@ -262,15 +260,14 @@ pub async fn revert_worklog_update(
 
     let local_id = current.id.ok_or(ReconstructError::SnapshotMissing)?;
     let now_s = now_unix();
+    let ended_at = before.started_at.saturating_add(duration_s.max(0));
     cache::worklogs::update_fields(
         db,
         local_id,
-        issue_key,
-        before.issue_id.as_deref(),
-        before.summary.as_deref(),
-        before.duration_s,
+        Some(&issue_key),
+        before.description.as_deref(),
         before.started_at,
-        before.comment.as_deref(),
+        ended_at,
         Some(now_s),
     )?;
 
@@ -280,7 +277,7 @@ pub async fn revert_worklog_update(
     record_linked(
         db,
         AuditOp::Revert,
-        Some(issue_key),
+        Some(&issue_key),
         Some(worklog_id),
         Some(&current),
         Some(&after),
@@ -330,46 +327,44 @@ async fn retry_create(
         .single()
         .ok_or(ReconstructError::BadTimestamp)?;
 
+    let issue_key = snap.issue_key.clone().unwrap_or_default();
+    let duration_s = snap.duration_s();
     match client
         .add_worklog(
-            &snap.issue_key,
+            &issue_key,
             started_dt,
-            snap.duration_s,
-            snap.comment.as_deref(),
+            duration_s,
+            snap.description.as_deref(),
         )
         .await
     {
         Ok(resp) => {
-            let (issue_id, summary) = match cache::issues::get_by_key(db, &snap.issue_key)? {
-                Some(row) => (row.issue_id, Some(row.summary)),
-                None => (resp.issue_id.clone(), snap.summary.clone()),
-            };
             let now_s = now_unix();
+            let connection_id = cache::issues::get_connection_id_by_key(db, &issue_key)?;
             let row = WorklogRow {
                 id: None,
-                issue_key: snap.issue_key.clone(),
-                issue_id,
-                summary,
-                duration_s: snap.duration_s,
+                connection_id,
+                issue_key: Some(issue_key.clone()),
+                description: snap.description.clone(),
                 started_at: snap.started_at,
+                ended_at: snap.started_at.saturating_add(duration_s.max(0)),
                 logged_at: now_s,
-                comment: snap.comment.clone(),
-                jira_worklog_id: Some(resp.id.clone()),
-                author_account_id: snap.author_account_id.clone(),
-                source: "jira".to_string(),
-                updated_at_jira: Some(now_s),
+                updated_at: now_s,
+                is_synced: true,
+                synced_at: Some(now_s),
+                remote_id: Some(resp.id.clone()),
                 pending_delete_at: None,
                 tombstoned_at: None,
-                pending_assignment: false,
+                summary: None,
             };
-            let local_id = cache::worklogs::upsert_from_jira(db, &row)?;
+            let local_id = cache::worklogs::upsert_from_remote(db, &row)?;
             let mut saved = row.clone();
             saved.id = Some(local_id);
 
             record_linked(
                 db,
                 AuditOp::Retry,
-                Some(&snap.issue_key),
+                Some(&issue_key),
                 Some(&resp.id),
                 None,
                 Some(&saved),
@@ -386,7 +381,7 @@ async fn retry_create(
             record_linked(
                 db,
                 AuditOp::Retry,
-                Some(&snap.issue_key),
+                Some(&issue_key),
                 None,
                 None,
                 None,
@@ -417,8 +412,10 @@ async fn retry_update(
         .ok_or(ReconstructError::SnapshotMissing)?;
     let issue_key = entry
         .issue_key
-        .as_deref()
-        .unwrap_or(snap.issue_key.as_str());
+        .clone()
+        .or_else(|| snap.issue_key.clone())
+        .unwrap_or_default();
+    let duration_s = snap.duration_s();
 
     let started_dt = Utc
         .timestamp_opt(snap.started_at, 0)
@@ -427,36 +424,35 @@ async fn retry_update(
 
     match client
         .update_worklog(
-            issue_key,
+            &issue_key,
             worklog_id,
             Some(started_dt),
-            Some(snap.duration_s),
-            snap.comment.as_deref(),
+            Some(duration_s),
+            snap.description.as_deref(),
         )
         .await
     {
         Ok(_) => {
-            if let Some(local) = cache::worklogs::get_by_jira_id(db, worklog_id)? {
+            if let Some(local) = cache::worklogs::get_by_remote_id_any(db, worklog_id)? {
                 if let Some(lid) = local.id {
                     let now_s = now_unix();
+                    let ended_at = snap.started_at.saturating_add(duration_s.max(0));
                     cache::worklogs::update_fields(
                         db,
                         lid,
-                        issue_key,
-                        local.issue_id.as_deref(),
-                        local.summary.as_deref(),
-                        snap.duration_s,
+                        Some(&issue_key),
+                        snap.description.as_deref(),
                         snap.started_at,
-                        snap.comment.as_deref(),
+                        ended_at,
                         Some(now_s),
                     )?;
                 }
             }
-            let after = cache::worklogs::get_by_jira_id(db, worklog_id)?;
+            let after = cache::worklogs::get_by_remote_id_any(db, worklog_id)?;
             record_linked(
                 db,
                 AuditOp::Retry,
-                Some(issue_key),
+                Some(&issue_key),
                 Some(worklog_id),
                 None,
                 after.as_ref(),
@@ -473,7 +469,7 @@ async fn retry_update(
             record_linked(
                 db,
                 AuditOp::Retry,
-                Some(issue_key),
+                Some(&issue_key),
                 Some(worklog_id),
                 None,
                 None,
@@ -499,7 +495,13 @@ async fn retry_delete(
     match client.delete_worklog(issue_key, worklog_id).await {
         Ok(()) | Err(JiraError::WorklogNotFound) => {
             let now_s = now_unix();
-            cache::worklogs::mark_tombstoned_by_jira_id(db, worklog_id, now_s)?;
+            // Legacy reconstruct path: looks up via remote_id across all
+            // connections, then tombstones that specific row.
+            if let Some(row) = cache::worklogs::get_by_remote_id_any(db, worklog_id)? {
+                if let Some(local_id) = row.id {
+                    cache::worklogs::mark_tombstoned(db, local_id, now_s)?;
+                }
+            }
             record_linked(
                 db,
                 AuditOp::Retry,

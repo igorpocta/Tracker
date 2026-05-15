@@ -226,6 +226,116 @@ impl JiraClient {
         .await
     }
 
+    /// `GET /rest/api/3/issue/{key}/transitions` — list legal transitions.
+    /// Vrací `(transition_id, to_status_name)` páry.
+    pub async fn list_transitions(
+        &self,
+        issue_key: &str,
+    ) -> Result<Vec<(String, String)>, JiraError> {
+        let url = self.url(&format!("/rest/api/3/issue/{issue_key}/transitions"))?;
+        with_retry(|| async {
+            let resp = self
+                .http
+                .get(url.clone())
+                .basic_auth(&self.email, Some(&self.token))
+                .send()
+                .await?;
+            let resp = Self::check_status(resp).await?;
+            let v: serde_json::Value = resp.json().await?;
+            let arr = v
+                .get("transitions")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let mut out = Vec::with_capacity(arr.len());
+            for t in arr {
+                let id = t.get("id").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let name = t
+                    .pointer("/to/name")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
+                if let (Some(i), Some(n)) = (id, name) {
+                    out.push((i, n));
+                }
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// `GET /rest/api/3/status` — vrátí všechny názvy statusů viditelné
+    /// tomuto uživateli (deduplikované, abecedně). Používá se k naplnění
+    /// dropdownu v Nastavení → Připojení → Auto-přechod.
+    ///
+    /// Pozn.: Jira vrací status objekty napříč VŠEMI workflow projekty;
+    /// tj. seznam je nadmnožina platných stavů per konkrétní issue. Reálná
+    /// dostupnost přechodu se ověřuje až za běhu přes `list_transitions`.
+    pub async fn list_status_names(&self) -> Result<Vec<String>, JiraError> {
+        let url = self.url("/rest/api/3/status")?;
+        with_retry(|| async {
+            let resp = self
+                .http
+                .get(url.clone())
+                .basic_auth(&self.email, Some(&self.token))
+                .send()
+                .await?;
+            let resp = Self::check_status(resp).await?;
+            let arr: serde_json::Value = resp.json().await?;
+            let mut set = std::collections::BTreeSet::<String>::new();
+            if let Some(items) = arr.as_array() {
+                for it in items {
+                    if let Some(name) = it.get("name").and_then(|v| v.as_str()) {
+                        set.insert(name.to_string());
+                    }
+                }
+            }
+            Ok(set.into_iter().collect())
+        })
+        .await
+    }
+
+    /// `POST /rest/api/3/issue/{key}/transitions` — provede přechod.
+    pub async fn transition_issue(
+        &self,
+        issue_key: &str,
+        transition_id: &str,
+    ) -> Result<(), JiraError> {
+        let url = self.url(&format!("/rest/api/3/issue/{issue_key}/transitions"))?;
+        let body = json!({ "transition": { "id": transition_id } });
+        with_retry(|| async {
+            let resp = self
+                .http
+                .post(url.clone())
+                .basic_auth(&self.email, Some(&self.token))
+                .json(&body)
+                .send()
+                .await?;
+            Self::check_status(resp).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// `GET /rest/api/3/issue/{key}?fields=status` — vrátí současný status.
+    pub async fn get_issue_status(&self, issue_key: &str) -> Result<Option<String>, JiraError> {
+        let mut url = self.url(&format!("/rest/api/3/issue/{issue_key}"))?;
+        url.query_pairs_mut().append_pair("fields", "status");
+        with_retry(|| async {
+            let resp = self
+                .http
+                .get(url.clone())
+                .basic_auth(&self.email, Some(&self.token))
+                .send()
+                .await?;
+            let resp = Self::check_status(resp).await?;
+            let v: serde_json::Value = resp.json().await?;
+            Ok(v.pointer("/fields/status/name")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string()))
+        })
+        .await
+    }
+
     /// `POST /rest/api/3/issue/{key}/worklog` — add a worklog with an optional ADF comment.
     ///
     /// `started` is formatted as `YYYY-MM-DDTHH:MM:SS.SSS+0000` (Jira's required shape).

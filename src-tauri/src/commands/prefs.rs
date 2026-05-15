@@ -93,6 +93,16 @@ const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
 /// "daily goal reached" notification. Used to dedupe.
 pub const KEY_TODAY_GOAL_NOTIFIED_AT: &str = "today_goal_notified_at";
 
+const KEY_POMODORO_ENABLED: &str = "pomodoro_enabled";
+const KEY_POMODORO_WORK_MIN: &str = "pomodoro_work_min";
+const KEY_POMODORO_BREAK_MIN: &str = "pomodoro_break_min";
+const DEFAULT_POMODORO_WORK_MIN: i64 = 25;
+const DEFAULT_POMODORO_BREAK_MIN: i64 = 5;
+const MIN_POMODORO_WORK_MIN: i64 = 5;
+const MAX_POMODORO_WORK_MIN: i64 = 180;
+const MIN_POMODORO_BREAK_MIN: i64 = 1;
+const MAX_POMODORO_BREAK_MIN: i64 = 60;
+
 // -----------------------------------------------------------------------------
 // Inner (Tauri-free) helpers.
 // -----------------------------------------------------------------------------
@@ -122,11 +132,30 @@ pub fn set_daily_goal_inner(db: &Db, seconds: i64) -> Result<(), String> {
     cache::settings::set(db, KEY_DAILY_GOAL, &seconds.to_string()).map_err(|e| e.to_string())
 }
 
+pub const ALLOWED_WIDGET_FORMATS: &[&str] = &["HH:MM:SS", "Hh Mm", "0.0h"];
+
 pub fn set_widget_format_inner(db: &Db, format: &str) -> Result<(), String> {
+    if !ALLOWED_WIDGET_FORMATS.contains(&format) {
+        return Err(format!(
+            "Neplatný formát widgetu {format:?}; očekáváno {ALLOWED_WIDGET_FORMATS:?}"
+        ));
+    }
     cache::settings::set(db, KEY_WIDGET_FORMAT, format).map_err(|e| e.to_string())
 }
 
+/// App icon je krátký identifier (cca [a-z0-9_-], pro výběr ze setu PNG
+/// resources). Omezujeme délku + povolené znaky, ať se nezpůsobí path
+/// traversal kdyby kdokoliv někdy hodnoty interpretoval jako filename.
 pub fn set_app_icon_inner(db: &Db, icon: &str) -> Result<(), String> {
+    if icon.is_empty() || icon.len() > 32 {
+        return Err("Identifikátor ikony musí mít 1–32 znaků".into());
+    }
+    if !icon
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Identifikátor ikony obsahuje neplatné znaky".into());
+    }
     cache::settings::set(db, KEY_APP_ICON, icon).map_err(|e| e.to_string())
 }
 
@@ -141,7 +170,9 @@ pub fn get_hourly_rate_inner(db: &Db) -> Result<f64, String> {
 
 /// Upper bound on the hourly rate. Past this we assume user error (typo,
 /// pasting in a yearly figure, accidentally hitting `e` in the input, etc.).
-pub const MAX_HOURLY_RATE: f64 = 100_000.0;
+/// Pokud někdy budeme měnu s hyperinflací, zvedne se per-currency
+/// (tj. v ConvertToCZK mode).
+pub const MAX_HOURLY_RATE: f64 = 99_999.0;
 
 pub fn set_hourly_rate_inner(db: &Db, rate: f64) -> Result<(), String> {
     if !rate.is_finite() {
@@ -210,6 +241,63 @@ pub fn set_density_inner(db: &Db, density: &str) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_DENSITY, density).map_err(|e| e.to_string())
+}
+
+// ----- Pomodoro -----
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PomodoroConfig {
+    pub enabled: bool,
+    pub work_min: i64,
+    pub break_min: i64,
+}
+
+pub fn get_pomodoro_inner(db: &Db) -> Result<PomodoroConfig, String> {
+    let enabled = matches!(
+        cache::settings::get(db, KEY_POMODORO_ENABLED)
+            .map_err(|e| e.to_string())?
+            .as_deref(),
+        Some("true")
+    );
+    let work_min = cache::settings::get(db, KEY_POMODORO_WORK_MIN)
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_POMODORO_WORK_MIN);
+    let break_min = cache::settings::get(db, KEY_POMODORO_BREAK_MIN)
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_POMODORO_BREAK_MIN);
+    Ok(PomodoroConfig {
+        enabled,
+        work_min,
+        break_min,
+    })
+}
+
+pub fn set_pomodoro_inner(db: &Db, cfg: &PomodoroConfig) -> Result<(), String> {
+    if !(MIN_POMODORO_WORK_MIN..=MAX_POMODORO_WORK_MIN).contains(&cfg.work_min) {
+        return Err(format!(
+            "Pomodoro work musí být {}–{} min",
+            MIN_POMODORO_WORK_MIN, MAX_POMODORO_WORK_MIN
+        ));
+    }
+    if !(MIN_POMODORO_BREAK_MIN..=MAX_POMODORO_BREAK_MIN).contains(&cfg.break_min) {
+        return Err(format!(
+            "Pomodoro pauza musí být {}–{} min",
+            MIN_POMODORO_BREAK_MIN, MAX_POMODORO_BREAK_MIN
+        ));
+    }
+    cache::settings::set(
+        db,
+        KEY_POMODORO_ENABLED,
+        if cfg.enabled { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())?;
+    cache::settings::set(db, KEY_POMODORO_WORK_MIN, &cfg.work_min.to_string())
+        .map_err(|e| e.to_string())?;
+    cache::settings::set(db, KEY_POMODORO_BREAK_MIN, &cfg.break_min.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ----- Accent color -----
@@ -320,6 +408,63 @@ pub async fn set_daily_goal(
     set_daily_goal_inner(&state.db, seconds)?;
     let _ = app.emit("prefs-changed", "daily_goal_seconds");
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_pomodoro(state: tauri::State<'_, AppState>) -> Result<PomodoroConfig, String> {
+    get_pomodoro_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_pomodoro(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    config: PomodoroConfig,
+) -> Result<(), String> {
+    set_pomodoro_inner(&state.db, &config)?;
+    let _ = app.emit("prefs-changed", "pomodoro");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_project_colors(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<cache::project_colors::ProjectColor>, String> {
+    cache::project_colors::list(&state.db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_project_color(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    project_key: String,
+    color: Option<String>,
+) -> Result<(), String> {
+    let key = project_key.trim();
+    if key.is_empty() {
+        return Err("project_key nesmí být prázdný".into());
+    }
+    match color.as_deref().map(str::trim) {
+        Some(c) if !c.is_empty() => {
+            if !is_valid_hex_color(c) {
+                return Err(format!("Neplatná barva {c:?}; očekáváno #RRGGBB"));
+            }
+            cache::project_colors::set(&state.db, key, c).map_err(|e| e.to_string())?;
+        }
+        _ => {
+            // Prázdná barva → odstranit override.
+            cache::project_colors::remove(&state.db, key).map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = app.emit("prefs-changed", "project_colors");
+    Ok(())
+}
+
+fn is_valid_hex_color(s: &str) -> bool {
+    if !s.starts_with('#') || (s.len() != 4 && s.len() != 7) {
+        return false;
+    }
+    s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 #[tauri::command]
@@ -578,6 +723,28 @@ mod tests {
         assert!(set_daily_goal_inner(&db, MIN_DAILY_GOAL_SECONDS).is_ok());
         assert!(set_daily_goal_inner(&db, 8 * 3600).is_ok());
         assert!(set_daily_goal_inner(&db, MAX_DAILY_GOAL_SECONDS).is_ok());
+    }
+
+    #[test]
+    fn set_widget_format_validates_whitelist() {
+        let db = open_db();
+        for f in ALLOWED_WIDGET_FORMATS {
+            assert!(set_widget_format_inner(&db, f).is_ok(), "{f}");
+        }
+        assert!(set_widget_format_inner(&db, "").is_err());
+        assert!(set_widget_format_inner(&db, "<script>").is_err());
+        assert!(set_widget_format_inner(&db, "hh:mm").is_err()); // case-sensitive
+    }
+
+    #[test]
+    fn set_app_icon_validates_charset_and_length() {
+        let db = open_db();
+        assert!(set_app_icon_inner(&db, "default").is_ok());
+        assert!(set_app_icon_inner(&db, "icon-pink_dark").is_ok());
+        assert!(set_app_icon_inner(&db, "").is_err());
+        assert!(set_app_icon_inner(&db, "../etc/passwd").is_err());
+        assert!(set_app_icon_inner(&db, "icon with spaces").is_err());
+        assert!(set_app_icon_inner(&db, &"x".repeat(33)).is_err());
     }
 
     #[test]

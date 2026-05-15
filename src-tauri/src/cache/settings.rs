@@ -21,3 +21,23 @@ pub fn set(db: &Db, key: &str, value: &str) -> Result<(), DbError> {
     )?;
     Ok(())
 }
+
+/// Remove a single setting by key. No-op if key doesn't exist.
+pub fn remove(db: &Db, key: &str) -> Result<(), DbError> {
+    let conn = db.pool().get()?;
+    conn.execute("DELETE FROM app_settings WHERE key = ?1", [key])?;
+    Ok(())
+}
+
+/// Return all settings whose key starts with `prefix`. Used for grouped
+/// settings like `last_sync_error:<connection_id>`.
+pub fn list_with_prefix(db: &Db, prefix: &str) -> Result<Vec<(String, String)>, DbError> {
+    let conn = db.pool().get()?;
+    let pattern = format!("{prefix}%");
+    let mut stmt =
+        conn.prepare("SELECT key, value FROM app_settings WHERE key LIKE ?1 ORDER BY key")?;
+    let mapped = stmt.query_map([pattern], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    mapped.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}

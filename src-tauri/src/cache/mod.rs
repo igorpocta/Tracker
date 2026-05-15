@@ -6,7 +6,9 @@ pub mod db;
 pub mod favorites;
 pub mod issues;
 pub mod migrations;
+pub mod project_colors;
 pub mod settings;
+pub mod sync_log;
 pub mod timer;
 pub mod worklogs;
 

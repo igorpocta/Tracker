@@ -44,6 +44,14 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     };
 
     // --- Menu items --------------------------------------------------------
+    let quick_start = MenuItem::with_id(
+        app,
+        "quick_start_unassigned",
+        "▶ Začít stopovat bez úkolu",
+        true,
+        None::<&str>,
+    )?;
+    let sep0 = PredefinedMenuItem::separator(app)?;
     let open_main = MenuItem::with_id(app, "open_main", "Otevřít Tracker", true, None::<&str>)?;
     let open_settings = MenuItem::with_id(
         app,
@@ -55,7 +63,17 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Ukončit Tracker", true, Some("CmdOrCtrl+Q"))?;
 
-    let menu = Menu::with_items(app, &[&open_main, &open_settings, &separator, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &quick_start,
+            &sep0,
+            &open_main,
+            &open_settings,
+            &separator,
+            &quit,
+        ],
+    )?;
 
     tray.set_menu(Some(menu))?;
     tray.set_tooltip(Some("Tracker — nečinný"))?;
@@ -70,6 +88,9 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         }
         "open_settings" => {
             let _ = crate::popover::open_settings(app);
+        }
+        "quick_start_unassigned" => {
+            spawn_quick_start_unassigned(app.clone());
         }
         "quit" => {
             app.exit(0);
@@ -89,6 +110,27 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         }
     });
 
+    Ok(())
+}
+
+/// Nastav idle tray ikonu na bílou „Zzz" siluetu (rendered SVG → PNG).
+/// `iconAsTemplate = false` ať si macOS bílou nepřebarví; user wants it
+/// always white regardless of light/dark menu bar.
+pub fn set_idle_zzz<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    match crate::tray_pulse::idle_zzz_png() {
+        Some(bytes) => {
+            let img = Image::from_bytes(bytes)?;
+            tray.set_icon_with_as_template(Some(img), false)?;
+        }
+        None => {
+            // SVG render failed — clear the icon so the title text carries
+            // the idle state alone (graceful degradation).
+            tray.set_icon(None)?;
+        }
+    }
     Ok(())
 }
 
@@ -170,4 +212,21 @@ pub fn set_visible<R: Runtime>(app: &AppHandle<R>, visible: bool) -> tauri::Resu
     };
     tray.set_visible(visible)?;
     Ok(())
+}
+
+/// Tray menu „Začít stopovat bez úkolu" — instant kick-off bez interakce s
+/// hlavním oknem. Klient si pak v Time Logu úkol doplní (řádek se objeví
+/// jako pending-assignment). Stop a všechny ostatní akce nadále řeší
+/// hlavní UI, tady chceme jen jednoduchý rychlý start.
+fn spawn_quick_start_unassigned<R: Runtime>(app: AppHandle<R>) {
+    use tauri::Manager;
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<crate::state::AppState>();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let res = crate::commands::timer::start_timer_inner(&state.db, "", now_ms, None);
+        if let Ok(active) = res {
+            use tauri::Emitter;
+            let _ = app.emit("timer-started", &active);
+        }
+    });
 }

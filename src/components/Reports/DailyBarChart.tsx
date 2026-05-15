@@ -1,23 +1,27 @@
 /**
  * Daily-hours bar chart used on the Reports route.
  *
+ * Sloupce jsou skládané (stacked) podle připojení — jeden segment na
+ * Jira / Freelo / další providera (případně více). Lokálně vytvořené
+ * záznamy bez `connection_id` se zobrazí jako neutrální segment „lokální".
+ *
  * Phase 18B improvements:
- *   - Item 1: working-day shading. Working day columns get a faint
- *     `--accent-soft` background tint; weekends/holidays sit on `--bg-app`.
- *     The chart pulls the user's working-week mask + non-working-day list
- *     once per range and derives per-column state locally — no per-day RPC.
- *   - Item 21: tooltip on hover, fixed scale calculation. The y-axis now
- *     anchors to `max(observed_max, dailyGoalHours)` so the bars never look
- *     1mm tall just because the day-goal is high. The bar minimum height is
- *     also a more visible 3px (was 2px).
+ *   - Item 1: working-day shading přes `--accent-soft`.
+ *   - Item 21: tooltip s rozpadem per provider, y-axis = max(observed, goal).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { listConnections, listProjectColors } from "../../api/commands";
 import type { WorklogRow } from "../../api/types";
 import { isWorkingDayLocal, useCalendarMask } from "../../hooks/useCalendarMask";
 import { addDays, startOfDay } from "../../lib/dates";
-import { formatDateCs, formatDateCsShort, formatDurationShort } from "../../lib/format";
+import {
+  formatDateCs,
+  formatDateCsShort,
+  formatDurationShort,
+  formatWeekdayCs,
+} from "../../lib/format";
 
 export interface DailyBarChartProps {
   rows: WorklogRow[];
@@ -27,10 +31,75 @@ export interface DailyBarChartProps {
   dailyGoalHours?: number;
 }
 
+interface Bucket {
+  /** `null` = lokální záznam bez synchronizace. */
+  connectionId: number | null;
+  label: string;
+  color: string;
+  seconds: number;
+}
+
+interface LegendEntry {
+  key: string;
+  label: string;
+  color: string;
+}
+
+const LOCAL_COLOR = "var(--text-tertiary)";
+
+/**
+ * Pokud připojení nemá explicit `config.color`, vezmeme výchozí accent
+ * a každému dalšímu defaultnímu připojení snížíme alfa kanál:
+ *   < 4 defaultů → krok 10 %
+ *   ≥ 4 defaultů → krok 5 %  (víc connections = jemnější odstupňování)
+ * Účel: vizuální odlišení připojení v stacked baru bez náhodných barev.
+ */
+function accentWithOpacity(percent: number): string {
+  const p = Math.max(10, Math.min(100, Math.round(percent)));
+  return `color-mix(in srgb, var(--accent) ${p}%, transparent)`;
+}
+
 export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartProps) {
   const days = useMemo(() => buildDayList(from, to), [from, to]);
-  const totals = useMemo(() => totalsByDay(rows), [rows]);
-  const counts = useMemo(() => countsByDay(rows), [rows]);
+
+  // Připojení potřebujeme pro pojmenování / barvy segmentů. Selže-li
+  // (např. během startup), padá fallback na "lokální" pro vše.
+  const connectionsQ = useQuery({
+    queryKey: ["connections"],
+    queryFn: listConnections,
+    staleTime: 60_000,
+  });
+
+  // Volitelné per-project barevné overridy. Když je seznam neprázdný,
+  // worklog s odpovídajícím prefixem klíče přebere barvu odsud místo
+  // defaultní per-connection palety.
+  const projectColorsQ = useQuery({
+    queryKey: ["project-colors"],
+    queryFn: listProjectColors,
+    staleTime: 60_000,
+  });
+
+  const connInfo = useMemo(
+    () => buildConnectionMap(connectionsQ.data ?? []),
+    [connectionsQ.data],
+  );
+
+  const projectColorMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projectColorsQ.data ?? []) {
+      m.set(p.project_key, p.color);
+    }
+    return m;
+  }, [projectColorsQ.data]);
+
+  // Per-day mapování connection_id (nebo null) → seconds. Když existuje
+  // project-color override, řadíme worklog do vlastního bucketu, ne do
+  // connection bucketu — tak vidíš v reportu projektovou distribuci, ne
+  // jen jednu globální Jira/Freelo barvu.
+  const bucketsByDay = useMemo(
+    () => groupByDay(rows, connInfo, projectColorMap),
+    [rows, connInfo, projectColorMap],
+  );
 
   // Phase 18B — Item 1: per-day working-day state.
   const { mask, nonWorking } = useCalendarMask(from, to);
@@ -38,14 +107,13 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
   const observedMaxHours = useMemo(() => {
     let m = 0;
     for (const d of days) {
-      const v = (totals.get(formatKey(d)) ?? 0) / 3600;
+      const total = sumBuckets(bucketsByDay.get(formatKey(d)));
+      const v = total / 3600;
       if (v > m) m = v;
     }
     return m;
-  }, [days, totals]);
+  }, [days, bucketsByDay]);
 
-  // Anchor the y-axis to MAX(observed, dailyGoalHours, 3) rounded up to a
-  // multiple of 3 for readability.
   const max = useMemo(() => {
     const base = Math.max(observedMaxHours, dailyGoalHours ?? 0, 3);
     return Math.max(3, Math.ceil(base / 3) * 3);
@@ -53,18 +121,36 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
 
   const [hover, setHover] = useState<number | null>(null);
 
-  // Daily-goal line — only render when configured (>0) and within axis range.
   const goalLinePct =
     dailyGoalHours && dailyGoalHours > 0 && max > 0
       ? Math.min(100, (dailyGoalHours / max) * 100)
       : null;
 
+  // Legenda = sjednocení všech bucketů, které mají alespoň jednu vteřinu.
+  const legend = useMemo(() => buildLegend(bucketsByDay), [bucketsByDay]);
+
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
-      <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Hodiny za den
-      </h3>
+      <div className="flex items-center justify-between mb-3 gap-4 flex-wrap">
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+          Hodiny za den
+        </h3>
+        {legend.length > 0 && (
+          <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)]">
+            {legend.map((l) => (
+              <div key={l.key} className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-sm"
+                  style={{ background: l.color }}
+                  aria-hidden
+                />
+                <span>{l.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex gap-4 h-[260px]">
         <div className="flex flex-col justify-between text-[10px] text-[var(--text-tertiary)] tabular-nums py-1">
           {[max, Math.round((max * 2) / 3), Math.round(max / 3), 0].map((v) => (
@@ -72,8 +158,6 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
           ))}
         </div>
         <div className="flex-1 relative">
-          {/* Plot region — bars/bands/grid all share this geometry so the
-              y-axis math (height: X%) resolves against the same 100%. */}
           <div className="absolute inset-0 pt-1 pb-5">
             <div className="relative h-full w-full">
               {/* Grid lines */}
@@ -105,14 +189,12 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                 })}
               </div>
 
-              {/* Bars — each column is full-height (h-full) so the inner
-                  absolutely-positioned bar's `height: X%` resolves against
-                  the real plot height, not 0. */}
+              {/* Stacked bars */}
               <div className="absolute inset-0 flex items-end gap-[2px]">
                 {days.map((d, idx) => {
-                  const seconds = totals.get(formatKey(d)) ?? 0;
-                  const hours = seconds / 3600;
-                  const heightPct = max > 0 ? (hours / max) * 100 : 0;
+                  const buckets = bucketsByDay.get(formatKey(d)) ?? [];
+                  const total = sumBuckets(buckets);
+                  const totalPct = max > 0 ? (total / 3600 / max) * 100 : 0;
                   const isHovered = hover === idx;
                   return (
                     <div
@@ -121,24 +203,43 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                       onMouseEnter={() => setHover(idx)}
                       onMouseLeave={() => setHover(null)}
                     >
-                      <div
-                        className="absolute left-0 right-0 bottom-0 rounded-t-[2px] transition-colors duration-150"
-                        style={{
-                          height: `${heightPct}%`,
-                          minHeight: heightPct > 0 ? "3px" : 0,
-                          background:
-                            heightPct > 0
-                              ? isHovered
-                                ? "var(--accent-hover)"
-                                : "var(--accent)"
-                              : "transparent",
-                        }}
-                      />
-                      {isHovered && seconds > 0 && (
+                      {totalPct > 0 && (
+                        <div
+                          className="absolute left-0 right-0 bottom-0 flex flex-col-reverse rounded-t-[2px] overflow-hidden transition-opacity duration-150"
+                          style={{
+                            height: `${totalPct}%`,
+                            minHeight: "3px",
+                            opacity: isHovered ? 0.85 : 1,
+                          }}
+                        >
+                          {buckets
+                            .filter((b) => b.seconds > 0)
+                            .map((b, segIdx, arr) => {
+                              const segPct = (b.seconds / total) * 100;
+                              return (
+                                <div
+                                  key={`${b.connectionId ?? "local"}`}
+                                  style={{
+                                    height: `${segPct}%`,
+                                    background: b.color,
+                                    // Vrchní segment dostane mírnou tečku
+                                    // mezi sebou a dalším, ať se barvy
+                                    // vizuálně neslévají do jedné plochy.
+                                    borderTop:
+                                      segIdx < arr.length - 1
+                                        ? "1px solid rgba(255,255,255,0.15)"
+                                        : "none",
+                                  }}
+                                />
+                              );
+                            })}
+                        </div>
+                      )}
+                      {isHovered && total > 0 && (
                         <DailyTooltip
                           date={d}
-                          seconds={seconds}
-                          count={counts.get(formatKey(d)) ?? 0}
+                          buckets={buckets.filter((b) => b.seconds > 0)}
+                          total={total}
                         />
                       )}
                     </div>
@@ -146,9 +247,7 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                 })}
               </div>
 
-              {/* Daily-goal line — dashed horizontal across the plot, with a
-                  small label on the right edge. Rendered LAST so it stays on
-                  top of bars/bands. */}
+              {/* Daily-goal line */}
               {goalLinePct !== null && (
                 <div
                   className="absolute left-0 right-0 pointer-events-none"
@@ -197,18 +296,18 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
 
 function DailyTooltip({
   date,
-  seconds,
-  count,
+  buckets,
+  total,
 }: {
   date: Date;
-  seconds: number;
-  count: number;
+  buckets: Bucket[];
+  total: number;
 }) {
   return (
     <div
       role="tooltip"
       className="absolute left-1/2 -translate-x-1/2 bottom-[calc(100%+4px)] z-20
-                 px-2 py-1 rounded-[var(--radius-sm)] text-[11px] whitespace-nowrap
+                 px-2 py-1.5 rounded-[var(--radius-sm)] text-[11px] whitespace-nowrap
                  pointer-events-none"
       style={{
         background: "var(--bg-elevated)",
@@ -217,13 +316,178 @@ function DailyTooltip({
         boxShadow: "var(--shadow-sm)",
       }}
     >
-      <div className="font-medium">{formatDateCs(date)}</div>
-      <div className="text-[var(--text-tertiary)]">
-        {formatDurationShort(seconds)}
-        {count > 1 ? ` · ${count} záznamů` : count === 1 ? ` · 1 záznam` : ""}
+      <div className="font-medium">
+        {formatWeekdayCs(date)} · {formatDateCs(date)}
+      </div>
+      <div className="text-[var(--text-tertiary)] mb-1">
+        {formatDurationShort(total)} celkem
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {buckets.map((b) => (
+          <div
+            key={b.connectionId ?? "local"}
+            className="flex items-center gap-1.5"
+          >
+            <span
+              className="inline-block w-2 h-2 rounded-sm"
+              style={{ background: b.color }}
+              aria-hidden
+            />
+            <span className="flex-1">{b.label}</span>
+            <span className="font-mono tabular-nums ml-2">
+              {formatDurationShort(b.seconds)}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+// -----------------------------------------------------------------------------
+// Pure helpers (kept exported where the test file references them)
+// -----------------------------------------------------------------------------
+
+interface ConnInfo {
+  label: string;
+  color: string;
+}
+
+export function buildConnectionMap(
+  list: {
+    id: number;
+    provider: string;
+    name: string;
+    config?: Record<string, unknown>;
+  }[],
+): Map<number, ConnInfo> {
+  const out = new Map<number, ConnInfo>();
+  // Spočítáme, kolik připojení nemá vlastní barvu — určuje krok průhlednosti.
+  const defaultsCount = list.filter(
+    (c) => !(typeof c.config?.["color"] === "string" && c.config["color"]),
+  ).length;
+  const stepPct = defaultsCount < 4 ? 10 : 5;
+
+  let defaultIdx = 0;
+  for (const c of list) {
+    const raw = c.config?.["color"];
+    const customColor = typeof raw === "string" && raw ? raw : null;
+    let color: string;
+    if (customColor) {
+      color = customColor;
+    } else {
+      color = accentWithOpacity(100 - defaultIdx * stepPct);
+      defaultIdx++;
+    }
+    out.set(c.id, { label: c.name || c.provider, color });
+  }
+  return out;
+}
+
+function groupByDay(
+  rows: WorklogRow[],
+  conn: Map<number, ConnInfo>,
+  projectColors: Map<string, string>,
+): Map<string, Bucket[]> {
+  const days = new Map<string, Map<string, Bucket>>();
+  for (const r of rows) {
+    const d = new Date(r.started_at * 1000);
+    const k = formatKey(d);
+    // Hierarchie barev: 1) explicit project color, 2) connection color,
+    // 3) "lokální" placeholder. Bucket key sloučí worklogy se stejnou
+    // barvou+labelem, ať se nezobrazí 5 stejně barevných pruhů vedle sebe.
+    const projectKey = projectKeyFromIssue(r.issue_key);
+    const projectOverride = projectKey ? projectColors.get(projectKey) : undefined;
+
+    let info: { label: string; color: string };
+    let bucketKey: string;
+    if (projectOverride) {
+      info = { label: projectKey!, color: projectOverride };
+      bucketKey = `p:${projectKey}`;
+    } else if (r.connection_id != null) {
+      info = conn.get(r.connection_id) ?? {
+        label: `#${r.connection_id}`,
+        color: accentWithOpacity(60),
+      };
+      bucketKey = `c:${r.connection_id}`;
+    } else {
+      info = { label: "Lokální", color: LOCAL_COLOR };
+      bucketKey = "local";
+    }
+
+    let dayMap = days.get(k);
+    if (!dayMap) {
+      dayMap = new Map();
+      days.set(k, dayMap);
+    }
+    const existing = dayMap.get(bucketKey);
+    if (existing) {
+      existing.seconds += r.duration_s;
+    } else {
+      dayMap.set(bucketKey, {
+        connectionId: r.connection_id ?? null,
+        label: info.label,
+        color: info.color,
+        seconds: r.duration_s,
+      });
+    }
+  }
+
+  // Stabilní pořadí: nejdřív řadit dle labelu (project_key / connection name),
+  // lokální (`connectionId === null` a label "Lokální") na konec.
+  const out = new Map<string, Bucket[]>();
+  for (const [k, map] of days) {
+    const arr = Array.from(map.values()).sort((a, b) => {
+      const aLocal = a.label === "Lokální";
+      const bLocal = b.label === "Lokální";
+      if (aLocal && !bLocal) return 1;
+      if (!aLocal && bLocal) return -1;
+      return a.label.localeCompare(b.label, "cs", { sensitivity: "base" });
+    });
+    out.set(k, arr);
+  }
+  return out;
+}
+
+/**
+ * Z issue klíče odvodí "project key" — prefix pro Jira (`DEV-792` → `DEV`),
+ * konkrétní task pro Freelo (`FREELO-12345`). Pokud uživatel chce barvu
+ * pro celý Freelo projekt, musí ji nastavit na konkrétní `FREELO-P-…`
+ * (parent_key); ten však tady bez extra lookupu nevíme, takže Freelo
+ * worklog zatím dostane fallback per-connection.
+ */
+function projectKeyFromIssue(issueKey?: string | null): string | null {
+  if (!issueKey) return null;
+  if (issueKey.startsWith("FREELO-P-")) return issueKey;
+  if (issueKey.startsWith("FREELO-")) return issueKey;
+  const dash = issueKey.indexOf("-");
+  return dash > 0 ? issueKey.slice(0, dash) : issueKey;
+}
+
+function sumBuckets(buckets: Bucket[] | undefined): number {
+  if (!buckets) return 0;
+  let s = 0;
+  for (const b of buckets) s += b.seconds;
+  return s;
+}
+
+function buildLegend(buckets: Map<string, Bucket[]>): LegendEntry[] {
+  const seen = new Map<string, LegendEntry>();
+  for (const arr of buckets.values()) {
+    for (const b of arr) {
+      if (b.seconds <= 0) continue;
+      const key = b.connectionId === null ? "local" : `c:${b.connectionId}`;
+      if (!seen.has(key)) {
+        seen.set(key, { key, label: b.label, color: b.color });
+      }
+    }
+  }
+  // Lokální vždy poslední.
+  return Array.from(seen.values()).sort((a, b) => {
+    if (a.key === "local") return 1;
+    if (b.key === "local") return -1;
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function buildDayList(from: Date, to: Date): Date[] {
@@ -237,29 +501,9 @@ function buildDayList(from: Date, to: Date): Date[] {
   return out;
 }
 
-function totalsByDay(rows: WorklogRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    const k = formatKey(d);
-    map.set(k, (map.get(k) ?? 0) + r.duration_s);
-  }
-  return map;
-}
-
-function countsByDay(rows: WorklogRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    const k = formatKey(d);
-    map.set(k, (map.get(k) ?? 0) + 1);
-  }
-  return map;
-}
-
 export function formatKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-// Re-export the date arithmetic for the chart-only consumers in tests.
+// Re-export pro testy.
 export { addDays, useQuery };
