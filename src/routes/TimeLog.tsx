@@ -24,6 +24,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useOutletContext } from "react-router-dom";
 
 import {
+  assignWorklogIssue,
   deleteWorklog,
   deleteLocalOnlyWorklog,
   getWorklogsForRange,
@@ -33,6 +34,7 @@ import {
 import type { WorklogRow as ApiWorklogRow } from "../api/types";
 import type { ShellOutletContext } from "../components/Layout/AppShell";
 import { IssuePill } from "../components/common/IssuePill";
+import { IssuePicker } from "../components/Worklog/IssuePicker";
 import { DayTimeline } from "../components/Timer/DayTimeline";
 import {
   addDays,
@@ -238,6 +240,31 @@ export default function TimeLog() {
     [ctx, queryClient],
   );
 
+  // Assign an issue to a worklog that was created without one (timer stopped
+  // unassigned, or manual entry with empty issue). Calls the backend
+  // `assign_worklog_issue` command which:
+  //   - sets the row's issue_key
+  //   - clears pending_assignment
+  //   - if a Jira/Freelo client is configured, POSTs the worklog upstream
+  //     too so it stops being a "local only" record.
+  const handleAssign = useCallback(
+    async (row: ApiWorklogRow, issueKey: string) => {
+      if (row.id == null) return;
+      try {
+        await assignWorklogIssue(row.id, issueKey);
+        queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+        queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+        ctx.pushToast?.("success", `Záznam přiřazen na ${issueKey}.`);
+      } catch (e) {
+        ctx.pushToast?.(
+          "error",
+          typeof e === "string" ? e : "Přiřazení úkolu selhalo.",
+        );
+      }
+    },
+    [ctx, queryClient],
+  );
+
   return (
     <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
       {/* Header row ----------------------------------------------------- */}
@@ -345,6 +372,7 @@ export default function TimeLog() {
                 row={r}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
+                onAssign={handleAssign}
                 highlighted={highlightId === key}
                 refCallback={(el) => {
                   rowRefs.current[key] = el;
@@ -410,6 +438,8 @@ interface WorklogRowProps {
     },
   ) => Promise<void>;
   onDelete: (row: ApiWorklogRow) => void;
+  /** Assign an issue to an unassigned worklog row. */
+  onAssign: (row: ApiWorklogRow, issueKey: string) => Promise<void>;
   /** Phase 18B — Item 31: flash the row when the user picks it from the timeline. */
   highlighted?: boolean;
   refCallback?: (el: HTMLDivElement | null) => void;
@@ -419,6 +449,7 @@ function WorklogRow({
   row,
   onUpdate,
   onDelete,
+  onAssign,
   highlighted,
   refCallback,
 }: WorklogRowProps) {
@@ -485,7 +516,11 @@ function WorklogRow({
           : "var(--bg-surface)",
       }}
     >
-      <IssuePill issueKey={row.issue_key} />
+      {row.issue_key ? (
+        <IssuePill issueKey={row.issue_key} />
+      ) : (
+        <IssuePicker onPick={(key) => onAssign(row, key)} />
+      )}
       {editing === "comment" ? (
         <input
           type="text"
@@ -514,10 +549,12 @@ function WorklogRow({
           title="Upravit komentář"
         >
           <span className="inline-flex items-center gap-1">
-            {/* Phase 18A — Item 8: fall back to "(načítá se…)" instead of
-                "(bez popisu)" when the summary is missing; the next sync will
-                backfill it. */}
-            {row.summary || "(načítá se…)"}
+            {/* Phase 18A — Item 8: fall back to "(načítá se…)" when an
+                issue IS set but its summary hasn't been backfilled yet (the
+                next sync will). When no issue is assigned at all, show
+                "Nepřiřazen" so it's clear the row is waiting for a pick. */}
+            {row.summary ||
+              (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
             {row.comment && (
               <MessageSquare
                 className="w-3 h-3 text-[var(--text-tertiary)]"
