@@ -11,6 +11,9 @@
 import { firstError, goalSliderHoursSchema } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
+import { NonWorkingDaysList } from "./NonWorkingDaysList";
+import { WorkingWeekMask } from "./WorkingWeekMask";
+
 const MIN_HOURS = 1;
 const MAX_HOURS = 14;
 
@@ -21,7 +24,7 @@ export default function SettingsGoals() {
   const hours = Math.max(MIN_HOURS, Math.min(MAX_HOURS, goalSeconds / 3600));
 
   return (
-    <div className="flex flex-col gap-6 max-w-xl">
+    <div className="flex flex-col gap-8 max-w-xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Cíle
@@ -67,6 +70,10 @@ export default function SettingsGoals() {
           Kolik hodin chcete denně odpracovat. Používá se v sekci Cíle.
         </p>
       </section>
+
+      <WorkingWeekMask />
+
+      <NonWorkingDaysList />
     </div>
   );
 }
