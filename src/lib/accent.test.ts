@@ -33,9 +33,9 @@ afterEach(() => {
 });
 
 describe("palette specs", () => {
-  it("has 10 mono palettes and 5 dual palettes", () => {
+  it("has 10 mono palettes and 10 dual palettes", () => {
     expect(MONO_PALETTES).toHaveLength(10);
-    expect(DUAL_PALETTES).toHaveLength(5);
+    expect(DUAL_PALETTES).toHaveLength(10);
   });
 
   it("identifies the mode correctly", () => {

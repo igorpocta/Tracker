@@ -57,6 +57,12 @@ export const DUAL_PALETTES: PaletteSpec[] = [
   { id: "sakura-night",  label: "Sakura Night",  mode: "dual", primary: "#EC4899", secondary: "#A855F7" },
   { id: "cyber-lime",    label: "Cyber Lime",    mode: "dual", primary: "#84CC16", secondary: "#7C3AED" },
   { id: "nordic-fjord",  label: "Nordic Fjord",  mode: "dual", primary: "#F59E0B", secondary: "#0EA5E9" },
+  // 2026 additions — modern dual combinations.
+  { id: "tokyo-night",   label: "Tokyo Night",   mode: "dual", primary: "#FF006E", secondary: "#06D6A0" },
+  { id: "sunset-drive",  label: "Sunset Drive",  mode: "dual", primary: "#FF6B35", secondary: "#9D4EDD" },
+  { id: "deep-ocean",    label: "Deep Ocean",    mode: "dual", primary: "#0077B6", secondary: "#00F5FF" },
+  { id: "royal-velvet",  label: "Royal Velvet",  mode: "dual", primary: "#7209B7", secondary: "#F8961E" },
+  { id: "forest-fire",   label: "Forest Fire",   mode: "dual", primary: "#386641", secondary: "#FF8C42" },
 ];
 
 export const ALL_PALETTES: PaletteSpec[] = [...MONO_PALETTES, ...DUAL_PALETTES];

@@ -251,7 +251,13 @@ export type AccentColor =
   | "aurora-boreal"
   | "sakura-night"
   | "cyber-lime"
-  | "nordic-fjord";
+  | "nordic-fjord"
+  // Dual palettes (2026 additions)
+  | "tokyo-night"
+  | "sunset-drive"
+  | "deep-ocean"
+  | "royal-velvet"
+  | "forest-fire";
 
 /**
  * Color palette mode — Mono (single primary) or Dual (primary + secondary).

@@ -61,6 +61,12 @@ pub const ALLOWED_ACCENTS: &[&str] = &[
     "sakura-night",
     "cyber-lime",
     "nordic-fjord",
+    // Dual palettes (2026 additions)
+    "tokyo-night",
+    "sunset-drive",
+    "deep-ocean",
+    "royal-velvet",
+    "forest-fire",
 ];
 /// Default palette mode.
 pub const DEFAULT_PALETTE_MODE: &str = "mono";

@@ -203,6 +203,12 @@ const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
   "sakura-night",
   "cyber-lime",
   "nordic-fjord",
+  // 2026 additions
+  "tokyo-night",
+  "sunset-drive",
+  "deep-ocean",
+  "royal-velvet",
+  "forest-fire",
 ]);
 
 function isAccentId(v: string): v is AccentColor {
