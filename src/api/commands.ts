@@ -375,6 +375,20 @@ export function updateLocalWorklog(args: {
 }
 
 /**
+ * `push_local_worklog(local_id): WorklogRow`
+ *
+ * Force-sync a local-only worklog (one with no upstream id) to the
+ * provider that owns its `issue_key`. Used by the "Synchronizovat" action
+ * on rows showing the ⚠ lokální chip — typically rows whose initial POST
+ * failed (offline, 429, sub-minute duration rejected upstream).
+ *
+ * Errors out if the row is already synced or has no issue assigned.
+ */
+export function pushLocalWorklog(localId: number): Promise<WorklogRow> {
+  return invoke<WorklogRow>("push_local_worklog", { localId });
+}
+
+/**
  * Soft-delete a worklog. Marks `pending_delete_at` locally; backend fires
  * the actual Jira DELETE after a 5s undo grace window. Frontend should
  * optimistically hide the row and show an undo toast.

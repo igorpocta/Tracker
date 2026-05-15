@@ -1042,6 +1042,102 @@ pub async fn retry_failed_audit_action(
 // Phase 18A — unassigned timer + local-only delete (Items 4, 7)
 // -----------------------------------------------------------------------------
 
+/// Push a local-only worklog upstream (Jira or Freelo, dispatched by issue
+/// key prefix). Used by the "Synchronizovat" action on rows that already
+/// have an `issue_key` but no upstream `jira_worklog_id` — typically because
+/// the original POST failed (network blip, 429, sub-minute duration, etc.).
+///
+/// Differs from [`assign_worklog_issue`] in that it does NOT require
+/// `pending_assignment`; it operates on any row whose remote id is null.
+/// On success the row's `jira_worklog_id` is filled and `worklog-updated` is
+/// emitted so the UI removes the "⚠ lokální" chip.
+#[tauri::command]
+pub async fn push_local_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    local_id: i64,
+) -> Result<WorklogRow, String> {
+    let before = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen".to_string())?;
+    if before.jira_worklog_id.is_some() {
+        return Err("Záznam je již synchronizovaný".into());
+    }
+    if before.issue_key.trim().is_empty() {
+        return Err("Záznam nemá přiřazený úkol — nejprve ho přiřaďte".into());
+    }
+    let issue_key = before.issue_key.clone();
+
+    if freelo::is_freelo_key(&issue_key) {
+        let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
+        let (client, cfg) = match client {
+            ProviderClient::Freelo(c, cfg) => (c, cfg),
+            _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
+        };
+        let user_id = cfg
+            .sync_user_id
+            .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+        let saved = match freelo::ops::add_work_report(
+            &client,
+            &state.db,
+            &issue_key,
+            before.started_at.saturating_mul(1000),
+            before.duration_s,
+            before.comment.as_deref(),
+            0,
+            user_id,
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => return Err(format!("Freelo: {e}")),
+        };
+        // The freelo upsert created a NEW row keyed by freelo:N. Remove the
+        // old local-only row so we don't end up with duplicates.
+        let _ = cache::worklogs::delete_local_only(&state.db, local_id);
+        let _ = app.emit("worklog-updated", &saved);
+        return Ok(saved);
+    }
+
+    // Jira path.
+    let client = state
+        .jira_client_cloned()
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    let started_dt = Utc
+        .timestamp_opt(before.started_at, 0)
+        .single()
+        .ok_or_else(|| "Neplatný čas začátku".to_string())?;
+    let resp = client
+        .add_worklog(
+            &issue_key,
+            started_dt,
+            before.duration_s,
+            before.comment.as_deref(),
+        )
+        .await
+        .map_err(|e| format!("Jira: {e}"))?;
+
+    let (issue_id, summary) =
+        match cache::issues::get_by_key(&state.db, &issue_key).map_err(|e| e.to_string())? {
+            Some(row) => (row.issue_id, Some(row.summary)),
+            None => (resp.issue_id.clone(), None),
+        };
+    cache::worklogs::assign_issue(
+        &state.db,
+        local_id,
+        &issue_key,
+        issue_id.as_deref(),
+        summary.as_deref(),
+        Some(&resp.id),
+    )
+    .map_err(|e| e.to_string())?;
+    let after = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam zmizel po synchronizaci".to_string())?;
+    let _ = app.emit("worklog-updated", &after);
+    Ok(after)
+}
+
 /// Assign an issue to a previously-unassigned worklog (one that was stopped
 /// without a selected issue). Pushes a fresh POST to the provider so the
 /// worklog becomes "real", links the provider id locally, and clears

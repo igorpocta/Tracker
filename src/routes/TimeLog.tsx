@@ -28,6 +28,7 @@ import {
   deleteWorklog,
   deleteLocalOnlyWorklog,
   getWorklogsForRange,
+  pushLocalWorklog,
   undoDeleteWorklog,
   updateLocalWorklog,
   updateWorklog,
@@ -581,25 +582,41 @@ function WorklogRow({
               aria-hidden
             />
           )}
-          {/* Phase 18A — Item 7: visual marker for local-only / unsynced
-              worklogs (no Jira id). */}
-          {!row.jira_worklog_id && !row.pending_assignment && (
-            <span
-              title="Tento záznam se nepodařilo synchronizovat s Jirou"
-              className="font-mono text-[10px] text-orange-500 shrink-0"
-            >
-              ⚠ lokální
-            </span>
-          )}
-          {row.pending_assignment && (
-            <span
-              title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol pomocí kontextového menu"
-              className="font-mono text-[10px] text-red-500 shrink-0"
-            >
-              ⚠ bez úkolu
-            </span>
-          )}
         </button>
+      )}
+
+      {/* Status chips live OUTSIDE the comment-edit button so they can be
+          interactive themselves (HTML doesn't allow nested buttons). */}
+      {!row.jira_worklog_id && !row.pending_assignment && row.id != null && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void (async () => {
+              if (row.id == null) return;
+              try {
+                await pushLocalWorklog(row.id);
+              } catch (err) {
+                console.error("[push_local_worklog] failed:", err);
+              }
+            })();
+          }}
+          title="Klikni pro vynucenou synchronizaci s providerem"
+          className="font-mono text-[10px] text-orange-500 shrink-0
+                     hover:text-orange-400 hover:underline underline-offset-2
+                     transition-colors duration-150"
+        >
+          ⚠ lokální · ↻
+        </button>
+      )}
+      {row.pending_assignment && (
+        <span
+          title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol vlevo"
+          className="font-mono text-[10px] text-red-500 shrink-0"
+        >
+          ⚠ bez úkolu
+        </span>
       )}
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
                        px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
