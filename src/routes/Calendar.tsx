@@ -71,6 +71,8 @@ const MONTHS = [
 export default function Calendar() {
   // Recompute `today` whenever the day actually rolls over — otherwise
   // a session left open past midnight would keep highlighting yesterday.
+  // `rolloverCount` is the trigger; the factory does not read it
+  // directly (it reads `new Date()`), so eslint sees it as unused.
   const { rolloverCount } = useTodayBoundary();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const today = useMemo(() => startOfDay(new Date()), [rolloverCount]);

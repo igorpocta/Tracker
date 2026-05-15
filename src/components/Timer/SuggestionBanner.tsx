@@ -11,6 +11,7 @@ import { Play, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { getSuggestions, startTimer, type Suggestion } from "../../api/commands";
+import { formatIsoDate } from "../../lib/dates";
 import { useTimerStore } from "../../stores/timerStore";
 
 const DISMISS_KEY_PREFIX = "tracker.suggestion.dismissed:";
@@ -27,7 +28,11 @@ export function SuggestionBanner() {
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(() => {
     const out = new Set<string>();
     if (typeof window !== "undefined") {
-      const day = new Date().toISOString().slice(0, 10);
+      // Use the local calendar day, not the UTC slice — otherwise the
+      // dismiss key shifts ±tz-offset hours and a user east of UTC sees
+      // it linger past their midnight while a user west sees it expire
+      // before their day rolls over.
+      const day = formatIsoDate(new Date());
       for (let i = 0; i < window.sessionStorage.length; i++) {
         const k = window.sessionStorage.key(i);
         if (k?.startsWith(`${DISMISS_KEY_PREFIX}${day}:`)) {
@@ -57,7 +62,8 @@ export function SuggestionBanner() {
     }
   };
   const handleDismiss = () => {
-    const day = new Date().toISOString().slice(0, 10);
+    // Local-day key, matching the read path above.
+    const day = formatIsoDate(new Date());
     window.sessionStorage.setItem(
       `${DISMISS_KEY_PREFIX}${day}:${top.issue_key}`,
       "1",
