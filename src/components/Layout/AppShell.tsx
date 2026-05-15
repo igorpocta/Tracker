@@ -25,6 +25,7 @@
  * focus surface — no chrome competing with it).
  */
 import { useQueryClient } from "@tanstack/react-query";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -345,15 +346,7 @@ export function AppShell() {
     <div
       className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
     >
-      {/*
-       * macOS title bar drag is handled NATIVELY now — the window uses
-       * `titleBarStyle: "Transparent"` (see tauri.conf.json) which keeps the
-       * OS title bar present (but visually invisible — our `--bg-app`
-       * shows through) and continues to receive drag events. No custom
-       * drag region needed; clicking-and-dragging in the top 28px works
-       * because that area IS the OS title bar. The `pt-7` on the root
-       * pushes our content below the traffic lights.
-       */}
+      {IS_MAC && <DragStrip />}
       <div className="flex-1 min-h-0 flex">
         <IconSidebar />
 
@@ -456,6 +449,59 @@ export function AppShell() {
 
       <Toaster toasts={toasts} onDismiss={dismissToast} />
     </div>
+  );
+}
+
+/**
+ * macOS Overlay title-bar drag strip.
+ *
+ * `titleBarStyle: "Overlay"` removes the OS title bar visually; we need to
+ * recreate drag-to-move ourselves. We bind React's onMouseDown directly and
+ * call `Window.startDragging()` — imperative, no DOM-attribute scanning,
+ * fully reliable. The module-level static import ensures the API is loaded
+ * before the first click.
+ *
+ * Double-click toggles maximize/restore (macOS title-bar convention).
+ *
+ * Capability `core:window:allow-start-dragging` is added in
+ * `src-tauri/capabilities/default.json`.
+ */
+function DragStrip() {
+  const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button, a, input, textarea, select"))
+      return;
+    e.preventDefault();
+    // Fire and forget; errors in non-Tauri contexts (tests) are silenced.
+    getCurrentWindow()
+      .startDragging()
+      .catch(() => {
+        /* noop */
+      });
+  }, []);
+
+  const onDoubleClick = useCallback(() => {
+    getCurrentWindow()
+      .toggleMaximize()
+      .catch(() => {
+        /* noop */
+      });
+  }, []);
+
+  return (
+    <div
+      aria-hidden
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
+      className="fixed top-0 left-0 right-0 h-8 z-[9999]"
+      data-tauri-drag-region
+      style={
+        {
+          WebkitAppRegion: "drag",
+          appRegion: "drag",
+        } as React.CSSProperties
+      }
+    />
   );
 }
 
