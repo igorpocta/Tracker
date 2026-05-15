@@ -4,6 +4,7 @@
 use chrono::NaiveDate;
 use serde_json::json;
 use tempfile::TempDir;
+use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
 use tracker_lib::cache::issues::IssueRow;
 use tracker_lib::cache::{self, Db};
 use tracker_lib::jira::worklog_sync::sync_worklogs_for_range;
@@ -20,9 +21,46 @@ async fn server_and_client() -> (MockServer, JiraClient) {
     (server, client)
 }
 
+/// Insert a Jira connection row matching the wiremock server. Returns its id —
+/// the value `sync_worklogs_for_range` and the per-connection cache queries
+/// now expect instead of an account id string.
+fn seed_jira_connection(db: &Db, base_url: &str) -> i64 {
+    let config = format!(
+        r#"{{"base_url":"{}","email":"{}","sync_jql":null,"my_issues_jql":null}}"#,
+        base_url, EMAIL
+    );
+    insert_conn(
+        db,
+        NewConnection {
+            provider: "jira",
+            name: "test",
+            enabled: true,
+            config_json: &config,
+        },
+    )
+    .expect("seed connection")
+}
+
+/// Mounts `GET /rest/api/3/myself` returning a fixed `accountId`. The
+/// provider-neutral sync now derives the user from the client itself instead
+/// of taking it as a parameter, so every test that exercises a sync function
+/// must satisfy this call.
+async fn mount_myself(server: &MockServer, account_id: &str) {
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "accountId": account_id,
+            "emailAddress": EMAIL,
+            "displayName": "Alice",
+        })))
+        .mount(server)
+        .await;
+}
+
 #[tokio::test]
 async fn worklog_sync_populates_summary_from_jira_search_response() {
     let (server, client) = server_and_client().await;
+    mount_myself(&server, "me-acc").await;
 
     Mock::given(method("POST"))
         .and(path("/rest/api/3/search/jql"))
@@ -62,13 +100,14 @@ async fn worklog_sync_populates_summary_from_jira_search_response() {
 
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("sync.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, &server.uri());
 
     let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    sync_worklogs_for_range(&client, &db, "me-acc", from, from)
+    sync_worklogs_for_range(&client, &db, conn_id, from, from)
         .await
         .unwrap();
 
-    let rows = cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc")).unwrap();
+    let rows = cache::worklogs::for_date_range(&db, 0, i64::MAX).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].summary.as_deref(),
@@ -84,6 +123,7 @@ async fn worklog_sync_backfills_summary_from_issue_cache() {
     // worklog's summary from the cache (no extra Jira fetch needed).
 
     let (server, client) = server_and_client().await;
+    mount_myself(&server, "me-acc").await;
 
     // Search returns the issue so the local row doesn't get tombstoned by
     // the mark-and-sweep pass.
@@ -127,13 +167,14 @@ async fn worklog_sync_backfills_summary_from_issue_cache() {
 
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("backfill.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, &server.uri());
 
     let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    sync_worklogs_for_range(&client, &db, "me-acc", from, from)
+    sync_worklogs_for_range(&client, &db, conn_id, from, from)
         .await
         .unwrap();
 
-    let row = cache::worklogs::get_by_jira_id(&db, "9999")
+    let row = cache::worklogs::get_by_remote_id(&db, conn_id, "9999")
         .unwrap()
         .expect("row present");
     assert_eq!(
