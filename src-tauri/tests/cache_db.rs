@@ -3,21 +3,36 @@ use tracker_lib::cache::audit::{
     get_by_id as audit_get_by_id, list as audit_list, purge_older_than as audit_purge,
     recent as audit_recent, record as audit_record, AuditEvent, AuditOp,
 };
+use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
 use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::worklogs::{
-    clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id, get_by_jira_id,
-    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_jira_id, pending_deletes_older_than,
+    clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id, get_by_remote_id_any,
+    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_remote_id, pending_deletes_older_than,
     recent as worklog_recent, record as worklog_record, total_seconds_for_range, update_fields,
-    upsert_from_jira, WorklogRow,
+    upsert_from_remote, WorklogRow,
 };
 use tracker_lib::cache::Db;
 
-fn fresh_db() -> (TempDir, Db) {
+/// `issues_v2` carries an FK to `connections`. Seed one Jira connection so
+/// every `IssueRow` we upsert downstream has a parent row to point at. The
+/// returned id is what tests should stamp on `IssueRow::connection_id` /
+/// `WorklogRow::connection_id`.
+fn fresh_db() -> (TempDir, Db, i64) {
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("t.db")).unwrap();
-    (dir, db)
+    let conn_id = insert_conn(
+        &db,
+        NewConnection {
+            provider: "jira",
+            name: "test",
+            enabled: true,
+            config_json: "{}",
+        },
+    )
+    .expect("seed connection");
+    (dir, db, conn_id)
 }
 
 #[test]
@@ -42,12 +57,18 @@ fn migrations_create_all_core_tables() {
     let db = Db::open(&dir.path().join("t.db")).unwrap();
     let conn = db.pool().get().unwrap();
 
+    // After migration 0012 the v1 tables (`issues`, `recent_worklogs`) were
+    // renamed to `*_legacy` and the new provider-neutral tables came online:
+    // `issues_v2` + `worklogs`. The rest of the operational set kept its
+    // names. We pin both sets so an accidental migration rename in either
+    // direction lights up here.
     for table in [
-        "issues",
+        "issues_v2",
+        "worklogs",
         "active_timer",
-        "recent_worklogs",
         "app_settings",
         "schema_migrations",
+        "connections",
     ] {
         let exists: bool = conn
             .query_row(
@@ -62,29 +83,33 @@ fn migrations_create_all_core_tables() {
 
 #[test]
 fn upsert_and_get_issue_roundtrip() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     let issue = IssueRow {
+        connection_id: conn_id,
+        issue_id: "ABC-1".into(),
         issue_key: "ABC-1".into(),
-        summary: "Fix login".into(),
-        status_category: Some("indeterminate".into()),
+        name: "Fix login".into(),
+        status: Some("In Progress".into()),
         updated_at: 1_700_000_000,
         ..Default::default()
     };
     upsert(&db, &issue).unwrap();
 
     let got = get_by_key(&db, "ABC-1").unwrap().unwrap();
-    assert_eq!(got.summary, "Fix login");
-    assert_eq!(got.status_category.as_deref(), Some("indeterminate"));
+    assert_eq!(got.name, "Fix login");
+    assert_eq!(got.status.as_deref(), Some("In Progress"));
 }
 
 #[test]
 fn upsert_overwrites_existing_issue() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     upsert(
         &db,
         &IssueRow {
+            connection_id: conn_id,
+            issue_id: "ABC-1".into(),
             issue_key: "ABC-1".into(),
-            summary: "Old summary".into(),
+            name: "Old summary".into(),
             updated_at: 1,
             ..Default::default()
         },
@@ -93,8 +118,10 @@ fn upsert_overwrites_existing_issue() {
     upsert(
         &db,
         &IssueRow {
+            connection_id: conn_id,
+            issue_id: "ABC-1".into(),
             issue_key: "ABC-1".into(),
-            summary: "New summary".into(),
+            name: "New summary".into(),
             updated_at: 2,
             ..Default::default()
         },
@@ -102,24 +129,26 @@ fn upsert_overwrites_existing_issue() {
     .unwrap();
 
     let got = get_by_key(&db, "ABC-1").unwrap().unwrap();
-    assert_eq!(got.summary, "New summary");
+    assert_eq!(got.name, "New summary");
     assert_eq!(got.updated_at, 2);
 }
 
 #[test]
 fn get_by_key_returns_none_for_missing() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     assert!(get_by_key(&db, "NOPE-1").unwrap().is_none());
 }
 
 #[test]
 fn search_matches_summary_substring_case_insensitive() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     upsert(
         &db,
         &IssueRow {
+            connection_id: conn_id,
+            issue_id: "A-1".into(),
             issue_key: "A-1".into(),
-            summary: "Login bug".into(),
+            name: "Login bug".into(),
             updated_at: 1,
             ..Default::default()
         },
@@ -128,8 +157,10 @@ fn search_matches_summary_substring_case_insensitive() {
     upsert(
         &db,
         &IssueRow {
+            connection_id: conn_id,
+            issue_id: "A-2".into(),
             issue_key: "A-2".into(),
-            summary: "Database migration".into(),
+            name: "Database migration".into(),
             updated_at: 2,
             ..Default::default()
         },
@@ -143,7 +174,7 @@ fn search_matches_summary_substring_case_insensitive() {
 
 #[test]
 fn timer_singleton_overwrites_on_start() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     timer_start(&db, "A-1", 1_000).unwrap();
     timer_start(&db, "B-2", 2_000).unwrap();
     let t = timer_get(&db).unwrap().unwrap();
@@ -153,7 +184,7 @@ fn timer_singleton_overwrites_on_start() {
 
 #[test]
 fn timer_stop_clears_state() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     timer_start(&db, "A-1", 1).unwrap();
     timer_stop(&db).unwrap();
     assert!(timer_get(&db).unwrap().is_none());
@@ -161,19 +192,20 @@ fn timer_stop_clears_state() {
 
 #[test]
 fn timer_get_returns_none_when_no_timer() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     assert!(timer_get(&db).unwrap().is_none());
 }
 
 #[test]
 fn record_and_list_worklogs_ordered_by_logged_at_desc() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     let id1 = worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "A-1".into(),
-            duration_s: 600,
+            connection_id: Some(conn_id),
+            issue_key: Some("A-1".into()),
             started_at: 1,
+            ended_at: 1 + 600,
             logged_at: 100,
             ..Default::default()
         },
@@ -182,9 +214,10 @@ fn record_and_list_worklogs_ordered_by_logged_at_desc() {
     let id2 = worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "A-2".into(),
-            duration_s: 300,
+            connection_id: Some(conn_id),
+            issue_key: Some("A-2".into()),
             started_at: 1,
+            ended_at: 1 + 300,
             logged_at: 200,
             ..Default::default()
         },
@@ -195,22 +228,23 @@ fn record_and_list_worklogs_ordered_by_logged_at_desc() {
 
     let rows = worklog_recent(&db, 10).unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].issue_key, "A-2");
-    assert_eq!(rows[1].issue_key, "A-1");
+    assert_eq!(rows[0].issue_key.as_deref(), Some("A-2"));
+    assert_eq!(rows[1].issue_key.as_deref(), Some("A-1"));
     assert_eq!(rows[0].id, Some(id2));
     assert_eq!(rows[1].id, Some(id1));
 }
 
 #[test]
 fn recent_respects_limit() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     for i in 0..5 {
         worklog_record(
             &db,
             &WorklogRow {
-                issue_key: format!("X-{i}"),
-                duration_s: 60,
+                connection_id: Some(conn_id),
+                issue_key: Some(format!("X-{i}")),
                 started_at: 0,
+                ended_at: 60,
                 logged_at: i,
                 ..Default::default()
             },
@@ -223,13 +257,13 @@ fn recent_respects_limit() {
 
 #[test]
 fn settings_get_returns_none_for_missing_key() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     assert!(setting_get(&db, "no.such.key").unwrap().is_none());
 }
 
 #[test]
 fn settings_set_and_get_roundtrip() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     setting_set(&db, "daily_goal_minutes", "480").unwrap();
     assert_eq!(
         setting_get(&db, "daily_goal_minutes").unwrap().as_deref(),
@@ -239,7 +273,7 @@ fn settings_set_and_get_roundtrip() {
 
 #[test]
 fn settings_set_overwrites_existing_value() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     setting_set(&db, "k", "v1").unwrap();
     setting_set(&db, "k", "v2").unwrap();
     assert_eq!(setting_get(&db, "k").unwrap().as_deref(), Some("v2"));
@@ -250,52 +284,58 @@ fn settings_set_overwrites_existing_value() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn migration_runner_applies_v1_then_v2_on_existing_db() {
-    // Simulate an "upgraded" database: create a fresh DB but manually delete
-    // the v2 row from schema_migrations and the v2-introduced columns. The
-    // next Db::open() should then re-apply 0002 cleanly.
+fn migration_runner_replays_idempotently_on_reopen() {
+    // Open the DB once to apply every migration, then reopen it. The migration
+    // runner must be idempotent (each version recorded in schema_migrations
+    // gates a re-run), so the second open should not flap on the v2 tables.
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("upgrade.db");
     {
         let db = Db::open(&path).unwrap();
-        // Insert a v1-style row (no Jira columns) to ensure data survives.
-        let conn = db.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO recent_worklogs (issue_key, duration_s, started_at, logged_at)
-             VALUES ('OLD-1', 600, 1, 1)",
-            [],
+        // Insert a row through the provider-neutral upsert path to make
+        // sure data is in place across the reopen. The original test
+        // inserted into the now-legacy `recent_worklogs`; we use the new
+        // `worklogs` table via `record(...)` instead.
+        let conn_id = insert_conn(
+            &db,
+            NewConnection {
+                provider: "jira",
+                name: "test",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+        worklog_record(
+            &db,
+            &WorklogRow {
+                connection_id: Some(conn_id),
+                issue_key: Some("OLD-1".into()),
+                started_at: 1,
+                ended_at: 1 + 600,
+                logged_at: 1,
+                updated_at: 1,
+                ..Default::default()
+            },
         )
         .unwrap();
     }
 
-    // Reopen — migrations are idempotent thanks to the schema_migrations
-    // table; this exercises "no-op v2" on a fully-migrated DB.
+    // Reopen — every prior migration must already be marked applied; the
+    // pre-existing row must still be queryable.
     let db = Db::open(&path).unwrap();
     let conn = db.pool().get().unwrap();
     let exists: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM recent_worklogs WHERE issue_key = 'OLD-1')",
+            "SELECT EXISTS(SELECT 1 FROM worklogs WHERE issue_key = 'OLD-1')",
             [],
             |r| r.get(0),
         )
         .unwrap();
     assert!(exists, "row from before reopen should still exist");
 
-    // Confirm the v2 columns are still there.
-    let mut stmt = conn.prepare("PRAGMA table_info(recent_worklogs)").unwrap();
-    let names: Vec<String> = stmt
-        .query_map([], |r| r.get::<_, String>(1))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    for col in ["author_account_id", "source", "updated_at"] {
-        assert!(
-            names.iter().any(|n| n == col),
-            "column {col} missing after reopen"
-        );
-    }
-
-    // schema_migrations should record both versions.
+    // schema_migrations should record every applied version (1..=14 at the
+    // time of writing — keep this in lockstep with `migrations/`).
     let mut stmt = conn
         .prepare("SELECT version FROM schema_migrations ORDER BY version ASC")
         .unwrap();
@@ -304,23 +344,37 @@ fn migration_runner_applies_v1_then_v2_on_existing_db() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
 }
 
 #[test]
-fn migration_0002_adds_authority_columns() {
-    let (_d, db) = fresh_db();
+fn worklogs_table_has_provider_neutral_columns() {
+    // The v1 `recent_worklogs` carried Jira-specific columns
+    // (`author_account_id`, `source`, `updated_at_jira`). Migration 0012
+    // replaces it with `worklogs` whose schema is provider-agnostic:
+    // `connection_id` + `is_synced`/`synced_at`/`remote_id` carry the same
+    // information without baking Jira semantics into column names.
+    let (_d, db, _) = fresh_db();
     let conn = db.pool().get().unwrap();
 
-    // Read column names from PRAGMA table_info.
-    let mut stmt = conn.prepare("PRAGMA table_info(recent_worklogs)").unwrap();
+    let mut stmt = conn.prepare("PRAGMA table_info(worklogs)").unwrap();
     let names: Vec<String> = stmt
         .query_map([], |r| r.get::<_, String>(1))
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
 
-    for col in ["author_account_id", "source", "updated_at"] {
+    for col in [
+        "connection_id",
+        "issue_key",
+        "description",
+        "started_at",
+        "ended_at",
+        "is_synced",
+        "synced_at",
+        "remote_id",
+        "tombstoned_at",
+    ] {
         assert!(
             names.iter().any(|n| n == col),
             "column {col} should exist (have: {names:?})"
@@ -329,40 +383,42 @@ fn migration_0002_adds_authority_columns() {
 }
 
 #[test]
-fn upsert_from_jira_replaces_by_jira_id() {
-    let (_d, db) = fresh_db();
+fn upsert_from_remote_replaces_by_remote_id() {
+    let (_d, db, conn_id) = fresh_db();
 
     // Insert an initial Jira-sourced row.
-    let id1 = upsert_from_jira(
+    let id1 = upsert_from_remote(
         &db,
         &WorklogRow {
-            issue_key: "ACME-1".into(),
-            duration_s: 600,
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-1".into()),
+            description: Some("initial".into()),
             started_at: 100,
+            ended_at: 100 + 600,
             logged_at: 100,
-            comment: Some("initial".into()),
-            jira_worklog_id: Some("J-42".into()),
-            author_account_id: Some("user-a".into()),
-            source: "jira".into(),
-            updated_at_jira: Some(1_000),
+            updated_at: 1_000,
+            is_synced: true,
+            synced_at: Some(1_000),
+            remote_id: Some("J-42".into()),
             ..Default::default()
         },
     )
     .unwrap();
 
-    // Replace via the same jira id with updated data.
-    let id2 = upsert_from_jira(
+    // Replace via the same remote id with updated data.
+    let id2 = upsert_from_remote(
         &db,
         &WorklogRow {
-            issue_key: "ACME-1".into(),
-            duration_s: 900,
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-1".into()),
+            description: Some("updated".into()),
             started_at: 100,
+            ended_at: 100 + 900,
             logged_at: 200,
-            comment: Some("updated".into()),
-            jira_worklog_id: Some("J-42".into()),
-            author_account_id: Some("user-a".into()),
-            source: "jira".into(),
-            updated_at_jira: Some(2_000),
+            updated_at: 2_000,
+            is_synced: true,
+            synced_at: Some(2_000),
+            remote_id: Some("J-42".into()),
             ..Default::default()
         },
     )
@@ -374,40 +430,41 @@ fn upsert_from_jira_replaces_by_jira_id() {
 
     let all = worklog_recent(&db, 50).unwrap();
     assert_eq!(all.len(), 1, "should still be exactly one row");
-    assert_eq!(all[0].duration_s, 900);
-    assert_eq!(all[0].comment.as_deref(), Some("updated"));
-    assert_eq!(all[0].updated_at_jira, Some(2_000));
-    assert_eq!(all[0].source, "jira");
+    assert_eq!(all[0].duration_s(), 900);
+    assert_eq!(all[0].description.as_deref(), Some("updated"));
+    assert_eq!(all[0].synced_at, Some(2_000));
+    assert!(all[0].is_synced);
 }
 
 #[test]
-fn upsert_from_jira_rejects_missing_jira_id() {
-    let (_d, db) = fresh_db();
-    let result = upsert_from_jira(
+fn upsert_from_remote_rejects_missing_remote_id() {
+    let (_d, db, conn_id) = fresh_db();
+    let result = upsert_from_remote(
         &db,
         &WorklogRow {
-            issue_key: "A-1".into(),
-            duration_s: 60,
+            connection_id: Some(conn_id),
+            issue_key: Some("A-1".into()),
+            started_at: 0,
+            ended_at: 60,
             ..Default::default()
         },
     );
-    assert!(result.is_err(), "missing jira_worklog_id must be rejected");
+    assert!(result.is_err(), "missing remote_id must be rejected");
 }
 
 #[test]
 fn for_date_range_filters_and_orders() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
 
     // started_at = 1000 — inside the range.
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "IN-1".into(),
-            duration_s: 100,
+            connection_id: Some(conn_id),
+            issue_key: Some("IN-1".into()),
             started_at: 1_000,
+            ended_at: 1_000 + 100,
             logged_at: 1_000,
-            author_account_id: Some("me".into()),
-            source: "local".into(),
             ..Default::default()
         },
     )
@@ -417,12 +474,11 @@ fn for_date_range_filters_and_orders() {
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "IN-2".into(),
-            duration_s: 200,
+            connection_id: Some(conn_id),
+            issue_key: Some("IN-2".into()),
             started_at: 2_000,
+            ended_at: 2_000 + 200,
             logged_at: 2_000,
-            author_account_id: Some("me".into()),
-            source: "local".into(),
             ..Default::default()
         },
     )
@@ -432,55 +488,38 @@ fn for_date_range_filters_and_orders() {
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "OUT-1".into(),
-            duration_s: 50,
+            connection_id: Some(conn_id),
+            issue_key: Some("OUT-1".into()),
             started_at: 5_000,
+            ended_at: 5_000 + 50,
             logged_at: 5_000,
-            author_account_id: Some("me".into()),
-            source: "local".into(),
             ..Default::default()
         },
     )
     .unwrap();
 
-    // started_at = 1500, but different author.
-    worklog_record(
-        &db,
-        &WorklogRow {
-            issue_key: "OTHER-1".into(),
-            duration_s: 999,
-            started_at: 1_500,
-            logged_at: 1_500,
-            author_account_id: Some("other".into()),
-            source: "jira".into(),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-
-    // No author filter: should see IN-1, IN-2, and OTHER-1, ordered by
-    // started_at DESC.
-    let all = worklog_for_date_range(&db, 0, 4_000, None).unwrap();
-    let keys: Vec<&str> = all.iter().map(|w| w.issue_key.as_str()).collect();
-    assert_eq!(keys, vec!["IN-2", "OTHER-1", "IN-1"]);
-
-    // Filter by author "me": should only see IN-2 and IN-1.
-    let mine = worklog_for_date_range(&db, 0, 4_000, Some("me")).unwrap();
-    let keys: Vec<&str> = mine.iter().map(|w| w.issue_key.as_str()).collect();
+    // The account-id filter is gone from `for_date_range` (it's implicit
+    // per-connection now). Asserting the basic in/out behavior captures
+    // the surviving contract.
+    let all = worklog_for_date_range(&db, 0, 4_000).unwrap();
+    let keys: Vec<&str> = all
+        .iter()
+        .map(|w| w.issue_key.as_deref().unwrap_or(""))
+        .collect();
     assert_eq!(keys, vec!["IN-2", "IN-1"]);
 }
 
 #[test]
 fn total_seconds_for_range_sums_correctly() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "A".into(),
-            duration_s: 100,
+            connection_id: Some(conn_id),
+            issue_key: Some("A".into()),
             started_at: 1_000,
+            ended_at: 1_000 + 100,
             logged_at: 1_000,
-            author_account_id: Some("me".into()),
             ..Default::default()
         },
     )
@@ -488,23 +527,11 @@ fn total_seconds_for_range_sums_correctly() {
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "B".into(),
-            duration_s: 250,
+            connection_id: Some(conn_id),
+            issue_key: Some("B".into()),
             started_at: 2_000,
+            ended_at: 2_000 + 250,
             logged_at: 2_000,
-            author_account_id: Some("me".into()),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    worklog_record(
-        &db,
-        &WorklogRow {
-            issue_key: "OTHER".into(),
-            duration_s: 7_000,
-            started_at: 2_000,
-            logged_at: 2_000,
-            author_account_id: Some("other".into()),
             ..Default::default()
         },
     )
@@ -513,24 +540,24 @@ fn total_seconds_for_range_sums_correctly() {
     worklog_record(
         &db,
         &WorklogRow {
-            issue_key: "C".into(),
-            duration_s: 50,
+            connection_id: Some(conn_id),
+            issue_key: Some("C".into()),
             started_at: 9_999,
+            ended_at: 9_999 + 50,
             logged_at: 9_999,
-            author_account_id: Some("me".into()),
             ..Default::default()
         },
     )
     .unwrap();
 
-    let total_me = total_seconds_for_range(&db, 0, 5_000, Some("me")).unwrap();
-    assert_eq!(total_me, 350);
-
-    let total_all = total_seconds_for_range(&db, 0, 5_000, None).unwrap();
-    assert_eq!(total_all, 7_350);
+    // `total_seconds_for_range` no longer accepts an author filter (per-
+    // connection is implicit). The sum is now duration-derived from
+    // `ended_at - started_at`.
+    let total = total_seconds_for_range(&db, 0, 5_000).unwrap();
+    assert_eq!(total, 350);
 
     // Empty range.
-    let none = total_seconds_for_range(&db, 100_000, 200_000, None).unwrap();
+    let none = total_seconds_for_range(&db, 100_000, 200_000).unwrap();
     assert_eq!(none, 0);
 }
 
@@ -538,25 +565,21 @@ fn total_seconds_for_range_sums_correctly() {
 // Phase 15: soft-delete + tombstone + audit
 // -----------------------------------------------------------------------------
 
-fn seed_jira_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
-    upsert_from_jira(
+fn seed_remote_row(db: &Db, conn_id: i64, remote_id: &str, issue_key: &str) -> i64 {
+    upsert_from_remote(
         db,
         &WorklogRow {
-            id: None,
-            issue_key: issue_key.into(),
-            issue_id: Some("10001".into()),
-            summary: Some("S".into()),
-            duration_s: 1800,
+            connection_id: Some(conn_id),
+            issue_key: Some(issue_key.into()),
+            description: Some("c".into()),
             started_at: 1_700_000_000,
+            ended_at: 1_700_000_000 + 1800,
             logged_at: 1_700_000_000,
-            comment: Some("c".into()),
-            jira_worklog_id: Some(jira_id.into()),
-            author_account_id: Some("me".into()),
-            source: "jira".into(),
-            updated_at_jira: Some(1_700_000_000),
-            pending_delete_at: None,
-            tombstoned_at: None,
-            pending_assignment: false,
+            updated_at: 1_700_000_000,
+            is_synced: true,
+            synced_at: Some(1_700_000_000),
+            remote_id: Some(remote_id.into()),
+            ..Default::default()
         },
     )
     .unwrap()
@@ -564,8 +587,8 @@ fn seed_jira_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
 
 #[test]
 fn mark_pending_delete_then_clear_roundtrip() {
-    let (_d, db) = fresh_db();
-    let id = seed_jira_row(&db, "j-1", "K-1");
+    let (_d, db, conn_id) = fresh_db();
+    let id = seed_remote_row(&db, conn_id, "j-1", "K-1");
 
     mark_pending_delete(&db, id, 1_700_000_100).unwrap();
     let row = get_by_id(&db, id).unwrap().unwrap();
@@ -579,8 +602,8 @@ fn mark_pending_delete_then_clear_roundtrip() {
 
 #[test]
 fn mark_tombstoned_clears_pending_delete() {
-    let (_d, db) = fresh_db();
-    let id = seed_jira_row(&db, "j-1", "K-1");
+    let (_d, db, conn_id) = fresh_db();
+    let id = seed_remote_row(&db, conn_id, "j-1", "K-1");
     mark_pending_delete(&db, id, 1_700_000_100).unwrap();
 
     mark_tombstoned(&db, id, 1_700_000_200).unwrap();
@@ -590,13 +613,13 @@ fn mark_tombstoned_clears_pending_delete() {
 }
 
 #[test]
-fn mark_tombstoned_by_jira_id_targets_correct_row() {
-    let (_d, db) = fresh_db();
-    let _a = seed_jira_row(&db, "j-a", "K-1");
-    let b = seed_jira_row(&db, "j-b", "K-1");
-    mark_tombstoned_by_jira_id(&db, "j-b", 1_700_000_300).unwrap();
+fn mark_tombstoned_by_remote_id_targets_correct_row() {
+    let (_d, db, conn_id) = fresh_db();
+    let _a = seed_remote_row(&db, conn_id, "j-a", "K-1");
+    let b = seed_remote_row(&db, conn_id, "j-b", "K-1");
+    mark_tombstoned_by_remote_id(&db, conn_id, "j-b", 1_700_000_300).unwrap();
 
-    let row_a = get_by_jira_id(&db, "j-a").unwrap().unwrap();
+    let row_a = get_by_remote_id_any(&db, "j-a").unwrap().unwrap();
     let row_b = get_by_id(&db, b).unwrap().unwrap();
     assert!(row_a.tombstoned_at.is_none());
     assert_eq!(row_b.tombstoned_at, Some(1_700_000_300));
@@ -604,9 +627,9 @@ fn mark_tombstoned_by_jira_id_targets_correct_row() {
 
 #[test]
 fn pending_deletes_older_than_filters_correctly() {
-    let (_d, db) = fresh_db();
-    let id_old = seed_jira_row(&db, "j-old", "K-1");
-    let id_new = seed_jira_row(&db, "j-new", "K-1");
+    let (_d, db, conn_id) = fresh_db();
+    let id_old = seed_remote_row(&db, conn_id, "j-old", "K-1");
+    let id_new = seed_remote_row(&db, conn_id, "j-new", "K-1");
     mark_pending_delete(&db, id_old, 100).unwrap();
     mark_pending_delete(&db, id_new, 10_000).unwrap();
 
@@ -618,42 +641,45 @@ fn pending_deletes_older_than_filters_correctly() {
 
 #[test]
 fn update_fields_writes_new_values() {
-    let (_d, db) = fresh_db();
-    let id = seed_jira_row(&db, "j-1", "K-1");
+    let (_d, db, conn_id) = fresh_db();
+    let id = seed_remote_row(&db, conn_id, "j-1", "K-1");
+    // `update_fields` now takes a slimmer arg list: (id, issue_key,
+    // description, started_at, ended_at, synced_at). The old call sig
+    // included issue_id/summary/duration_s/updated_at_jira — all dropped
+    // or moved to derived/JOIN territory.
     update_fields(
         &db,
         id,
-        "K-2",
-        Some("20002"),
-        Some("New summary"),
-        3600,
-        1_800_000_000,
+        Some("K-2"),
         Some("Updated"),
+        1_800_000_000,
+        1_800_000_000 + 3600,
         Some(1_800_000_500),
     )
     .unwrap();
 
     let row = get_by_id(&db, id).unwrap().unwrap();
-    assert_eq!(row.issue_key, "K-2");
-    assert_eq!(row.issue_id.as_deref(), Some("20002"));
-    assert_eq!(row.summary.as_deref(), Some("New summary"));
-    assert_eq!(row.duration_s, 3600);
+    assert_eq!(row.issue_key.as_deref(), Some("K-2"));
+    assert_eq!(row.duration_s(), 3600);
     assert_eq!(row.started_at, 1_800_000_000);
-    assert_eq!(row.comment.as_deref(), Some("Updated"));
-    assert_eq!(row.updated_at_jira, Some(1_800_000_500));
+    assert_eq!(row.description.as_deref(), Some("Updated"));
+    assert_eq!(row.synced_at, Some(1_800_000_500));
+    assert!(row.is_synced);
 }
 
 #[test]
 fn audit_record_and_recent_roundtrip() {
-    let (_d, db) = fresh_db();
+    let (_d, db, conn_id) = fresh_db();
     let row = WorklogRow {
         id: Some(1),
-        issue_key: "K-1".into(),
-        duration_s: 1800,
+        connection_id: Some(conn_id),
+        issue_key: Some("K-1".into()),
         started_at: 1,
+        ended_at: 1 + 1800,
         logged_at: 1,
-        jira_worklog_id: Some("j-1".into()),
-        source: "jira".into(),
+        updated_at: 1,
+        is_synced: true,
+        remote_id: Some("j-1".into()),
         ..Default::default()
     };
 
@@ -705,15 +731,15 @@ fn audit_record_and_recent_roundtrip() {
 
 #[test]
 fn worklog_default_recent_hides_tombstoned() {
-    let (_d, db) = fresh_db();
-    let id = seed_jira_row(&db, "j-1", "K-1");
-    let _ = seed_jira_row(&db, "j-2", "K-1");
+    let (_d, db, conn_id) = fresh_db();
+    let id = seed_remote_row(&db, conn_id, "j-1", "K-1");
+    let _ = seed_remote_row(&db, conn_id, "j-2", "K-1");
     mark_tombstoned(&db, id, 1_700_000_500).unwrap();
 
     let recent_rows = worklog_recent(&db, 50).unwrap();
     let ids: Vec<&str> = recent_rows
         .iter()
-        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .map(|r| r.remote_id.as_deref().unwrap_or(""))
         .collect();
     assert!(ids.contains(&"j-2"));
     assert!(!ids.contains(&"j-1"));
@@ -743,7 +769,7 @@ fn seed_audit_op(db: &Db, op: AuditOp, occurred_at: i64, success: bool, key: &st
 
 #[test]
 fn audit_log_pagination_by_before_id_returns_correct_slice() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     // Seed 5 rows with strictly increasing occurred_at.
     let _id1 = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
     let _id2 = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
@@ -774,7 +800,7 @@ fn audit_log_pagination_by_before_id_returns_correct_slice() {
 
 #[test]
 fn audit_log_filter_ops_restricts_results() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
     let _ = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
     let _ = seed_audit_op(&db, AuditOp::Delete, 300, true, "K-2");
@@ -798,7 +824,7 @@ fn audit_log_filter_ops_restricts_results() {
 
 #[test]
 fn audit_log_filter_only_failed_excludes_successful_entries() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
     let _ = seed_audit_op(&db, AuditOp::Create, 200, false, "K-1");
     let _ = seed_audit_op(&db, AuditOp::Delete, 300, false, "K-1");
@@ -811,7 +837,7 @@ fn audit_log_filter_only_failed_excludes_successful_entries() {
 
 #[test]
 fn audit_log_default_uses_50_limit_by_recent() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     for i in 0..60 {
         seed_audit_op(&db, AuditOp::Create, 100 + i, true, "K-1");
     }
@@ -824,7 +850,7 @@ fn audit_log_default_uses_50_limit_by_recent() {
 
 #[test]
 fn audit_get_by_id_returns_full_entry_or_none() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     let id = seed_audit_op(&db, AuditOp::Delete, 100, true, "K-1");
     let entry = audit_get_by_id(&db, id).unwrap().expect("present");
     assert_eq!(entry.op, "delete");
@@ -835,7 +861,7 @@ fn audit_get_by_id_returns_full_entry_or_none() {
 
 #[test]
 fn audit_purge_older_than_removes_old_rows_only() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     let _ = seed_audit_op(&db, AuditOp::Create, 100, true, "K-1");
     let _ = seed_audit_op(&db, AuditOp::Update, 200, true, "K-1");
     let kept = seed_audit_op(&db, AuditOp::Delete, 400, true, "K-1");
@@ -850,7 +876,7 @@ fn audit_purge_older_than_removes_old_rows_only() {
 
 #[test]
 fn audit_source_audit_id_linkage_persists() {
-    let (_d, db) = fresh_db();
+    let (_d, db, _) = fresh_db();
     let original = seed_audit_op(&db, AuditOp::Delete, 100, true, "K-1");
     let restore_id = audit_record(
         &db,
