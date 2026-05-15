@@ -16,15 +16,33 @@ use std::sync::RwLock;
 use crate::cache::{self, activity::ActivityRecorder, Db};
 use crate::commands::connections::{FreeloConnectionConfig, JiraConnectionConfig};
 use crate::config::JiraConfig;
-use crate::freelo::FreeloClient;
+use crate::freelo::{FreeloClient, FreeloService};
 use crate::jira::JiraClient;
+use crate::worklog_service::WorklogService;
 
 /// Discriminated provider clients. Phase 18E added the Freelo variant; future
 /// providers (Toggl, Clockify, …) get their own variant here.
+///
+/// Phase B4 — the Freelo variant now wraps both client and config in a
+/// [`FreeloService`] so it can implement the provider-agnostic
+/// [`WorklogService`] trait. Code that needs the underlying client should
+/// reach for `svc.client`; code that needs the config uses `svc.config`.
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
     Jira(JiraClient),
-    Freelo(FreeloClient, FreeloConnectionConfig),
+    Freelo(FreeloService),
+}
+
+impl ProviderClient {
+    /// Return a trait-object view of this provider for sync orchestration.
+    /// New providers plug in by adding a variant + `impl WorklogService`;
+    /// the orchestrator stays untouched.
+    pub fn as_service(&self) -> &dyn WorklogService {
+        match self {
+            ProviderClient::Jira(c) => c,
+            ProviderClient::Freelo(svc) => svc,
+        }
+    }
 }
 
 /// An "active" connection: the row from the DB plus a built HTTP client.
@@ -142,7 +160,7 @@ impl AppState {
                         kind: row.provider.clone(),
                         name: row.name.clone(),
                         enabled: row.enabled,
-                        client: ProviderClient::Freelo(client, cfg),
+                        client: ProviderClient::Freelo(FreeloService::new(client, cfg)),
                     });
                 }
                 _ => continue, // unknown provider

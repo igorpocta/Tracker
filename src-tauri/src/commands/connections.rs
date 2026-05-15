@@ -512,7 +512,7 @@ pub async fn list_my_issues(
             }
             Ok(out)
         }
-        crate::state::ProviderClient::Freelo(_client, _cfg) => {
+        crate::state::ProviderClient::Freelo(_svc) => {
             // For Freelo: recent tasks from the cache (the sync pass writes
             // them on the schedule). We filter to keys that start with the
             // Freelo prefix to avoid mixing with Jira issues.

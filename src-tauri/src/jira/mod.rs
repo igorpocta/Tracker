@@ -13,6 +13,7 @@ pub mod jql;
 pub mod models;
 pub mod reconstruct;
 pub mod worklog_ops;
+pub mod worklog_service_impl;
 pub mod worklog_sync;
 
 pub use adf::{extract_adf_text, make_adf_comment};

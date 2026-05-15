@@ -15,6 +15,7 @@ pub mod tray;
 pub mod tray_pulse;
 pub mod tray_ticker;
 pub mod validation;
+pub mod worklog_service;
 
 use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone};
 use tauri::{Emitter, Manager};

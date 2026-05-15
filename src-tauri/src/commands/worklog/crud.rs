@@ -235,7 +235,7 @@ fn resolve_client_for_issue(
     let want_freelo = freelo::is_freelo_key(issue_key);
     for c in conns.iter().filter(|c| c.enabled) {
         match (&c.client, want_freelo) {
-            (ProviderClient::Freelo(_, _), true) => return Ok((c.id, c.client.clone())),
+            (ProviderClient::Freelo(_), true) => return Ok((c.id, c.client.clone())),
             (ProviderClient::Jira(_), false) => return Ok((c.id, c.client.clone())),
             _ => {}
         }
@@ -369,7 +369,7 @@ async fn create_freelo_worklog(
 
     let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
     let (client, cfg) = match client {
-        ProviderClient::Freelo(c, cfg) => (c, cfg),
+        ProviderClient::Freelo(svc) => (svc.client, svc.config),
         _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
     };
     let user_id = cfg
@@ -645,7 +645,7 @@ async fn update_freelo_worklog(
 
     let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
     let client = match client {
-        ProviderClient::Freelo(c, _) => c,
+        ProviderClient::Freelo(svc) => svc.client,
         _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
     };
 
@@ -907,7 +907,7 @@ pub async fn push_local_worklog(
     if freelo::is_freelo_key(&issue_key) {
         let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
         let (client, cfg) = match client {
-            ProviderClient::Freelo(c, cfg) => (c, cfg),
+            ProviderClient::Freelo(svc) => (svc.client, svc.config),
             _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
         };
         let user_id = cfg
@@ -992,7 +992,7 @@ pub async fn assign_worklog_issue(
     if freelo::is_freelo_key(&issue_key) {
         let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
         let (client, cfg) = match client {
-            ProviderClient::Freelo(c, cfg) => (c, cfg),
+            ProviderClient::Freelo(svc) => (svc.client, svc.config),
             _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
         };
         let user_id = cfg
@@ -1182,7 +1182,7 @@ pub async fn commit_pending_delete(
                 .read()
                 .expect("AppState.connections RwLock poisoned");
             conns.iter().find_map(|c| match &c.client {
-                ProviderClient::Freelo(client, _) => Some(client.clone()),
+                ProviderClient::Freelo(svc) => Some(svc.client.clone()),
                 _ => None,
             })
         };

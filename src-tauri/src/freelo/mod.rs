@@ -25,9 +25,11 @@ pub mod models;
 pub mod ops;
 pub mod reconstruct;
 pub mod sync;
+pub mod worklog_service_impl;
 
 pub use client::{FreeloClient, FreeloError};
 pub use models::{FreeloProject, FreeloTask, FreeloUser, FreeloWorkReport};
+pub use worklog_service_impl::FreeloService;
 
 /// Synthetic prefix for Freelo task keys in the shared `issues` table.
 /// User-visible — must match what the UI pill renders (`FREELO-12345`).

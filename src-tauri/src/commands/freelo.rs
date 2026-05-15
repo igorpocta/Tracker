@@ -41,7 +41,7 @@ fn freelo_config_for(
         .find(|c| c.id == connection_id && c.enabled)
         .ok_or_else(|| "Freelo připojení není aktivní".to_string())?;
     match &active.client {
-        ProviderClient::Freelo(client, cfg) => Ok((client.clone(), cfg.clone())),
+        ProviderClient::Freelo(svc) => Ok((svc.client.clone(), svc.config.clone())),
         _ => Err("Připojení není Freelo".into()),
     }
 }

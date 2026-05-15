@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::cache;
-use crate::freelo;
 use crate::jira;
-use crate::state::{AppState, ProviderClient};
+use crate::state::AppState;
 
 /// Result payload of [`refresh_all`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,10 +139,12 @@ pub async fn sync_one_connection(
 ) -> (usize, usize) {
     let conn_id = conn.id;
     let conn_name = conn.name.clone();
-    let provider = match &conn.client {
-        ProviderClient::Jira(_) => "jira",
-        ProviderClient::Freelo(_, _) => "freelo",
-    };
+    // Phase B4: dispatch through the WorklogService trait. The provider
+    // tag and the two sync calls both go through `&dyn WorklogService` so
+    // adding Toggl/Clockify/… is one new variant + one new `impl
+    // WorklogService` away.
+    let svc = conn.client.as_service();
+    let provider = svc.provider_name();
     let today = Local::now().date_naive();
     let from = today - Duration::days(mode.worklog_window_days());
     let started_at = Utc::now().timestamp();
@@ -170,94 +171,44 @@ pub async fn sync_one_connection(
 
     emit("connection", None, None);
 
-    // `issues_n` se nastaví v každé větvi match-e (oba providers); init = 0
-    // jen pro `record_sync_run` v chybové cestě, kdy match vrátí brzy.
-    #[allow(unused_assignments)]
-    let mut issues_n = 0usize;
+    let issues_n: usize;
     let mut worklogs_n = 0usize;
     let mut any_error = false;
 
-    match conn.client {
-        ProviderClient::Jira(client) => {
-            emit("issues", None, None);
-            match jira::sync_issues_from_jira(&client, db, conn_id).await {
-                Ok(n) => {
-                    issues_n = n;
-                    emit("issues", Some(n), None);
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    store_sync_error(db, conn_id, "issues", &msg);
-                    emit("issues", None, Some(&msg));
-                    return (0, 0);
-                }
-            }
-
-            if client.myself().await.is_ok() {
-                emit("worklogs", None, None);
-                match jira::worklog_sync::sync_worklogs_for_range(&client, db, conn_id, from, today)
-                    .await
-                {
-                    Ok(n) => {
-                        worklogs_n = n;
-                        emit("worklogs", Some(n), None);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        store_sync_error(db, conn_id, "worklogs", &msg);
-                        emit("worklogs", None, Some(&msg));
-                        any_error = true;
-                    }
-                }
-            }
+    // ---- Issues ---------------------------------------------------------
+    emit("issues", None, None);
+    match svc.sync_issues(db, conn_id).await {
+        Ok(n) => {
+            issues_n = n;
+            emit("issues", Some(n), None);
         }
-        ProviderClient::Freelo(client, cfg) => {
-            emit("issues", None, None);
-            match freelo::sync::sync_issues_for_connection(
-                &client,
-                db,
-                conn_id,
-                &cfg.selected_project_ids,
-            )
-            .await
-            {
-                Ok(n) => {
-                    issues_n = n;
-                    emit("issues", Some(n), None);
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    store_sync_error(db, conn_id, "issues", &msg);
-                    emit("issues", None, Some(&msg));
-                    return (0, 0);
-                }
-            }
+        Err(e) => {
+            let msg = e.to_string();
+            store_sync_error(db, conn_id, "issues", &msg);
+            emit("issues", None, Some(&msg));
+            // Worklog phase is meaningless without a fresh issue catalog
+            // — preserve the pre-B4 short-circuit (no `sync_runs` row when
+            // we never made it past the issues phase).
+            return (0, 0);
+        }
+    }
 
-            if let Some(user_id) = cfg.sync_user_id {
-                emit("worklogs", None, None);
-                match freelo::sync::sync_worklogs_for_range(
-                    &client,
-                    db,
-                    conn_id,
-                    user_id,
-                    from,
-                    today,
-                    &cfg.selected_project_ids,
-                )
-                .await
-                {
-                    Ok(n) => {
-                        worklogs_n = n;
-                        emit("worklogs", Some(n), None);
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        store_sync_error(db, conn_id, "worklogs", &msg);
-                        emit("worklogs", None, Some(&msg));
-                        any_error = true;
-                    }
-                }
-            }
+    // ---- Worklogs -------------------------------------------------------
+    // The per-provider impl is responsible for its own readiness gate
+    // (Jira: `myself()` round-trip; Freelo: cached `sync_user_id`). When
+    // the gate fails the impl returns Ok(0) — preserved from the pre-B4
+    // orchestrator that silently skipped the worklog phase.
+    emit("worklogs", None, None);
+    match svc.sync_worklogs(db, conn_id, from, today).await {
+        Ok(n) => {
+            worklogs_n = n;
+            emit("worklogs", Some(n), None);
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            store_sync_error(db, conn_id, "worklogs", &msg);
+            emit("worklogs", None, Some(&msg));
+            any_error = true;
         }
     }
 

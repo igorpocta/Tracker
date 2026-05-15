@@ -111,7 +111,7 @@ fn first_freelo_client(
     conns
         .iter()
         .find_map(|c| match &c.client {
-            ProviderClient::Freelo(client, _) => Some(client.clone()),
+            ProviderClient::Freelo(svc) => Some(svc.client.clone()),
             _ => None,
         })
         .ok_or_else(|| "Freelo klient není nakonfigurován".to_string())

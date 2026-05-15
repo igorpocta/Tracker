@@ -548,7 +548,7 @@ pub async fn stop_timer_inner(
                 .read()
                 .expect("AppState.connections RwLock poisoned");
             conns.iter().find_map(|c| match &c.client {
-                ProviderClient::Freelo(client, cfg) => Some((c.id, client.clone(), cfg.clone())),
+                ProviderClient::Freelo(svc) => Some((c.id, svc.client.clone(), svc.config.clone())),
                 _ => None,
             })
         };
