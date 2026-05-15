@@ -15,6 +15,7 @@ import { Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { getSuggestedIssues, searchIssuesCache } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 
 const LIMIT = 12;
 const DEBOUNCE_MS = 150;
@@ -43,7 +44,7 @@ export function IssuePicker({ onPick, disabled = false }: IssuePickerProps) {
     enabled: open && debounced.length > 0,
   });
   const recentQ = useQuery({
-    queryKey: ["picker-recent", LIMIT],
+    queryKey: queryKeys.suggestedIssues.list(LIMIT),
     queryFn: () => getSuggestedIssues(LIMIT),
     enabled: open && debounced.length === 0,
     staleTime: 30_000,

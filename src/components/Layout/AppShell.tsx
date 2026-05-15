@@ -38,6 +38,7 @@ import {
   refreshCache,
   startTimer,
 } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useIdleDetection } from "../../hooks/useIdleDetection";
@@ -127,7 +128,7 @@ export function AppShell() {
       }
       await refreshAll(mode);
       queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
       queryClient.invalidateQueries({ queryKey: ["search-issues"] });
       queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
       queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
@@ -181,7 +182,7 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
       queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
       queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
       setStopOpen(false);
     },
     [pushToast, queryClient],
@@ -221,14 +222,14 @@ export function AppShell() {
 
   const onCacheRefreshed = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-    queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
   }, [queryClient]);
   useTauriEvent<number>("cache-refreshed", onCacheRefreshed);
 
   // Auto-sync event fired by backend ~3s after startup.
   const onAutoSyncComplete = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-    queryClient.invalidateQueries({ queryKey: ["suggested-issues"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
     queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
     queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
   }, [queryClient]);

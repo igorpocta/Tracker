@@ -25,6 +25,7 @@ import {
   listFavorites,
   searchIssuesCache,
 } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState } from "../../api/types";
 import { FavoriteStar } from "../Favorites/FavoriteStar";
 import { useNow } from "../../hooks/useNow";
@@ -105,7 +106,7 @@ function IdleBar({
   // This matches the request: "click into the field → see the last tasks
   // I tracked on; start typing → searchable list ordered by issue update".
   const recentTrackedQ = useQuery({
-    queryKey: ["recently-tracked-issues", LIMIT],
+    queryKey: queryKeys.suggestedIssues.list(LIMIT),
     queryFn: () => getSuggestedIssues(LIMIT),
     enabled: debounced.length === 0,
     staleTime: 30_000,
