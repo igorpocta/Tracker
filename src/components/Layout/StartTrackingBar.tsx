@@ -242,7 +242,7 @@ function IdleBar({
           {clock}
         </span>
 
-        {open && results.length > 0 && (
+        {open && (
           <SearchDropdown
             results={results}
             favoriteKeys={favoriteKeys}
@@ -316,15 +316,7 @@ function IdleBar({
   );
 }
 
-function SearchDropdown({
-  results,
-  favoriteKeys,
-  highlight,
-  onPick,
-  onHover,
-  loading,
-  emptyQuery,
-}: {
+export interface SearchDropdownProps {
   results: import("../../api/types").IssueRow[];
   favoriteKeys: Set<string>;
   highlight: number;
@@ -332,7 +324,17 @@ function SearchDropdown({
   onHover: (idx: number) => void;
   loading: boolean;
   emptyQuery: boolean;
-}) {
+}
+
+export function SearchDropdown({
+  results,
+  favoriteKeys,
+  highlight,
+  onPick,
+  onHover,
+  loading,
+  emptyQuery,
+}: SearchDropdownProps) {
   // Find the index where favorites end and the "rest" begins. We use it to
   // emit two section headers when the query is empty: "★ Oblíbené" above
   // the favourite rows, "Naposledy trackováno" above the recently-tracked
@@ -358,12 +360,14 @@ function SearchDropdown({
       )}
       {loading && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
-          Vyhledávání…
+          {emptyQuery ? "Načítám…" : "Vyhledávání…"}
         </div>
       )}
       {!loading && results.length === 0 && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
-          Žádné odpovídající úkoly.
+          {emptyQuery
+            ? "Začněte psát pro vyhledání úkolu."
+            : "Žádné odpovídající úkoly."}
         </div>
       )}
       {results.map((iss, idx) => {
