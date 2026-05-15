@@ -5,6 +5,7 @@ pub mod freelo;
 pub mod jira;
 pub mod keychain;
 pub mod popover;
+pub mod sentry_init;
 pub mod server;
 pub mod state;
 pub mod tray;

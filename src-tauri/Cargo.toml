@@ -63,6 +63,13 @@ anyhow = "1"
 # Image processing (used by tray_pulse to alpha-modulate the recording dot at runtime)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# Phase 19: opt-in Sentry crash + error reporting. `rustls` mirrors the rest
+# of the project's TLS stack (see `reqwest` above). `default-features = false`
+# disables `release-health` / `debug-images` / `transport=native-tls` so we
+# only ship what we actually use.
+sentry = { version = "0.48", default-features = false, features = ["backtrace", "panic", "contexts", "reqwest", "rustls"] }
+sentry-tracing = "0.48"
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
