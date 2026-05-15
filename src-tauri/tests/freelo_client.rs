@@ -19,62 +19,25 @@ async fn server_and_client() -> (MockServer, FreeloClient) {
     (server, client)
 }
 
-// ---------- me / /users + /all-projects fallback ----------
+// ---------- me / /users/me health check ----------
 
 #[tokio::test]
-async fn me_returns_authenticated_user_from_users_endpoint() {
+async fn me_returns_synthetic_user_on_success() {
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
-        .and(path("/users"))
+        .and(path("/users/me"))
         .and(basic_auth(EMAIL, KEY))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {
-                "id": 7,
-                "email": EMAIL,
-                "first_name": "Alice",
-                "last_name": "Example"
-            },
-            {
-                "id": 99,
-                "email": "bob@example.com",
-                "first_name": "Bob",
-                "last_name": "Builder"
-            }
-        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "result": "success"
+        })))
         .expect(1)
         .mount(&server)
         .await;
 
     let user = client.me().await.expect("ok");
-    assert_eq!(user.id, 7);
-    assert_eq!(user.best_name(), "Alice Example");
-}
-
-#[tokio::test]
-async fn me_falls_back_to_all_projects_when_users_endpoint_is_404() {
-    let (server, client) = server_and_client().await;
-    // /users returns 404 — Freelo deployment doesn't expose it.
-    Mock::given(method("GET"))
-        .and(path("/users"))
-        .respond_with(
-            ResponseTemplate::new(404).set_body_string(r#"{"error":"Page not found"}"#),
-        )
-        .mount(&server)
-        .await;
-    // /all-projects works → auth is OK → synthesize user from email.
-    Mock::given(method("GET"))
-        .and(path("/all-projects"))
-        .and(basic_auth(EMAIL, KEY))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let user = client.me().await.expect("ok");
+    // /users/me carries no user details, so client synthesizes id=0 + email.
     assert_eq!(user.id, 0);
     assert_eq!(user.email.as_deref(), Some(EMAIL));
-    // Heuristic from "alice.example@example.com" → "Alice Example"
-    // (EMAIL constant is `alice@example.com` → "Alice").
     assert!(user.best_name().contains("Alice"));
 }
 
@@ -82,7 +45,7 @@ async fn me_falls_back_to_all_projects_when_users_endpoint_is_404() {
 async fn me_propagates_401_as_unauthorized() {
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
-        .and(path("/users"))
+        .and(path("/users/me"))
         .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
         .mount(&server)
         .await;
@@ -137,21 +100,33 @@ async fn list_projects_handles_wrapped_response() {
 }
 
 #[tokio::test]
-async fn list_projects_merges_owned_and_invited_collections() {
-    // Real Freelo v1 shape — `/all-projects` returns two arrays, one per
-    // collection. We must include BOTH so a user whose access is only via
-    // invited projects still sees them in the setup picker.
+async fn list_projects_walks_through_multiple_pages() {
+    // When the server reports total > out.len() we keep paginating.
     let (server, client) = server_and_client().await;
+    // Page 0
     Mock::given(method("GET"))
         .and(path("/all-projects"))
+        .and(wiremock::matchers::query_param("p", "0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "owned_projects": [
-                { "id": 1, "name": "My own", "state": "active" }
-            ],
-            "invited_projects": [
-                { "id": 2, "name": "Klient X", "state": "active" },
-                { "id": 3, "name": "Klient Y", "state": "finished" }
-            ]
+            "total": 4, "count": 2, "page": 0, "per_page": 2,
+            "data": { "projects": [
+                { "id": 1, "name": "A", "state": "active" },
+                { "id": 2, "name": "B", "state": "active" }
+            ]}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Page 1
+    Mock::given(method("GET"))
+        .and(path("/all-projects"))
+        .and(wiremock::matchers::query_param("p", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total": 4, "count": 2, "page": 1, "per_page": 2,
+            "data": { "projects": [
+                { "id": 3, "name": "C", "state": "active" },
+                { "id": 4, "name": "D", "state": "finished" }
+            ]}
         })))
         .expect(1)
         .mount(&server)
@@ -159,28 +134,37 @@ async fn list_projects_merges_owned_and_invited_collections() {
 
     let projects = client.list_projects().await.expect("ok");
     let ids: Vec<i64> = projects.iter().map(|p| p.id).collect();
-    assert_eq!(ids, vec![1, 2, 3], "owned + invited merged in order");
+    assert_eq!(ids, vec![1, 2, 3, 4]);
 }
 
 #[tokio::test]
-async fn list_projects_only_invited_collection() {
-    // The user's actual case: no owned projects, only invited ones.
+async fn list_projects_reads_canonical_paginated_shape() {
+    // Real Freelo v1 shape per https://api.freelo.io/docs/v1/freelo-api:
+    //   { total, count, page, per_page, data: { projects: [...] } }
+    // /all-projects returns BOTH owned and invited mixed into data.projects.
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
         .and(path("/all-projects"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "owned_projects": [],
-            "invited_projects": [
-                { "id": 42, "name": "SAB · Klient", "state": "active" }
-            ]
+            "total": 3,
+            "count": 3,
+            "page": 1,
+            "per_page": 50,
+            "data": {
+                "projects": [
+                    { "id": 1, "name": "My own", "state": "active" },
+                    { "id": 2, "name": "Klient X", "state": "active" },
+                    { "id": 42, "name": "SAB · Klient", "state": "active" }
+                ]
+            }
         })))
         .expect(1)
         .mount(&server)
         .await;
 
     let projects = client.list_projects().await.expect("ok");
-    assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0].id, 42);
+    let ids: Vec<i64> = projects.iter().map(|p| p.id).collect();
+    assert_eq!(ids, vec![1, 2, 42]);
 }
 
 // ---------- list_tasks_for_project ----------

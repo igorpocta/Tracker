@@ -155,23 +155,15 @@ impl FreeloClient {
         Err(FreeloError::Api { status: code, body })
     }
 
-    /// Return the authenticated user.
+    /// `GET /users/me` — authentication health check.
     ///
-    /// Freelo's v1 API doesn't expose a dedicated `/me` endpoint, and the
-    /// "users" endpoint name has varied across versions of their docs
-    /// (`/users`, `/users/manage-workers`, `/workers`). We therefore:
-    ///   1. Try `/users` (canonical for v1 per Apiary docs).
-    ///   2. Fall back to `/all-projects` — a known-good endpoint we use
-    ///      elsewhere in setup. If it returns 200 (auth OK) we synthesize a
-    ///      minimal `FreeloUser` from the supplied email so the rest of the
-    ///      sync pipeline has an identity to work with.
-    ///
-    /// A 404 from `/users` is treated as "endpoint missing on this Freelo
-    /// deployment" (NOT an auth error), and we proceed to step 2.
+    /// Per the official Freelo v1 docs this returns `{result: "success"}`
+    /// (200) on valid credentials and 401 on bad ones. The response doesn't
+    /// carry user-detail fields, so we synthesize a minimal `FreeloUser`
+    /// from the supplied email (used downstream as the worklog author tag).
     pub async fn me(&self) -> Result<FreeloUser, FreeloError> {
-        // --- Step 1: try /users -------------------------------------------
-        let url = self.url("/users")?;
-        let users_result: Result<Value, FreeloError> = with_retry(|| async {
+        let url = self.url("/users/me")?;
+        let _: Value = with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
@@ -179,36 +171,9 @@ impl FreeloClient {
                 .send()
                 .await?;
             let resp = Self::check_status(resp).await?;
-            Ok(resp.json::<Value>().await?)
-        })
-        .await;
-
-        match users_result {
-            Ok(body) => {
-                if let Some(parsed) = extract_user_matching_email(&body, &self.email) {
-                    return Ok(parsed);
-                }
-                // Response shape unexpected — fall through to step 2 rather
-                // than fail. Auth clearly worked.
-            }
-            // Bubble up auth errors — the user must fix the API key/email.
-            Err(FreeloError::Unauthorized) => return Err(FreeloError::Unauthorized),
-            // Anything else (404 = endpoint missing, 429 retried out, etc.)
-            // → fall through to step 2.
-            Err(_) => { /* fall through */ }
-        }
-
-        // --- Step 2: verify auth via /all-projects, synthesize identity ---
-        let projects_url = self.url("/all-projects")?;
-        let _: Value = with_retry(|| async {
-            let resp = self
-                .http
-                .get(projects_url.clone())
-                .basic_auth(&self.email, Some(&self.api_key))
-                .send()
-                .await?;
-            let resp = Self::check_status(resp).await?;
-            Ok(resp.json::<Value>().await?)
+            // Body is `{result: "success"}` — we don't need to inspect it,
+            // but consuming the JSON keeps the wire reusable.
+            Ok(resp.json::<Value>().await.unwrap_or(Value::Null))
         })
         .await?;
 
@@ -225,54 +190,87 @@ impl FreeloClient {
     /// access to. Freelo returns project objects keyed by id; we flatten the
     /// response shape and return a typed list.
     pub async fn list_projects(&self) -> Result<Vec<FreeloProject>, FreeloError> {
-        let url = self.url("/all-projects")?;
-        let body: Value = with_retry(|| async {
-            let resp = self
-                .http
-                .get(url.clone())
-                .basic_auth(&self.email, Some(&self.api_key))
-                .send()
-                .await?;
-            let resp = Self::check_status(resp).await?;
-            Ok(resp.json::<Value>().await?)
-        })
-        .await?;
-
+        // Freelo `/all-projects` is paginated. Per the official v1 docs we
+        // pass `p=N` (0-indexed) plus the canonical sort params. We loop
+        // through pages until we've collected `total` projects or we get an
+        // empty page.
+        //
+        // Canonical response shape:
+        //   { total, count, page, per_page, data: { projects: [ ... ] } }
+        //
+        // The parser also tolerates older shapes for resilience:
+        //   { projects: [ ... ] }                 — flat-keyed
+        //   { owned_projects, invited_projects }  — earlier guess
+        //   [ ... ]                               — bare array (legacy)
         let mut out: Vec<FreeloProject> = Vec::new();
-        let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut page: u32 = 0;
+        // Hard safety cap to avoid runaway loops on malformed responses.
+        const MAX_PAGES: u32 = 50;
 
-        // Known response shapes:
-        //   1) `{ "owned_projects": [...], "invited_projects": [...] }` —
-        //      current Freelo v1 (the one this user has, where they only see
-        //      invited projects).
-        //   2) `{ "projects": [...] }` — older.
-        //   3) bare array — legacy.
-        let candidate_keys = ["owned_projects", "invited_projects", "projects"];
-        let mut pushed_anything_from_keys = false;
-        if let Some(obj) = body.as_object() {
-            for key in candidate_keys {
-                if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
-                    pushed_anything_from_keys = true;
-                    for v in arr {
-                        if let Ok(p) = serde_json::from_value::<FreeloProject>(v.clone()) {
-                            if seen_ids.insert(p.id) {
-                                out.push(p);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if !pushed_anything_from_keys {
-            if let Some(arr) = body.as_array() {
+        loop {
+            let mut url = self.url("/all-projects")?;
+            url.query_pairs_mut()
+                .append_pair("order_by", "date_add")
+                .append_pair("order", "asc")
+                .append_pair("p", &page.to_string());
+
+            let body: Value = with_retry(|| async {
+                let resp = self
+                    .http
+                    .get(url.clone())
+                    .basic_auth(&self.email, Some(&self.api_key))
+                    .send()
+                    .await?;
+                let resp = Self::check_status(resp).await?;
+                Ok(resp.json::<Value>().await?)
+            })
+            .await?;
+
+            let before = out.len();
+            let mut push_arr = |arr: &Vec<Value>| {
                 for v in arr {
                     if let Ok(p) = serde_json::from_value::<FreeloProject>(v.clone()) {
-                        if seen_ids.insert(p.id) {
+                        if seen.insert(p.id) {
                             out.push(p);
                         }
                     }
                 }
+            };
+            if let Some(arr) = body
+                .pointer("/data/projects")
+                .and_then(|v| v.as_array())
+            {
+                push_arr(arr);
+            } else if let Some(obj) = body.as_object() {
+                for key in ["projects", "owned_projects", "invited_projects"] {
+                    if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
+                        push_arr(arr);
+                    }
+                }
+            } else if let Some(arr) = body.as_array() {
+                push_arr(arr);
             }
+
+            // Decide whether to fetch the next page.
+            let added = out.len() - before;
+            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            // Stop when:
+            //  • the response carried `total` and we've reached it, OR
+            //  • this page added nothing (empty / non-paginated response), OR
+            //  • we hit the safety cap.
+            // Legacy shapes (bare array, no `total`) only ever return one
+            // page, so `added == 0` naturally short-circuits after page 0.
+            let reached_total = total.map(|t| out.len() >= t).unwrap_or(false);
+            if added == 0 || reached_total || page + 1 >= MAX_PAGES {
+                break;
+            }
+            // If there's no `total` (legacy shape), don't risk a second
+            // request that will likely 404 — bail after the first page.
+            if total.is_none() {
+                break;
+            }
+            page += 1;
         }
         Ok(out)
     }
