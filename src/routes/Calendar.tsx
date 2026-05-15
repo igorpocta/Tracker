@@ -18,17 +18,27 @@
  * so the active days form a "heat" pattern. Click a day to load its detail
  * panel on the right (Phase 13B; for now the click is a no-op).
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { getWorklogsForRange } from "../api/commands";
+import {
+  addNonWorkingDay,
+  getWorklogsForRange,
+  removeNonWorkingDay,
+} from "../api/commands";
 import type { WorklogRow } from "../api/types";
+import {
+  CellContextMenu,
+  type NonWorkingReason,
+} from "../components/Calendar/CellContextMenu";
+import { isWorkingDayLocal, useCalendarMask } from "../hooks/useCalendarMask";
 import {
   addDays,
   dayEndUnixS,
   dayStartUnixS,
   endOfMonth,
+  formatIsoDate,
   isSameDay,
   startOfDay,
   startOfMonth,
@@ -115,6 +125,7 @@ function MonthlyView({
   month: number;
   today: Date;
 }) {
+  const queryClient = useQueryClient();
   const monthStart = useMemo(
     () => startOfMonth(new Date(year, month, 1)),
     [year, month],
@@ -129,9 +140,51 @@ function MonthlyView({
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
+  // Working-week mask + explicit non-working days for the visible month.
+  // The hook batches both backend calls into cached queries so the grid
+  // doesn't fire N RPCs.
+  const { mask, nonWorking } = useCalendarMask(monthStart, monthEnd);
+
   const rows = q.data ?? [];
   const dayTotals = useMemo(() => totalsByDay(rows), [rows]);
   const monthTotal = rows.reduce((a, r) => a + r.duration_s, 0);
+
+  // Phase 18C — right-click context menu state. We only need a single menu
+  // instance for the whole grid.
+  const [menu, setMenu] = useState<null | {
+    x: number;
+    y: number;
+    date: Date;
+  }>(null);
+
+  /** Bust any cached `non-working-days` range query so cells repaint. */
+  const refreshNonWorking = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["non-working-days"] });
+  }, [queryClient]);
+
+  const handleMark = useCallback(
+    async (date: Date, reason: NonWorkingReason) => {
+      try {
+        await addNonWorkingDay(formatIsoDate(date), reason);
+        refreshNonWorking();
+      } catch {
+        /* swallow — toast plumbing left to the shell-level error handler */
+      }
+    },
+    [refreshNonWorking],
+  );
+
+  const handleUnmark = useCallback(
+    async (date: Date) => {
+      try {
+        await removeNonWorkingDay(formatIsoDate(date));
+        refreshNonWorking();
+      } catch {
+        /* swallow */
+      }
+    },
+    [refreshNonWorking],
+  );
 
   const monthDays: Date[] = [];
   for (let i = 0; i < monthEnd.getDate(); i++) {
@@ -169,16 +222,40 @@ function MonthlyView({
         {monthDays.map((d) => {
           const seconds = dayTotals.get(formatKey(d)) ?? 0;
           const isToday = isSameDay(d, today);
+          const isNonWorking = !isWorkingDayLocal(d, mask, nonWorking);
           return (
             <CalendarCell
               key={d.toISOString()}
               date={d}
               seconds={seconds}
               isToday={isToday}
+              isNonWorking={isNonWorking}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, date: d });
+              }}
             />
           );
         })}
       </div>
+
+      {menu && (
+        <CellContextMenu
+          x={menu.x}
+          y={menu.y}
+          date={formatIsoDate(menu.date)}
+          isWorkingDay={isWorkingDayLocal(menu.date, mask, nonWorking)}
+          isExplicitlyMarked={nonWorking.has(formatIsoDate(menu.date))}
+          onMarkNonWorking={(reason) => void handleMark(menu.date, reason)}
+          onUnmark={() => void handleUnmark(menu.date)}
+          onOpenDetail={() => {
+            /* Day detail panel is still TODO (Phase 13B). The action is wired
+             * so the menu item stays clickable; once the panel lands, replace
+             * this with `setDetailDate(menu.date)`. */
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </>
   );
 }
@@ -362,17 +439,61 @@ function CalendarCell({
   date,
   seconds,
   isToday,
+  isNonWorking,
+  onContextMenu,
 }: {
   date: Date;
   seconds: number;
   isToday: boolean;
+  isNonWorking?: boolean;
+  onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const hours = seconds / 3600;
   const fill = Math.min(1, hours / 8);
   const filled = hours > 0;
+
+  // Non-working days get a subtle diagonal stripe overlay so they read as
+  // "different" without competing with the heat fill. Working days are
+  // unchanged. Stripes are drawn via a CSS background gradient so we don't
+  // need an extra DOM node.
+  const stripeOverlay = isNonWorking
+    ? `repeating-linear-gradient(135deg, color-mix(in srgb, var(--text-tertiary) 18%, transparent) 0 2px, transparent 2px 8px)`
+    : null;
+
+  const style: React.CSSProperties | undefined = (() => {
+    if (filled && stripeOverlay) {
+      return {
+        background: `${stripeOverlay}, color-mix(in srgb, var(--accent) ${Math.round(
+          20 + fill * 60,
+        )}%, var(--bg-surface))`,
+        color: "var(--text-primary)",
+      };
+    }
+    if (filled) {
+      return {
+        background: `color-mix(in srgb, var(--accent) ${Math.round(
+          20 + fill * 60,
+        )}%, var(--bg-surface))`,
+        color: "var(--text-primary)",
+      };
+    }
+    if (stripeOverlay) {
+      return {
+        background: `${stripeOverlay}, var(--bg-surface)`,
+      };
+    }
+    return undefined;
+  })();
+
   return (
     <button
       type="button"
+      onContextMenu={onContextMenu}
+      aria-label={
+        isNonWorking
+          ? `${date.getDate()}. ${date.getMonth() + 1}. — nepracovní den`
+          : `${date.getDate()}. ${date.getMonth() + 1}.`
+      }
       className={clsx(
         "relative h-[88px] rounded-[var(--radius-md)] p-2 text-left",
         "border transition-colors duration-150",
@@ -381,16 +502,7 @@ function CalendarCell({
           : "border-[var(--border-subtle)] bg-[var(--bg-surface)]",
         isToday && !filled && "ring-1 ring-[var(--accent)]",
       )}
-      style={
-        filled
-          ? {
-              background: `color-mix(in srgb, var(--accent) ${Math.round(
-                20 + fill * 60,
-              )}%, var(--bg-surface))`,
-              color: "var(--text-primary)",
-            }
-          : undefined
-      }
+      style={style}
     >
       <div className="text-xs font-medium text-[var(--text-primary)]">
         {`${date.getDate()}`.padStart(2, "0")}
