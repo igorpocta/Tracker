@@ -92,7 +92,12 @@ export function IconSidebar() {
         borderColor: "var(--sidebar-border)",
       }}
     >
-      {/* Logo "T." in accent */}
+      {/*
+        Logo — minimalist stopwatch, same shape as the app icon but stroked
+        in the active accent color over a transparent background. `currentColor`
+        propagates from the parent NavLink's inline `color: var(--accent)`,
+        so it follows palette changes instantly.
+      */}
       <NavLink
         to="/"
         end
@@ -100,12 +105,33 @@ export function IconSidebar() {
         className="block px-1 py-0.5 mb-1 select-none"
         style={{ color: "var(--accent)" }}
       >
-        <span
-          className="text-[22px] leading-none font-semibold italic tracking-tight"
-          style={{ fontFamily: "var(--font-script), serif" }}
+        <svg
+          viewBox="0 0 24 24"
+          width="26"
+          height="26"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
         >
-          T.
-        </span>
+          {/* Winding stem above the ring at 12 o'clock. */}
+          <rect
+            x="10.4"
+            y="2"
+            width="3.2"
+            height="2"
+            rx="0.7"
+            fill="currentColor"
+            stroke="none"
+          />
+          {/* Stopwatch ring. */}
+          <circle cx="12" cy="14" r="8" strokeWidth="1.9" />
+          {/* Clock hand at ~11 o'clock — sin(-60°)*5 ≈ -4.33, cos(-60°)*5 = 2.5. */}
+          <line x1="12" y1="14" x2="7.67" y2="11.5" strokeWidth="1.9" />
+          {/* Centre cap. */}
+          <circle cx="12" cy="14" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
       </NavLink>
 
       {/* Primary nav (top group) */}
