@@ -65,7 +65,7 @@ pub fn run() {
                 } else if let Ok(cfg) = config::load_from_path(&cfg_path) {
                     // First-time migration path.
                     // Legacy shims (so old commands still work).
-                    *state.jira_config.write().unwrap() = Some(cfg.clone());
+                    *state.jira_config.write().expect("AppState.jira_config RwLock poisoned") = Some(cfg.clone());
                     let _ = state.try_build_client();
                     let connection_cfg =
                         crate::commands::connections::JiraConnectionConfig {
@@ -177,7 +177,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 let state = auto_handle.state::<AppState>();
-                let active = state.connections.read().unwrap().clone();
+                let active = state.connections.read().expect("AppState.connections RwLock poisoned").clone();
                 let total = active.len();
 
                 // Dev-time throttle: skip the per-connection auto-sync if we

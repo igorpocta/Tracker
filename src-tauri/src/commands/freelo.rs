@@ -32,7 +32,10 @@ fn freelo_config_for(
     state: &AppState,
     connection_id: i64,
 ) -> Result<(crate::freelo::FreeloClient, FreeloConnectionConfig), String> {
-    let conns = state.connections.read().unwrap();
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
     let active = conns
         .iter()
         .find(|c| c.id == connection_id && c.enabled)

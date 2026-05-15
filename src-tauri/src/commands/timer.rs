@@ -366,7 +366,10 @@ async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str) {
         _ => return,
     };
     let (client, cfg_json) = {
-        let conns = state.connections.read().unwrap();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
         let Some(c) = conns.iter().find(|c| c.id == conn_id) else {
             return;
         };
@@ -540,7 +543,10 @@ pub async fn stop_timer_inner(
     } else if freelo::is_freelo_key(&timer.issue_key) {
         // Find a live Freelo client + its connection id.
         let freelo_pair = {
-            let conns = state.connections.read().unwrap();
+            let conns = state
+                .connections
+                .read()
+                .expect("AppState.connections RwLock poisoned");
             conns.iter().find_map(|c| match &c.client {
                 ProviderClient::Freelo(client, cfg) => Some((c.id, client.clone(), cfg.clone())),
                 _ => None,

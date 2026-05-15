@@ -64,7 +64,11 @@ const MAX_ROWS_PER_CONNECTION: usize = 1_000;
 pub async fn get_jira_dashboard_issues(
     state: tauri::State<'_, AppState>,
 ) -> Result<JiraDashboardResponse, String> {
-    let active = state.connections.read().unwrap().clone();
+    let active = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .clone();
     let mut rows: Vec<JiraDashboardRow> = Vec::new();
     let mut errors: Vec<JiraDashboardError> = Vec::new();
 

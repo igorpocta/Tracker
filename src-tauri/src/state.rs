@@ -157,21 +157,36 @@ impl AppState {
                 // Should be unreachable because we filter on `kind == "jira"`.
                 _ => unreachable!("first_jira filter broken"),
             };
-            *self.jira_client.write().unwrap() = Some(client);
+            *self
+                .jira_client
+                .write()
+                .expect("AppState.jira_client RwLock poisoned") = Some(client);
             // Best-effort derive a JiraConfig from the persisted JSON.
             let row = cache::connections::get_by_id(&self.db, c.id)?.unwrap();
             if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(&row.config_json) {
-                *self.jira_config.write().unwrap() = Some(JiraConfig {
+                *self
+                    .jira_config
+                    .write()
+                    .expect("AppState.jira_config RwLock poisoned") = Some(JiraConfig {
                     base_url: cfg.base_url,
                     email: cfg.email,
                 });
             }
         } else {
-            *self.jira_client.write().unwrap() = None;
-            *self.jira_config.write().unwrap() = None;
+            *self
+                .jira_client
+                .write()
+                .expect("AppState.jira_client RwLock poisoned") = None;
+            *self
+                .jira_config
+                .write()
+                .expect("AppState.jira_config RwLock poisoned") = None;
         }
 
-        *self.connections.write().unwrap() = built;
+        *self
+            .connections
+            .write()
+            .expect("AppState.connections RwLock poisoned") = built;
         Ok(())
     }
 
@@ -180,26 +195,42 @@ impl AppState {
     /// `save_config`/`update_config` commands; new code paths go through
     /// [`hydrate_connections`].
     pub fn try_build_client(&self) -> Result<bool, anyhow::Error> {
-        let cfg = self.jira_config.read().unwrap().clone();
+        let cfg = self
+            .jira_config
+            .read()
+            .expect("AppState.jira_config RwLock poisoned")
+            .clone();
         let token = crate::keychain::load_jira_token(&self.app_data_dir)?;
         match (cfg, token) {
             (Some(c), Some(token)) => {
                 let client = JiraClient::new(c.base_url.clone(), c.email.clone(), token)?;
-                *self.jira_client.write().unwrap() = Some(client);
+                *self
+                    .jira_client
+                    .write()
+                    .expect("AppState.jira_client RwLock poisoned") = Some(client);
                 Ok(true)
             }
             _ => {
-                *self.jira_client.write().unwrap() = None;
+                *self
+                    .jira_client
+                    .write()
+                    .expect("AppState.jira_client RwLock poisoned") = None;
                 Ok(false)
             }
         }
     }
 
     pub fn jira_client_cloned(&self) -> Option<JiraClient> {
-        self.jira_client.read().unwrap().clone()
+        self.jira_client
+            .read()
+            .expect("AppState.jira_client RwLock poisoned")
+            .clone()
     }
 
     pub fn jira_config_cloned(&self) -> Option<JiraConfig> {
-        self.jira_config.read().unwrap().clone()
+        self.jira_config
+            .read()
+            .expect("AppState.jira_config RwLock poisoned")
+            .clone()
     }
 }

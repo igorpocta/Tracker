@@ -91,7 +91,10 @@ impl<R: Runtime> ServerState<R> {
     /// Record "we just got a request" — bumps `last_heartbeat` to now.
     pub fn bump_heartbeat(&self) {
         let now = Utc::now().timestamp();
-        *self.last_heartbeat.write().unwrap() = Some(now);
+        *self
+            .last_heartbeat
+            .write()
+            .expect("WidgetState.last_heartbeat RwLock poisoned") = Some(now);
     }
 }
 
@@ -336,7 +339,11 @@ async fn stop_timer_handler<R: Runtime>(
 
 async fn get_visible_ticket_handler<R: Runtime>(State(state): State<ServerState<R>>) -> Response {
     state.bump_heartbeat();
-    let v = state.visible_ticket.read().unwrap().clone();
+    let v = state
+        .visible_ticket
+        .read()
+        .expect("WidgetState.visible_ticket RwLock poisoned")
+        .clone();
     Json::<Option<VisibleTicket>>(v).into_response()
 }
 
@@ -348,7 +355,10 @@ async fn post_visible_ticket_handler<R: Runtime>(
     if ticket.seen_at.is_none() {
         ticket.seen_at = Some(Utc::now().timestamp());
     }
-    *state.visible_ticket.write().unwrap() = Some(ticket.clone());
+    *state
+        .visible_ticket
+        .write()
+        .expect("WidgetState.visible_ticket RwLock poisoned") = Some(ticket.clone());
     Json(ticket).into_response()
 }
 

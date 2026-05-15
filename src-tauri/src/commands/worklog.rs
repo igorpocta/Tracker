@@ -350,7 +350,11 @@ pub async fn refresh_all(
     let mut total_issues = 0usize;
     let mut total_worklogs = 0usize;
 
-    let active = state.connections.read().unwrap().clone();
+    let active = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .clone();
     let total_conns = active.len();
 
     for (idx, conn) in active.into_iter().enumerate() {
@@ -361,7 +365,12 @@ pub async fn refresh_all(
 
     // Legacy single-Jira shim: bez multi-connection rows, ale s legacy
     // klientem v paměti — použijeme connection_id = 0 jako sentinel.
-    if state.connections.read().unwrap().is_empty() {
+    if state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .is_empty()
+    {
         if let Some(client) = state.jira_client_cloned() {
             let conn_id: i64 = 0;
             let today = Local::now().date_naive();
@@ -556,7 +565,10 @@ pub async fn refresh_connection(
     let mode = SyncMode::from_optional_str(mode.as_deref());
 
     let conn = {
-        let conns = state.connections.read().unwrap();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
         conns
             .iter()
             .find(|c| c.id == connection_id && c.enabled)
@@ -659,7 +671,10 @@ fn resolve_client_for_issue(
 ) -> Result<(i64, ProviderClient), String> {
     let conn_id =
         cache::issues::get_connection_id_by_key(&state.db, issue_key).map_err(|e| e.to_string())?;
-    let conns = state.connections.read().unwrap();
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
     // If we know the connection id, prefer that.
     if let Some(cid) = conn_id {
         if let Some(active) = conns.iter().find(|c| c.id == cid && c.enabled) {
@@ -1400,7 +1415,10 @@ fn audit_is_freelo(db: &cache::Db, audit_id: i64) -> bool {
 fn first_freelo_client(
     state: &tauri::State<'_, AppState>,
 ) -> Result<crate::freelo::client::FreeloClient, String> {
-    let conns = state.connections.read().unwrap();
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
     conns
         .iter()
         .find_map(|c| match &c.client {
@@ -1824,7 +1842,10 @@ pub async fn commit_pending_delete(
         };
         // Resolve the live freelo client.
         let client = {
-            let conns = state.connections.read().unwrap();
+            let conns = state
+                .connections
+                .read()
+                .expect("AppState.connections RwLock poisoned");
             conns.iter().find_map(|c| match &c.client {
                 ProviderClient::Freelo(client, _) => Some(client.clone()),
                 _ => None,
