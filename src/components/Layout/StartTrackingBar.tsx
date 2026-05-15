@@ -18,9 +18,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { MessageSquare, Play, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
-import { listFavorites, searchIssuesCache } from "../../api/commands";
+import {
+  getSuggestedIssues,
+  listFavorites,
+  searchIssuesCache,
+} from "../../api/commands";
 import type { ActiveTimerState } from "../../api/types";
 import { FavoriteStar } from "../Favorites/FavoriteStar";
 import { useNow } from "../../hooks/useNow";
@@ -88,10 +92,23 @@ function IdleBar({
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const q = useQuery({
+  // When the user has typed something, hit `search_issues_cache` which
+  // matches issue_key/summary and orders by the issue's own updated_at.
+  const searchQ = useQuery({
     queryKey: ["search-issues", debounced, LIMIT],
     queryFn: () => searchIssuesCache(debounced, LIMIT),
     enabled: debounced.length > 0,
+  });
+
+  // Empty query → show the issues the user has actually tracked time on,
+  // ordered by their most recent worklog (most recently tracked first).
+  // This matches the request: "click into the field → see the last tasks
+  // I tracked on; start typing → searchable list ordered by issue update".
+  const recentTrackedQ = useQuery({
+    queryKey: ["recently-tracked-issues", LIMIT],
+    queryFn: () => getSuggestedIssues(LIMIT),
+    enabled: debounced.length === 0,
+    staleTime: 30_000,
   });
 
   // Phase 18B — Item 26: favorites are surfaced at the top of the dropdown.
@@ -103,9 +120,9 @@ function IdleBar({
   const favorites = favoritesQ.data ?? [];
   const favoriteKeys = new Set(favorites.map((f) => f.issue_key));
 
-  // Merge: favorites first (matched against the query if any), then the rest
-  // of the search results, de-duplicated.
-  const baseResults = q.data ?? [];
+  // Build the result list. Favorites always go first; the rest comes from
+  // either the recently-tracked feed (no query) or the search feed (with
+  // query), de-duplicated against favorites.
   const filteredFavorites = debounced
     ? favorites.filter(
         (f) =>
@@ -113,11 +130,12 @@ function IdleBar({
           (f.summary ?? "").toLowerCase().includes(debounced.toLowerCase()),
       )
     : favorites;
-  const merged = [
+  const baseResults =
+    debounced.length > 0 ? (searchQ.data ?? []) : (recentTrackedQ.data ?? []);
+  const results = [
     ...filteredFavorites,
     ...baseResults.filter((r) => !favoriteKeys.has(r.issue_key)),
   ];
-  const results = merged;
 
   // Close the dropdown on outside click.
   useEffect(() => {
@@ -196,15 +214,21 @@ function IdleBar({
           {clock}
         </span>
 
-        {open && (debounced.length > 0 || filteredFavorites.length > 0) && (
+        {open && results.length > 0 && (
           <SearchDropdown
             results={results}
             favoriteKeys={favoriteKeys}
             highlight={highlight}
             onPick={handlePick}
             onHover={setHighlight}
-            loading={q.isFetching && results.length === 0 && debounced.length > 0}
-            showingOnlyFavorites={debounced.length === 0}
+            loading={
+              (debounced.length > 0 && searchQ.isFetching && results.length === 0) ||
+              (debounced.length === 0 && recentTrackedQ.isFetching && results.length === 0)
+            }
+            // Without a query, the list shows favorites + the issues the
+            // user most recently tracked time on. With a query, the rest of
+            // the list comes from the cache-wide search.
+            emptyQuery={debounced.length === 0}
           />
         )}
       </div>
@@ -282,7 +306,7 @@ function SearchDropdown({
   onPick,
   onHover,
   loading,
-  showingOnlyFavorites,
+  emptyQuery,
 }: {
   results: import("../../api/types").IssueRow[];
   favoriteKeys: Set<string>;
@@ -290,8 +314,18 @@ function SearchDropdown({
   onPick: (key: string) => void;
   onHover: (idx: number) => void;
   loading: boolean;
-  showingOnlyFavorites: boolean;
+  emptyQuery: boolean;
 }) {
+  // Find the index where favorites end and the "rest" begins. We use it to
+  // emit two section headers when the query is empty: "★ Oblíbené" above
+  // the favourite rows, "Naposledy trackováno" above the recently-tracked
+  // rows. With a non-empty query we render one flat list (favorites that
+  // match the search just float to the top).
+  const firstNonFavIdx = results.findIndex((r) => !favoriteKeys.has(r.issue_key));
+  const favCount =
+    firstNonFavIdx < 0 ? results.length : firstNonFavIdx;
+  const restCount = results.length - favCount;
+
   return (
     <div
       role="listbox"
@@ -300,7 +334,7 @@ function SearchDropdown({
                  bg-[var(--bg-surface)] shadow-[var(--shadow-md)]
                  max-h-[420px] overflow-y-auto"
     >
-      {showingOnlyFavorites && results.length > 0 && (
+      {emptyQuery && favCount > 0 && (
         <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
           ★ Oblíbené
         </div>
@@ -317,36 +351,46 @@ function SearchDropdown({
       )}
       {results.map((iss, idx) => {
         const isFav = favoriteKeys.has(iss.issue_key);
+        const showRestHeader =
+          emptyQuery && idx === favCount && restCount > 0 && favCount > 0;
+        const showFirstRestHeader =
+          emptyQuery && idx === 0 && favCount === 0 && restCount > 0;
         return (
-          <div
-            key={iss.issue_key}
-            role="option"
-            aria-selected={idx === highlight}
-            onMouseEnter={() => onHover(idx)}
-            className={clsx(
-              "w-full flex items-center gap-2 px-3 py-2 text-xs",
-              idx === highlight
-                ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)]",
+          <Fragment key={iss.issue_key}>
+            {(showRestHeader || showFirstRestHeader) && (
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+                Naposledy trackováno
+              </div>
             )}
-          >
-            <FavoriteStar issueKey={iss.issue_key} initial={isFav} size={12} />
-            <button
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onPick(iss.issue_key);
-              }}
-              className="flex-1 min-w-0 text-left flex items-center gap-2"
+            <div
+              role="option"
+              aria-selected={idx === highlight}
+              onMouseEnter={() => onHover(idx)}
+              className={clsx(
+                "w-full flex items-center gap-2 px-3 py-2 text-xs",
+                idx === highlight
+                  ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
+                  : "text-[var(--text-secondary)]",
+              )}
             >
-              <span className="font-mono uppercase text-[11px] text-[var(--text-tertiary)] w-20 shrink-0">
-                {iss.issue_key}
-              </span>
-              <span className="truncate flex-1 text-[var(--text-primary)]">
-                {iss.summary || "(načítá se…)"}
-              </span>
-            </button>
-          </div>
+              <FavoriteStar issueKey={iss.issue_key} initial={isFav} size={12} />
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onPick(iss.issue_key);
+                }}
+                className="flex-1 min-w-0 text-left flex items-center gap-2"
+              >
+                <span className="font-mono uppercase text-[11px] text-[var(--text-tertiary)] w-20 shrink-0">
+                  {iss.issue_key}
+                </span>
+                <span className="truncate flex-1 text-[var(--text-primary)]">
+                  {iss.summary || "(načítá se…)"}
+                </span>
+              </button>
+            </div>
+          </Fragment>
         );
       })}
     </div>
