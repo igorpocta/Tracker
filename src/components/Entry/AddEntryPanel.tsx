@@ -119,7 +119,8 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   if (!open) return null;
 
   const totalMinutes = computeDurationMinutes(start, end);
-  const totalLabel =
+  const wrapsMidnight = crossesMidnight(start, end);
+  const totalCore =
     totalMinutes <= 0
       ? "—"
       : totalMinutes < 60
@@ -127,6 +128,12 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
         : totalMinutes % 60 === 0
           ? `${Math.floor(totalMinutes / 60)}h`
           : `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+  // Surface the midnight wrap so the user can see the panel
+  // interpreted "23:30 → 00:30" as a 1-hour next-day interval
+  // (otherwise the duration alone is ambiguous).
+  const totalLabel = wrapsMidnight
+    ? `${totalCore} · konec další den`
+    : totalCore;
 
   const handleDurationClick = (minutes: number) => {
     setEnd(addMinutes(start, minutes));
@@ -390,13 +397,33 @@ function formatLocalTime(d: Date): string {
   return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
 }
 
-/** Returns total minutes between two `HH:MM` strings. Handles end < start as 0. */
+/**
+ * Returns total minutes between two `HH:MM` strings.
+ *
+ * If `end` is strictly LESS than `start`, the interval is treated as
+ * crossing midnight: the result is `end + 24h - start`. This matches
+ * the parent `onSave` handler in `AppShell.tsx`, which composes the
+ * full `Date` interval and adds a day to `endedAt` whenever the wall
+ * clocks suggest the entry wraps past midnight. Without this rule
+ * `23:30 → 00:30` (a 1-hour entry) would round to 0 minutes and the
+ * form would refuse to save with "Konec musí být po začátku."
+ *
+ * Equal start/end remains a 0-minute interval — only strictly less
+ * triggers the wrap. Malformed input returns 0.
+ */
 export function computeDurationMinutes(start: string, end: string): number {
   const a = parseHHMM(start);
   const b = parseHHMM(end);
   if (a === null || b === null) return 0;
-  const diff = b - a;
-  return diff > 0 ? diff : 0;
+  return b >= a ? b - a : b + 24 * 60 - a;
+}
+
+/** `true` when the HH:MM pair encodes an interval that wraps past midnight. */
+export function crossesMidnight(start: string, end: string): boolean {
+  const a = parseHHMM(start);
+  const b = parseHHMM(end);
+  if (a === null || b === null) return false;
+  return b < a;
 }
 
 function parseHHMM(s: string): number | null {

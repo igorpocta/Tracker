@@ -488,6 +488,16 @@ export function AppShell() {
             const [y, mo, d] = entry.dateIso.split("-").map((s) => parseInt(s, 10));
             const startedAt = new Date(y, mo - 1, d, hh, mm, 0);
             const endedAt = new Date(y, mo - 1, d, eh, em, 0);
+            // Midnight wrap: if the end clock is strictly before the start
+            // clock the user meant the entry to span past 24:00 — e.g.
+            // 23:30 → 00:30 is a 1h interval, not a 23h-back-in-time one.
+            // The panel's `computeDurationMinutes` already treats it this
+            // way for the total-duration label; mirror the rule here so
+            // `durationSeconds` matches and the backend doesn't reject
+            // the row with "Trvání musí být kladné".
+            if (endedAt.getTime() < startedAt.getTime()) {
+              endedAt.setDate(endedAt.getDate() + 1);
+            }
             const durationSeconds = Math.max(
               0,
               Math.round((endedAt.getTime() - startedAt.getTime()) / 1000),
