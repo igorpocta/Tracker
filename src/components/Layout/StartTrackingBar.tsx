@@ -182,7 +182,7 @@ function IdleBar({
               onSubmit();
             }
           }}
-          placeholder="Začít sledovat…"
+          placeholder="Začít stopovat…"
           aria-label="Vyhledat a spustit časomíru"
           aria-expanded={open}
           className="w-full h-11 pl-4 pr-24 rounded-[var(--radius-md)]
