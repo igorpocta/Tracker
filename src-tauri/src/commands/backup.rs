@@ -16,6 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::Emitter;
 
 use crate::cache::Db;
 use crate::state::AppState;
@@ -123,8 +124,17 @@ fn dump_table(conn: &rusqlite::Connection, sql: &str) -> Result<Vec<Value>, rusq
 
 /// Import — TRUNCATE všech přepisovaných tabulek + INSERT z bundle.
 /// Provedeno v transakci, takže fail vrátí stav před importem.
+///
+/// Po úspěšném importu rehydratujeme runtime stav AppState a emitujeme
+/// stejné `connections-changed` / `config-changed` / `cache-refreshed`
+/// eventy jako bežné config / connections commandy. Bez toho by aplikace
+/// běžela dál se starými HTTP klienty a `jira_client_cloned()` shimem ze
+/// stavu před importem — uživatel by viděl správná data v UI, ale
+/// mutations (nový worklog, sync, ...) by mohly trefit už neexistující
+/// tenant nebo nový tenant na cestě skrz toho starého.
 #[tauri::command]
 pub async fn import_backup(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     bundle: BackupBundle,
 ) -> Result<ImportStats, String> {
@@ -134,7 +144,45 @@ pub async fn import_backup(
             bundle.version
         ));
     }
-    import_inner(&state.db, &bundle).map_err(|e| e.to_string())
+    let stats = import_inner(&state.db, &bundle).map_err(|e| e.to_string())?;
+
+    apply_post_import_state_refresh(&state);
+
+    // Tell the FE everything just changed under it. Existing handlers in
+    // `AppShell` already invalidate the relevant React Query keys on each
+    // of these.
+    let _ = app.emit("connections-changed", ());
+    let _ = app.emit("config-changed", ());
+    // `cache-refreshed` doubles as "all the worklog / issue lists you've
+    // cached need to be re-fetched" — matches what the desktop refresh
+    // emits at the end of `refresh_cache`.
+    let _ = app.emit("cache-refreshed", stats.worklogs);
+
+    Ok(stats)
+}
+
+/// Rebuild runtime state from the post-import DB. Extracted from the
+/// Tauri command so integration tests can verify the shim-reset +
+/// hydrate sequence without a Tauri runtime / AppHandle.
+///
+/// 1) Drop the legacy single-Jira shims (`jira_client`, `jira_config`)
+///    so a removed-on-restore tenant doesn't keep getting hit.
+/// 2) Re-hydrate `state.connections` from the imported rows. Errors are
+///    logged but not propagated — the DB is already in the correct
+///    state; the worst case is the user has to restart the app to pick
+///    up the new clients.
+pub fn apply_post_import_state_refresh(state: &AppState) {
+    *state
+        .jira_client
+        .write()
+        .expect("AppState.jira_client RwLock poisoned") = None;
+    *state
+        .jira_config
+        .write()
+        .expect("AppState.jira_config RwLock poisoned") = None;
+    if let Err(e) = state.hydrate_connections() {
+        tracing::warn!("import_backup: hydrate_connections after restore failed: {e}");
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
