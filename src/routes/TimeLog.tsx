@@ -520,7 +520,7 @@ function ModeSelector({
   );
 }
 
-interface WorklogRowProps {
+export interface WorklogRowProps {
   row: ApiWorklogRow;
   onUpdate: (
     row: ApiWorklogRow,
@@ -538,7 +538,7 @@ interface WorklogRowProps {
   refCallback?: (el: HTMLDivElement | null) => void;
 }
 
-function WorklogRow({
+export function WorklogRow({
   row,
   onUpdate,
   onDelete,
@@ -552,19 +552,39 @@ function WorklogRow({
   const [editing, setEditing] = useState<"start" | "end" | "duration" | "comment" | null>(
     null,
   );
+  // Drafts only matter while a cell is in edit mode — and they are
+  // (re-)seeded fresh from the latest `row` props the moment the user
+  // clicks into a cell via the `beginEditing*` helpers below. Outside
+  // of edit mode the read-mode buttons render the row values directly.
+  //
+  // The pre-fix version re-synced these state variables from inside a
+  // `useMemo` callback whose deps were `[row.*]` — that's a setState
+  // during render, which Strict Mode runs twice (so each setState
+  // would fire twice on every row change) and which React Compiler
+  // would treat as a memoisation invariant violation. Lazy-seeding on
+  // edit-entry sidesteps both problems and is the pattern senior
+  // review recommended.
   const [draftStart, setDraftStart] = useState(formatHHMM(started));
   const [draftEnd, setDraftEnd] = useState(formatHHMM(ended));
   const [draftDuration, setDraftDuration] = useState(formatDurationShort(row.duration_s));
   const [draftComment, setDraftComment] = useState(row.comment ?? "");
 
-  // When `row` changes (after a successful update) re-sync drafts.
-  useMemo(() => {
+  const beginEditingStart = () => {
     setDraftStart(formatHHMM(started));
+    setEditing("start");
+  };
+  const beginEditingEnd = () => {
     setDraftEnd(formatHHMM(ended));
+    setEditing("end");
+  };
+  const beginEditingDuration = () => {
     setDraftDuration(formatDurationShort(row.duration_s));
+    setEditing("duration");
+  };
+  const beginEditingComment = () => {
     setDraftComment(row.comment ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.started_at, row.duration_s, row.comment]);
+    setEditing("comment");
+  };
 
   const commitStart = async () => {
     setEditing(null);
@@ -636,7 +656,7 @@ function WorklogRow({
       ) : (
         <button
           type="button"
-          onClick={() => setEditing("comment")}
+          onClick={beginEditingComment}
           className="flex-1 min-w-0 flex items-center gap-2 text-xs text-left text-[var(--text-primary)]
                      hover:underline decoration-dotted underline-offset-4"
           title="Upravit komentář"
@@ -718,7 +738,7 @@ function WorklogRow({
       ) : (
         <button
           type="button"
-          onClick={() => setEditing("start")}
+          onClick={beginEditingStart}
           className={readCellCls}
           title="Upravit začátek"
         >
@@ -746,7 +766,7 @@ function WorklogRow({
       ) : (
         <button
           type="button"
-          onClick={() => setEditing("end")}
+          onClick={beginEditingEnd}
           className={readCellCls}
           title="Upravit konec"
         >
@@ -777,7 +797,7 @@ function WorklogRow({
       ) : (
         <button
           type="button"
-          onClick={() => setEditing("duration")}
+          onClick={beginEditingDuration}
           className="font-mono tabular-nums text-[11px] text-[var(--text-primary)] shrink-0
                      w-16 text-right hover:underline decoration-dotted underline-offset-4"
           title="Upravit trvání"
