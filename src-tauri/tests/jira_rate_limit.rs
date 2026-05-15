@@ -120,7 +120,7 @@ async fn gives_up_after_max_retries() {
 fn retry_after_header_parser_accepts_seconds() {
     use reqwest::header::HeaderValue;
     let v = HeaderValue::from_static("30");
-    let parsed = tracker_lib::jira::client::parse_retry_after_header(Some(&v));
+    let parsed = tracker_lib::http_base::parse_retry_after(Some(&v));
     assert_eq!(parsed, Some(30));
 }
 
@@ -128,6 +128,6 @@ fn retry_after_header_parser_accepts_seconds() {
 fn retry_after_header_parser_rejects_garbage() {
     use reqwest::header::HeaderValue;
     let v = HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT");
-    let parsed = tracker_lib::jira::client::parse_retry_after_header(Some(&v));
+    let parsed = tracker_lib::http_base::parse_retry_after(Some(&v));
     assert_eq!(parsed, None);
 }

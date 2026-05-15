@@ -45,39 +45,6 @@ pub enum ReconstructError {
     UnsupportedRetry(String),
 }
 
-fn parse_row(json: &str) -> Result<WorklogRow, ReconstructError> {
-    audit_helpers::parse_row(json)
-}
-
-fn now_unix() -> i64 {
-    audit_helpers::now_unix()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn record_linked(
-    db: &Db,
-    op: AuditOp,
-    issue_key: Option<&str>,
-    worklog_id: Option<&str>,
-    before: Option<&WorklogRow>,
-    after: Option<&WorklogRow>,
-    success: bool,
-    error: Option<&str>,
-    source_audit_id: i64,
-) {
-    audit_helpers::record_linked(
-        db,
-        op,
-        issue_key,
-        worklog_id,
-        before,
-        after,
-        success,
-        error,
-        source_audit_id,
-    );
-}
-
 fn fetch_audit(db: &Db, audit_id: i64) -> Result<AuditEntry, ReconstructError> {
     cache::audit::get_by_id(db, audit_id)?.ok_or(ReconstructError::AuditNotFound)
 }
@@ -103,7 +70,7 @@ pub async fn restore_deleted_worklog(
         .before_json
         .as_deref()
         .ok_or(ReconstructError::SnapshotMissing)?;
-    let before = parse_row(before_json)?;
+    let before = audit_helpers::parse_row::<ReconstructError>(before_json)?;
 
     let started_dt = Utc
         .timestamp_opt(before.started_at, 0)
@@ -123,7 +90,7 @@ pub async fn restore_deleted_worklog(
     {
         Ok(r) => r,
         Err(e) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Restore,
                 Some(&issue_key),
@@ -138,7 +105,7 @@ pub async fn restore_deleted_worklog(
         }
     };
 
-    let now_s = now_unix();
+    let now_s = audit_helpers::now_unix();
     let connection_id = cache::issues::get_connection_id_by_key(db, &issue_key)?;
     let row = WorklogRow {
         id: None,
@@ -160,7 +127,7 @@ pub async fn restore_deleted_worklog(
     let mut saved = row.clone();
     saved.id = Some(local_id);
 
-    record_linked(
+    audit_helpers::record_linked(
         db,
         AuditOp::Restore,
         Some(&issue_key),
@@ -195,7 +162,7 @@ pub async fn revert_worklog_update(
         .before_json
         .as_deref()
         .ok_or(ReconstructError::SnapshotMissing)?;
-    let before = parse_row(before_json)?;
+    let before = audit_helpers::parse_row::<ReconstructError>(before_json)?;
 
     let worklog_id = entry
         .worklog_id
@@ -227,7 +194,7 @@ pub async fn revert_worklog_update(
     {
         Ok(_) => {}
         Err(JiraError::WorklogNotFound) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Revert,
                 Some(&issue_key),
@@ -241,7 +208,7 @@ pub async fn revert_worklog_update(
             return Err(ReconstructError::WorklogGone);
         }
         Err(e) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Revert,
                 Some(&issue_key),
@@ -257,7 +224,7 @@ pub async fn revert_worklog_update(
     }
 
     let local_id = current.id.ok_or(ReconstructError::SnapshotMissing)?;
-    let now_s = now_unix();
+    let now_s = audit_helpers::now_unix();
     let ended_at = before.started_at.saturating_add(duration_s.max(0));
     cache::worklogs::update_fields(
         db,
@@ -272,7 +239,7 @@ pub async fn revert_worklog_update(
     let after =
         cache::worklogs::get_by_id(db, local_id)?.ok_or(ReconstructError::SnapshotMissing)?;
 
-    record_linked(
+    audit_helpers::record_linked(
         db,
         AuditOp::Revert,
         Some(&issue_key),
@@ -319,7 +286,7 @@ async fn retry_create(
         .as_deref()
         .or(entry.before_json.as_deref())
         .ok_or(ReconstructError::SnapshotMissing)?;
-    let snap = parse_row(snapshot_json)?;
+    let snap = audit_helpers::parse_row::<ReconstructError>(snapshot_json)?;
     let started_dt = Utc
         .timestamp_opt(snap.started_at, 0)
         .single()
@@ -337,7 +304,7 @@ async fn retry_create(
         .await
     {
         Ok(resp) => {
-            let now_s = now_unix();
+            let now_s = audit_helpers::now_unix();
             let connection_id = cache::issues::get_connection_id_by_key(db, &issue_key)?;
             let row = WorklogRow {
                 id: None,
@@ -359,7 +326,7 @@ async fn retry_create(
             let mut saved = row.clone();
             saved.id = Some(local_id);
 
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(&issue_key),
@@ -376,7 +343,7 @@ async fn retry_create(
             }))
         }
         Err(e) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(&issue_key),
@@ -402,7 +369,7 @@ async fn retry_update(
         .as_deref()
         .or(entry.before_json.as_deref())
         .ok_or(ReconstructError::SnapshotMissing)?;
-    let snap = parse_row(snapshot_json)?;
+    let snap = audit_helpers::parse_row::<ReconstructError>(snapshot_json)?;
 
     let worklog_id = entry
         .worklog_id
@@ -433,7 +400,7 @@ async fn retry_update(
         Ok(_) => {
             if let Some(local) = cache::worklogs::get_by_remote_id_any(db, worklog_id)? {
                 if let Some(lid) = local.id {
-                    let now_s = now_unix();
+                    let now_s = audit_helpers::now_unix();
                     let ended_at = snap.started_at.saturating_add(duration_s.max(0));
                     cache::worklogs::update_fields(
                         db,
@@ -447,7 +414,7 @@ async fn retry_update(
                 }
             }
             let after = cache::worklogs::get_by_remote_id_any(db, worklog_id)?;
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(&issue_key),
@@ -464,7 +431,7 @@ async fn retry_update(
             }))
         }
         Err(e) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(&issue_key),
@@ -492,7 +459,7 @@ async fn retry_delete(
     let issue_key = entry.issue_key.as_deref().unwrap_or("");
     match client.delete_worklog(issue_key, worklog_id).await {
         Ok(()) | Err(JiraError::WorklogNotFound) => {
-            let now_s = now_unix();
+            let now_s = audit_helpers::now_unix();
             // Legacy reconstruct path: looks up via remote_id across all
             // connections, then tombstones that specific row.
             if let Some(row) = cache::worklogs::get_by_remote_id_any(db, worklog_id)? {
@@ -500,7 +467,7 @@ async fn retry_delete(
                     cache::worklogs::mark_tombstoned(db, local_id, now_s)?;
                 }
             }
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(issue_key),
@@ -517,7 +484,7 @@ async fn retry_delete(
             }))
         }
         Err(e) => {
-            record_linked(
+            audit_helpers::record_linked(
                 db,
                 AuditOp::Retry,
                 Some(issue_key),

@@ -1,6 +1,3 @@
-use std::future::Future;
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
@@ -14,15 +11,6 @@ use super::models::{
     WorklogUpdatedPage,
 };
 use crate::http_base::{self, HttpError, RateLimitInfo};
-
-/// Maximum number of retries for a single Jira request after a 429 response.
-///
-/// Kept as a re-export of the shared constant so existing callers
-/// (`jira::client::MAX_RETRIES`) keep linking. Will be removed in Phase C
-/// of the refactor once callers move to [`crate::http_base::MAX_RETRIES`].
-pub const MAX_RETRIES: u32 = http_base::MAX_RETRIES;
-/// Cap on the wait-before-retry derived from `Retry-After` or backoff.
-pub const MAX_RETRY_WAIT_SECS: u64 = http_base::MAX_RETRY_WAIT_SECS;
 
 /// Errors produced by the Jira API client.
 #[derive(Debug, Error)]
@@ -49,10 +37,10 @@ pub enum JiraError {
     /// when present (seconds form only — we do not parse HTTP-date because
     /// Jira always emits seconds in practice).
     ///
-    /// Callers should not observe this variant directly: the [`with_retry`]
-    /// wrapper transparently retries up to [`MAX_RETRIES`] times. Only if all
-    /// attempts are exhausted does this bubble out (currently as
-    /// `JiraError::Api { status: 429 }` after the wrapper converts).
+    /// Callers should not observe this variant directly:
+    /// [`crate::http_base::with_retry`] transparently retries up to
+    /// [`crate::http_base::MAX_RETRIES`] times. Only if all attempts are
+    /// exhausted does this bubble out.
     #[error("rate limited (retry after {retry_after_secs:?} seconds)")]
     RateLimited { retry_after_secs: Option<u64> },
 }
@@ -85,44 +73,6 @@ impl HttpError for JiraError {
     fn api(status: u16, body: String) -> Self {
         JiraError::Api { status, body }
     }
-}
-
-/// Generic retry-with-backoff for Jira API calls.
-///
-/// Delegates to [`crate::http_base::with_retry`]; existing callers keep
-/// using `jira::client::with_retry`. Phase C will inline this away.
-pub async fn with_retry<F, Fut, T>(f: F) -> Result<T, JiraError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, JiraError>>,
-{
-    http_base::with_retry(f).await
-}
-
-/// Test-friendly variant of [`with_retry`] that accepts a custom sleep
-/// function. Production code calls [`with_retry`].
-///
-/// Currently no in-tree caller (retry behaviour is tested at the
-/// `http_base` level), but exposed `pub(crate)` for tests that may need
-/// to drive the retry loop without wall-clock delay.
-#[allow(dead_code)]
-pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(f: F, sleep: S) -> Result<T, JiraError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, JiraError>>,
-    S: Fn(Duration) -> SFut,
-    SFut: Future<Output = ()>,
-{
-    http_base::with_retry_using(f, sleep).await
-}
-
-/// Parse a `Retry-After` header value. Returns `None` for malformed input or
-/// HTTP-date forms (we only support seconds because Jira always emits that).
-///
-/// Thin re-export of [`crate::http_base::parse_retry_after`] kept for the
-/// existing Jira-specific name. Phase C cleanup removes this.
-pub fn parse_retry_after_header(h: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
-    http_base::parse_retry_after(h)
 }
 
 impl JiraClient {
@@ -162,21 +112,17 @@ impl JiraClient {
         self.base_url.as_str()
     }
 
-    async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, JiraError> {
-        http_base::check_status::<JiraError>(resp).await
-    }
-
     /// `GET /rest/api/3/myself` — current user.
     pub async fn myself(&self) -> Result<JiraUser, JiraError> {
         let url = self.url("/rest/api/3/myself")?;
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<JiraUser>().await?)
         })
         .await
@@ -204,7 +150,7 @@ impl JiraClient {
             body["nextPageToken"] = json!(tok);
         }
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -212,7 +158,7 @@ impl JiraClient {
                 .json(&body)
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<SearchPage>().await?)
         })
         .await
@@ -225,14 +171,14 @@ impl JiraClient {
         issue_key: &str,
     ) -> Result<Vec<(String, String)>, JiraError> {
         let url = self.url(&format!("/rest/api/3/issue/{issue_key}/transitions"))?;
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             let v: serde_json::Value = resp.json().await?;
             let arr = v
                 .get("transitions")
@@ -264,14 +210,14 @@ impl JiraClient {
     /// dostupnost přechodu se ověřuje až za běhu přes `list_transitions`.
     pub async fn list_status_names(&self) -> Result<Vec<String>, JiraError> {
         let url = self.url("/rest/api/3/status")?;
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             let arr: serde_json::Value = resp.json().await?;
             let mut set = std::collections::BTreeSet::<String>::new();
             if let Some(items) = arr.as_array() {
@@ -294,7 +240,7 @@ impl JiraClient {
     ) -> Result<(), JiraError> {
         let url = self.url(&format!("/rest/api/3/issue/{issue_key}/transitions"))?;
         let body = json!({ "transition": { "id": transition_id } });
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -302,7 +248,7 @@ impl JiraClient {
                 .json(&body)
                 .send()
                 .await?;
-            Self::check_status(resp).await?;
+            http_base::check_status::<JiraError>(resp).await?;
             Ok(())
         })
         .await
@@ -312,14 +258,14 @@ impl JiraClient {
     pub async fn get_issue_status(&self, issue_key: &str) -> Result<Option<String>, JiraError> {
         let mut url = self.url(&format!("/rest/api/3/issue/{issue_key}"))?;
         url.query_pairs_mut().append_pair("fields", "status");
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             let v: serde_json::Value = resp.json().await?;
             Ok(v.pointer("/fields/status/name")
                 .and_then(|x| x.as_str())
@@ -353,7 +299,7 @@ impl JiraClient {
             }
         }
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -361,7 +307,7 @@ impl JiraClient {
                 .json(&body)
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<WorklogResponse>().await?)
         })
         .await
@@ -408,7 +354,7 @@ impl JiraClient {
             }
         }
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .put(url.clone())
@@ -421,7 +367,7 @@ impl JiraClient {
             if status == StatusCode::NOT_FOUND {
                 return Err(JiraError::WorklogNotFound);
             }
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<WorklogResponse>().await?)
         })
         .await
@@ -436,7 +382,7 @@ impl JiraClient {
         let url = self.url(&format!(
             "/rest/api/3/issue/{issue_key}/worklog/{worklog_id}"
         ))?;
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .delete(url.clone())
@@ -455,7 +401,8 @@ impl JiraClient {
                 return Err(JiraError::Unauthorized);
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_secs = parse_retry_after_header(resp.headers().get("Retry-After"));
+                let retry_after_secs =
+                    http_base::parse_retry_after(resp.headers().get("Retry-After"));
                 return Err(JiraError::RateLimited { retry_after_secs });
             }
             let code = status.as_u16();
@@ -479,14 +426,14 @@ impl JiraClient {
         url.query_pairs_mut()
             .append_pair("since", &since_ms.to_string());
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<WorklogUpdatedPage>().await?)
         })
         .await
@@ -498,7 +445,7 @@ impl JiraClient {
         let url = self.url("/rest/api/3/worklog/list")?;
         let body = json!({ "ids": ids });
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -506,7 +453,7 @@ impl JiraClient {
                 .json(&body)
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<Vec<JiraWorklog>>().await?)
         })
         .await
@@ -529,14 +476,14 @@ impl JiraClient {
             .append_pair("startAt", &start_at.to_string())
             .append_pair("maxResults", &max_results.to_string());
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<IssueWorklogsPage>().await?)
         })
         .await
@@ -549,14 +496,14 @@ impl JiraClient {
         url.query_pairs_mut()
             .append_pair("fields", "summary,issuetype,parent,status,updated");
 
-        with_retry(|| async {
+        http_base::with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.token))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<JiraError>(resp).await?;
             Ok(resp.json::<JiraIssue>().await?)
         })
         .await
