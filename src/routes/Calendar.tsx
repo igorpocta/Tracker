@@ -34,6 +34,7 @@ import {
   type NonWorkingReason,
 } from "../components/Calendar/CellContextMenu";
 import { isWorkingDayLocal, useCalendarMask } from "../hooks/useCalendarMask";
+import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
   addDays,
   dayEndUnixS,
@@ -68,7 +69,11 @@ const MONTHS = [
 ];
 
 export default function Calendar() {
-  const today = useMemo(() => startOfDay(new Date()), []);
+  // Recompute `today` whenever the day actually rolls over — otherwise
+  // a session left open past midnight would keep highlighting yesterday.
+  const { rolloverCount } = useTodayBoundary();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const today = useMemo(() => startOfDay(new Date()), [rolloverCount]);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [view, setView] = useState<"monthly" | "yearly">("monthly");

@@ -32,6 +32,7 @@ import { useMemo } from "react";
 import { getWorklogsForRange } from "../api/commands";
 import { GoalsPrediction } from "../components/Goals/GoalsPrediction";
 import { useCalendarMask, isWorkingDayLocal } from "../hooks/useCalendarMask";
+import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
   addDays,
   dayEndUnixS,
@@ -71,7 +72,10 @@ const WEEKDAYS_LONG = [
 
 export default function Goals() {
   const dailyGoalSeconds = usePrefsStore((s) => s.dailyGoalSeconds);
-  const today = useMemo(() => startOfDay(new Date()), []);
+  // Recompute `today` (and the month range derived from it) on day rollover.
+  const { rolloverCount } = useTodayBoundary();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const today = useMemo(() => startOfDay(new Date()), [rolloverCount]);
   const monthStart = useMemo(() => startOfMonth(today), [today]);
   const monthEnd = useMemo(() => endOfMonth(today), [today]);
 

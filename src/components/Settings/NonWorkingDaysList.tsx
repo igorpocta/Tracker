@@ -18,6 +18,7 @@ import {
   removeNonWorkingDay,
 } from "../../api/commands";
 import type { NonWorkingDay } from "../../api/commands";
+import { useTodayBoundary } from "../../hooks/useTodayBoundary";
 import { addDays, formatIsoDate } from "../../lib/dates";
 
 import { AddNonWorkingDayDialog } from "./AddNonWorkingDayDialog";
@@ -53,7 +54,11 @@ function weekdayFor(iso: string): string {
 
 export function NonWorkingDaysList() {
   const queryClient = useQueryClient();
-  const today = useMemo(() => new Date(), []);
+  // Recompute on day rollover — the -30 / +90 range slides forward each
+  // midnight so the user keeps seeing roughly "the next 90 days".
+  const { rolloverCount } = useTodayBoundary();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const today = useMemo(() => new Date(), [rolloverCount]);
 
   const fromIso = formatIsoDate(addDays(today, -30));
   const toIso = formatIsoDate(addDays(today, 90));

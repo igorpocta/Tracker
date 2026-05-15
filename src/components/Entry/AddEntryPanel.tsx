@@ -37,7 +37,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { searchIssuesCache } from "../../api/commands";
 import type { IssueRow } from "../../api/types";
@@ -66,24 +66,31 @@ const QUICK_DURATIONS = [
 ];
 
 export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
-  const today = useMemo(() => formatLocalDate(new Date()), []);
-  const nowHHMM = useMemo(() => formatLocalTime(new Date()), []);
-
+  // Initial defaults match the first mount — we recompute the wall-clock
+  // values inside the open-effect below so a panel left mounted past
+  // midnight (or just for an hour) still opens with the *current* time
+  // and date, not the moment the parent first rendered.
   const [issueQuery, setIssueQuery] = useState("");
   const [issueKey, setIssueKey] = useState("");
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
-  const [dateIso, setDateIso] = useState(today);
-  const [start, setStart] = useState(nowHHMM);
-  const [end, setEnd] = useState(nowHHMM);
+  const [dateIso, setDateIso] = useState(() => formatLocalDate(new Date()));
+  const [start, setStart] = useState(() => formatLocalTime(new Date()));
+  const [end, setEnd] = useState(() => formatLocalTime(new Date()));
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const issueContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Reset state every time the panel opens.
+  // Reset state every time the panel opens. The date + time defaults are
+  // read fresh inside the effect, so reopening the panel after midnight
+  // — or even just an hour later — gets today's date and the current
+  // wall-clock minute instead of whatever was frozen at mount.
   useEffect(() => {
     if (!open) return;
+    const now = new Date();
+    const today = formatLocalDate(now);
+    const nowHHMM = formatLocalTime(now);
     setIssueQuery("");
     setIssueKey("");
     setDateIso(today);
@@ -91,7 +98,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
     setEnd(nowHHMM);
     setComment("");
     setError(null);
-  }, [open, today, nowHHMM]);
+  }, [open]);
 
   const debounced = useDebounced(issueQuery, 120);
   const issuesQ = useQuery({
