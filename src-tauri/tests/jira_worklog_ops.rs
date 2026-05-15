@@ -3,7 +3,9 @@
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 use tempfile::TempDir;
-use tracker_lib::cache::worklogs::{upsert_from_jira, WorklogRow};
+use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
+use tracker_lib::cache::issues::IssueRow;
+use tracker_lib::cache::worklogs::{upsert_from_remote, WorklogRow};
 use tracker_lib::cache::Db;
 use tracker_lib::jira::worklog_ops::{move_worklog, MoveWorklogArgs, MoveWorklogError};
 use tracker_lib::jira::JiraClient;
@@ -20,39 +22,67 @@ async fn server_and_client() -> (MockServer, JiraClient) {
     (server, client)
 }
 
-fn fresh_db() -> (TempDir, Db) {
+/// `issues_v2` has an FK to `connections`. Seed one Jira connection plus the
+/// two issue rows the move test exercises (OLD-1 / NEW-2) so the upserts
+/// downstream find their parent.
+fn fresh_db(base_url: &str) -> (TempDir, Db, i64) {
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("ops.db")).unwrap();
-    (dir, db)
+    let config = format!(r#"{{"base_url":"{}","email":"{}"}}"#, base_url, EMAIL);
+    let conn_id = insert_conn(
+        &db,
+        NewConnection {
+            provider: "jira",
+            name: "test",
+            enabled: true,
+            config_json: &config,
+        },
+    )
+    .expect("seed connection");
+    for key in ["OLD-1", "NEW-2"] {
+        tracker_lib::cache::issues::upsert(
+            &db,
+            &IssueRow {
+                connection_id: conn_id,
+                issue_id: key.into(),
+                issue_key: key.into(),
+                name: "x".into(),
+                ..Default::default()
+            },
+        )
+        .expect("seed issue");
+    }
+    (dir, db, conn_id)
 }
 
-/// Seed the local cache with a "jira"-source row representing the old worklog.
-fn seed_old_row(db: &Db, jira_id: &str, issue_key: &str) -> i64 {
+/// Seed the local cache with a synced (remote-origin) row representing the
+/// old worklog. The provider-neutral schema drops `source`/`author_account_id`
+/// /`pending_assignment` in favour of `is_synced` + `connection_id`.
+fn seed_old_row(db: &Db, conn_id: i64, remote_id: &str, issue_key: &str) -> i64 {
     let row = WorklogRow {
         id: None,
-        issue_key: issue_key.to_string(),
-        issue_id: Some("10001".into()),
-        summary: Some("Old summary".into()),
-        duration_s: 1800,
+        connection_id: Some(conn_id),
+        issue_key: Some(issue_key.to_string()),
+        description: Some("Old comment".into()),
         started_at: 1_700_000_000,
+        ended_at: 1_700_000_000 + 1800,
         logged_at: 1_700_000_000,
-        comment: Some("Old comment".into()),
-        jira_worklog_id: Some(jira_id.to_string()),
-        author_account_id: Some("me-acc".into()),
-        source: "jira".to_string(),
-        updated_at_jira: Some(1_700_000_000),
+        updated_at: 1_700_000_000,
+        is_synced: true,
+        synced_at: Some(1_700_000_000),
+        remote_id: Some(remote_id.to_string()),
         pending_delete_at: None,
         tombstoned_at: None,
-        pending_assignment: false,
+        summary: Some("Old summary".into()),
     };
-    upsert_from_jira(db, &row).unwrap()
+    upsert_from_remote(db, &row).unwrap()
 }
 
 #[tokio::test]
 async fn move_worklog_happy_path() {
     let (server, client) = server_and_client().await;
-    let (_d, db) = fresh_db();
-    let _old_id = seed_old_row(&db, "5001", "OLD-1");
+    let (_d, db, conn_id) = fresh_db(&server.uri());
+    let _old_id = seed_old_row(&db, conn_id, "5001", "OLD-1");
 
     // POST new on NEW-2: succeed.
     Mock::given(method("POST"))
@@ -85,26 +115,25 @@ async fn move_worklog_happy_path() {
         started,
         time_spent_seconds: 1800,
         comment: Some("Moved"),
-        author_account_id: Some("me-acc"),
     };
 
     let res = move_worklog(&client, &db, args).await.expect("ok");
     assert_eq!(res.new_worklog_id, "6001");
-    assert_eq!(res.new_row.issue_key, "NEW-2");
+    assert_eq!(res.new_row.issue_key.as_deref(), Some("NEW-2"));
 
     // The new row should be in the DB.
-    let by_new = tracker_lib::cache::worklogs::get_by_jira_id(&db, "6001").unwrap();
+    let by_new = tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "6001").unwrap();
     assert!(by_new.is_some());
     // The old row should be gone.
-    let by_old = tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001").unwrap();
+    let by_old = tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001").unwrap();
     assert!(by_old.is_none(), "old row should have been hard-deleted");
 }
 
 #[tokio::test]
 async fn move_worklog_create_failed_leaves_old_intact() {
     let (server, client) = server_and_client().await;
-    let (_d, db) = fresh_db();
-    let _old_id = seed_old_row(&db, "5001", "OLD-1");
+    let (_d, db, conn_id) = fresh_db(&server.uri());
+    let _old_id = seed_old_row(&db, conn_id, "5001", "OLD-1");
 
     // POST new on NEW-2: 500.
     Mock::given(method("POST"))
@@ -124,7 +153,6 @@ async fn move_worklog_create_failed_leaves_old_intact() {
         started,
         time_spent_seconds: 1800,
         comment: None,
-        author_account_id: Some("me-acc"),
     };
 
     let err = move_worklog(&client, &db, args).await.unwrap_err();
@@ -134,17 +162,17 @@ async fn move_worklog_create_failed_leaves_old_intact() {
     );
 
     // Old row should still be in the DB.
-    let by_old = tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
+    let by_old = tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001")
         .unwrap()
         .expect("old row should remain");
-    assert_eq!(by_old.issue_key, "OLD-1");
+    assert_eq!(by_old.issue_key.as_deref(), Some("OLD-1"));
 }
 
 #[tokio::test]
 async fn move_worklog_delete_failed_returns_new_id_for_recovery() {
     let (server, client) = server_and_client().await;
-    let (_d, db) = fresh_db();
-    let _old_id = seed_old_row(&db, "5001", "OLD-1");
+    let (_d, db, conn_id) = fresh_db(&server.uri());
+    let _old_id = seed_old_row(&db, conn_id, "5001", "OLD-1");
 
     // POST new on NEW-2: succeed.
     Mock::given(method("POST"))
@@ -174,7 +202,6 @@ async fn move_worklog_delete_failed_returns_new_id_for_recovery() {
         started,
         time_spent_seconds: 900,
         comment: None,
-        author_account_id: Some("me-acc"),
     };
 
     let err = move_worklog(&client, &db, args).await.unwrap_err();
@@ -192,13 +219,13 @@ async fn move_worklog_delete_failed_returns_new_id_for_recovery() {
 
     // Both rows should now exist: the new (inserted) AND the old (untouched).
     assert!(
-        tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
+        tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001")
             .unwrap()
             .is_some(),
         "old row preserved"
     );
     assert!(
-        tracker_lib::cache::worklogs::get_by_jira_id(&db, "6001")
+        tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "6001")
             .unwrap()
             .is_some(),
         "new row inserted"
@@ -208,8 +235,8 @@ async fn move_worklog_delete_failed_returns_new_id_for_recovery() {
 #[tokio::test]
 async fn move_worklog_delete_404_is_treated_as_success() {
     let (server, client) = server_and_client().await;
-    let (_d, db) = fresh_db();
-    let _old_id = seed_old_row(&db, "5001", "OLD-1");
+    let (_d, db, conn_id) = fresh_db(&server.uri());
+    let _old_id = seed_old_row(&db, conn_id, "5001", "OLD-1");
 
     Mock::given(method("POST"))
         .and(path("/rest/api/3/issue/NEW-2/worklog"))
@@ -235,13 +262,14 @@ async fn move_worklog_delete_404_is_treated_as_success() {
         started,
         time_spent_seconds: 900,
         comment: None,
-        author_account_id: Some("me-acc"),
     };
 
     let res = move_worklog(&client, &db, args).await.expect("ok");
     assert_eq!(res.new_worklog_id, "6001");
     // Old row should be removed locally too (404 means "already gone").
-    assert!(tracker_lib::cache::worklogs::get_by_jira_id(&db, "5001")
-        .unwrap()
-        .is_none());
+    assert!(
+        tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001")
+            .unwrap()
+            .is_none()
+    );
 }
