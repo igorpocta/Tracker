@@ -441,12 +441,23 @@ function truncateToWidth(
   return lo > 0 ? text.slice(0, lo) + "…" : "";
 }
 
-function canvasXToTimeMs(canvasX: number, cssWidth: number, day: Date): number {
+export function canvasXToTimeMs(
+  canvasX: number,
+  cssWidth: number,
+  day: Date,
+): number {
   const totalHours = END_HOUR - START_HOUR;
   const frac = Math.max(0, Math.min(1, canvasX / cssWidth));
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
-  return dayStart.getTime() + (START_HOUR + frac * totalHours) * 3_600_000;
+  // `frac * totalHours * 3_600_000` is float arithmetic; the result feeds
+  // Tauri commands typed `i64` (`create_manual_worklog`, `split_worklog`).
+  // Without the round, serde rejects with
+  // `invalid type: floating point, expected i64`. Sub-ms precision is
+  // meaningless for wall-clock worklogs anyway.
+  return Math.round(
+    dayStart.getTime() + (START_HOUR + frac * totalHours) * 3_600_000,
+  );
 }
 
 export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {
