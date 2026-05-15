@@ -53,6 +53,12 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
 
   const [hover, setHover] = useState<number | null>(null);
 
+  // Daily-goal line — only render when configured (>0) and within axis range.
+  const goalLinePct =
+    dailyGoalHours && dailyGoalHours > 0 && max > 0
+      ? Math.min(100, (dailyGoalHours / max) * 100)
+      : null;
+
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
@@ -66,71 +72,112 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
           ))}
         </div>
         <div className="flex-1 relative">
-          {/* Grid lines */}
-          <div className="absolute inset-0 flex flex-col justify-between py-1 pointer-events-none">
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={`grid-${i}`}
-                className="border-t border-[var(--border-subtle)]"
-              />
-            ))}
-          </div>
-          {/* Working-day shading bands (sit behind the bars) */}
-          <div className="absolute inset-0 flex gap-[2px] pt-1 pb-5 pointer-events-none">
-            {days.map((d) => {
-              const working = isWorkingDayLocal(d, mask, nonWorking);
-              return (
+          {/* Plot region — bars/bands/grid all share this geometry so the
+              y-axis math (height: X%) resolves against the same 100%. */}
+          <div className="absolute inset-0 pt-1 pb-5">
+            <div className="relative h-full w-full">
+              {/* Grid lines */}
+              <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={`grid-${i}`}
+                    className="border-t border-[var(--border-subtle)]"
+                  />
+                ))}
+              </div>
+
+              {/* Working-day shading bands (sit behind the bars) */}
+              <div className="absolute inset-0 flex gap-[2px] pointer-events-none">
+                {days.map((d) => {
+                  const working = isWorkingDayLocal(d, mask, nonWorking);
+                  return (
+                    <div
+                      key={`band-${d.toISOString()}`}
+                      className="flex-1 rounded-[2px]"
+                      style={{
+                        background: working
+                          ? "var(--accent-soft)"
+                          : "transparent",
+                        opacity: working ? 0.35 : 0,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* Bars — each column is full-height (h-full) so the inner
+                  absolutely-positioned bar's `height: X%` resolves against
+                  the real plot height, not 0. */}
+              <div className="absolute inset-0 flex items-end gap-[2px]">
+                {days.map((d, idx) => {
+                  const seconds = totals.get(formatKey(d)) ?? 0;
+                  const hours = seconds / 3600;
+                  const heightPct = max > 0 ? (hours / max) * 100 : 0;
+                  const isHovered = hover === idx;
+                  return (
+                    <div
+                      key={d.toISOString()}
+                      className="flex-1 h-full relative cursor-pointer"
+                      onMouseEnter={() => setHover(idx)}
+                      onMouseLeave={() => setHover(null)}
+                    >
+                      <div
+                        className="absolute left-0 right-0 bottom-0 rounded-t-[2px] transition-colors duration-150"
+                        style={{
+                          height: `${heightPct}%`,
+                          minHeight: heightPct > 0 ? "3px" : 0,
+                          background:
+                            heightPct > 0
+                              ? isHovered
+                                ? "var(--accent-hover)"
+                                : "var(--accent)"
+                              : "transparent",
+                        }}
+                      />
+                      {isHovered && seconds > 0 && (
+                        <DailyTooltip
+                          date={d}
+                          seconds={seconds}
+                          count={counts.get(formatKey(d)) ?? 0}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Daily-goal line — dashed horizontal across the plot, with a
+                  small label on the right edge. Rendered LAST so it stays on
+                  top of bars/bands. */}
+              {goalLinePct !== null && (
                 <div
-                  key={`band-${d.toISOString()}`}
-                  className="flex-1 rounded-[2px]"
-                  style={{
-                    background: working
-                      ? "var(--accent-soft)"
-                      : "transparent",
-                    opacity: working ? 0.35 : 0,
-                  }}
-                />
-              );
-            })}
-          </div>
-          {/* Bars */}
-          <div className="absolute inset-0 flex items-end gap-[2px] pt-1 pb-5">
-            {days.map((d, idx) => {
-              const seconds = totals.get(formatKey(d)) ?? 0;
-              const hours = seconds / 3600;
-              const heightPct = max > 0 ? (hours / max) * 100 : 0;
-              const isHovered = hover === idx;
-              return (
-                <div
-                  key={d.toISOString()}
-                  className="flex-1 relative cursor-pointer"
-                  onMouseEnter={() => setHover(idx)}
-                  onMouseLeave={() => setHover(null)}
+                  className="absolute left-0 right-0 pointer-events-none"
+                  style={{ bottom: `${goalLinePct}%` }}
+                  aria-label={`Denní cíl ${dailyGoalHours} h`}
                 >
                   <div
-                    className="absolute left-0 right-0 bottom-0 rounded-t-[2px] transition-colors duration-150"
+                    className="w-full"
                     style={{
-                      height: `${heightPct}%`,
-                      minHeight: heightPct > 0 ? "3px" : 0,
-                      background:
-                        heightPct > 0
-                          ? isHovered
-                            ? "var(--accent-hover)"
-                            : "var(--accent)"
-                          : "transparent",
+                      borderTop: "1px dashed var(--warning, #ff9f0a)",
+                      opacity: 0.8,
                     }}
                   />
-                  {isHovered && seconds > 0 && (
-                    <DailyTooltip
-                      date={d}
-                      seconds={seconds}
-                      count={counts.get(formatKey(d)) ?? 0}
-                    />
-                  )}
+                  <div
+                    className="absolute -top-2 right-0 px-1 py-[1px] rounded-[3px] text-[9px] font-medium tabular-nums leading-none"
+                    style={{
+                      background: "var(--bg-surface)",
+                      color: "var(--warning, #ff9f0a)",
+                      border: "1px solid var(--warning, #ff9f0a)",
+                      opacity: 0.85,
+                    }}
+                  >
+                    cíl {dailyGoalHours}h
+                  </div>
                 </div>
-              );
-            })}
+              )}
+            </div>
           </div>
+
           {/* X-axis labels */}
           <div className="absolute left-0 right-0 bottom-0 flex gap-[2px]">
             {days.map((d, idx) => (
