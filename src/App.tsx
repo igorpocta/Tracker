@@ -9,10 +9,11 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { hasConfig } from "./api/commands";
+import { getInstallId, getSentryEnabled, hasConfig } from "./api/commands";
 import type { NavigateTarget } from "./api/types";
 import { AppShell } from "./components/Layout/AppShell";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
+import { initSentry } from "./lib/sentry";
 import Audit from "./routes/Audit";
 import Calendar from "./routes/Calendar";
 import Goals from "./routes/Goals";
@@ -60,6 +61,25 @@ export default function App() {
       })
       .catch(() => {
         if (!cancelled) setInitialRoute("/setup");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Phase 19 — opt-in Sentry. Runs in parallel with the route decision so
+  // boot is never blocked on the toggle lookup. The SDK init itself is a
+  // no-op if the user hasn't opted in OR no DSN is configured at build
+  // time, so failing-soft here is correct.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getSentryEnabled(), getInstallId()])
+      .then(([enabled, installId]) => {
+        if (cancelled || !enabled) return;
+        initSentry({ installId });
+      })
+      .catch(() => {
+        /* non-Tauri context or backend mid-restart — Sentry stays off. */
       });
     return () => {
       cancelled = true;

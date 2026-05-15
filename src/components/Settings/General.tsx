@@ -16,13 +16,16 @@ import { useNavigate } from "react-router-dom";
 import {
   getActivityThresholdMin,
   getAutostart,
+  getInstallId,
   getRoundingIntervalMinutes,
   getRoundingMode,
+  getSentryEnabled,
   purgeAuditLog,
   setActivityThresholdMin,
   setAutostart,
   setRoundingIntervalMinutes,
   setRoundingMode,
+  setSentryEnabled,
   type RoundingMode,
 } from "../../api/commands";
 import {
@@ -30,6 +33,7 @@ import {
   firstError,
   roundingIntervalSchema,
 } from "../../lib/validation";
+import { initSentry, shutdownSentry } from "../../lib/sentry";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
@@ -65,6 +69,8 @@ export default function General() {
   const [rndInterval, setRndInterval] = useState<number>(1);
   // Phase 18A — Item 32: inactivity threshold (minutes).
   const [actThreshold, setActThreshold] = useState<number>(5);
+  // Phase 19: anonymous error reporting.
+  const [sentryOn, setSentryOn] = useState<boolean | null>(null);
 
   useEffect(() => {
     try {
@@ -85,6 +91,7 @@ export default function General() {
     void getRoundingMode().then(setRndMode).catch(() => {});
     void getRoundingIntervalMinutes().then(setRndInterval).catch(() => {});
     void getActivityThresholdMin().then(setActThreshold).catch(() => {});
+    void getSentryEnabled().then(setSentryOn).catch(() => setSentryOn(false));
   }, []);
 
   const updateAutostart = async (enabled: boolean) => {
@@ -113,6 +120,26 @@ export default function General() {
     if (firstError(activityThresholdSchema, n)) return;
     setActThreshold(n);
     await setActivityThresholdMin(n).catch(() => {});
+  };
+
+  // Phase 19: when the user opts in we initialise the frontend SDK
+  // immediately (so the current session is covered, not just the next
+  // restart). When they opt out we flush + close.
+  const updateSentry = async (enabled: boolean) => {
+    const previous = sentryOn;
+    setSentryOn(enabled);
+    try {
+      await setSentryEnabled(enabled);
+      if (enabled) {
+        const installId = await getInstallId().catch(() => null);
+        initSentry({ installId });
+      } else {
+        await shutdownSentry();
+      }
+    } catch {
+      // Revert on failure.
+      setSentryOn(previous);
+    }
   };
 
   const updateTimeInput = (v: TimeInputStyle) => {
@@ -238,6 +265,27 @@ export default function General() {
             Spouštět Tracker automaticky
           </span>
         </label>
+      </Section>
+
+      <Section
+        title="Anonymní reportování chyb"
+        description="Pokud zapnete, aplikace zasílá anonymizovaná hlášení chyb na Sentry — pomáhá nám diagnostikovat pády. API tokeny, hesla ani plné e-maily se neposílají. Identifikace je pouze anonymním instalačním ID."
+      >
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={sentryOn === true}
+            onChange={(e) => void updateSentry(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-[var(--text-primary)]">
+            Povolit reportování chyb
+          </span>
+        </label>
+        <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
+          Změna se na frontendu projeví ihned. Backend přejde do nového
+          režimu při příštím spuštění aplikace.
+        </p>
       </Section>
 
       <Section
