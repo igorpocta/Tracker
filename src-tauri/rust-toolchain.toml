@@ -1,0 +1,15 @@
+# Pinned Rust toolchain for the workspace.
+#
+# Why pin: CI runs `cargo clippy --all-targets -- -D warnings`, which makes
+# any new clippy lint a hard build break. Without a pin, dev environments
+# and CI drift over time (CI fetches whatever `dtolnay/rust-toolchain@<ver>`
+# resolves to, dev runs whatever the user last `rustup update`d). The first
+# time that drifted us into a red build was the 1.95 `unnecessary_sort_by`
+# lint — the local gate was green on 1.92, CI was red on 1.95.
+#
+# Bumping: edit the channel string here AND the two `dtolnay/rust-toolchain`
+# references in `.github/workflows/build.yml` in the same commit. Both must
+# match.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
