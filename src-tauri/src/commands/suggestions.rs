@@ -109,7 +109,7 @@ fn compute_suggestions(
             bucket_hour: hour,
         })
         .collect();
-    out.sort_by(|a, b| b.occurrences.cmp(&a.occurrences));
+    out.sort_by_key(|s| std::cmp::Reverse(s.occurrences));
     out.truncate(MAX_SUGGESTIONS);
     Ok(out)
 }
