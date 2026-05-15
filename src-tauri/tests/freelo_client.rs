@@ -19,18 +19,18 @@ async fn server_and_client() -> (MockServer, FreeloClient) {
     (server, client)
 }
 
-// ---------- me / users-manage-workers ----------
+// ---------- me / /users + /all-projects fallback ----------
 
 #[tokio::test]
-async fn me_returns_authenticated_user() {
+async fn me_returns_authenticated_user_from_users_endpoint() {
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
-        .and(path("/users/manage-workers"))
+        .and(path("/users"))
         .and(basic_auth(EMAIL, KEY))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             {
                 "id": 7,
-                "email": "alice@example.com",
+                "email": EMAIL,
                 "first_name": "Alice",
                 "last_name": "Example"
             },
@@ -51,10 +51,38 @@ async fn me_returns_authenticated_user() {
 }
 
 #[tokio::test]
+async fn me_falls_back_to_all_projects_when_users_endpoint_is_404() {
+    let (server, client) = server_and_client().await;
+    // /users returns 404 — Freelo deployment doesn't expose it.
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_string(r#"{"error":"Page not found"}"#),
+        )
+        .mount(&server)
+        .await;
+    // /all-projects works → auth is OK → synthesize user from email.
+    Mock::given(method("GET"))
+        .and(path("/all-projects"))
+        .and(basic_auth(EMAIL, KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let user = client.me().await.expect("ok");
+    assert_eq!(user.id, 0);
+    assert_eq!(user.email.as_deref(), Some(EMAIL));
+    // Heuristic from "alice.example@example.com" → "Alice Example"
+    // (EMAIL constant is `alice@example.com` → "Alice").
+    assert!(user.best_name().contains("Alice"));
+}
+
+#[tokio::test]
 async fn me_propagates_401_as_unauthorized() {
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
-        .and(path("/users/manage-workers"))
+        .and(path("/users"))
         .respond_with(ResponseTemplate::new(401).set_body_string("nope"))
         .mount(&server)
         .await;

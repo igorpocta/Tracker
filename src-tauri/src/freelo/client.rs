@@ -155,13 +155,23 @@ impl FreeloClient {
         Err(FreeloError::Api { status: code, body })
     }
 
-    /// `GET /users/manage-workers` (or similar) — return the authenticated
-    /// user. Freelo's exact endpoint for "who am I" varies; we try
-    /// `/users/manage-workers` first because it's documented, and fall back
-    /// to deriving identity from the supplied email if needed.
+    /// Return the authenticated user.
+    ///
+    /// Freelo's v1 API doesn't expose a dedicated `/me` endpoint, and the
+    /// "users" endpoint name has varied across versions of their docs
+    /// (`/users`, `/users/manage-workers`, `/workers`). We therefore:
+    ///   1. Try `/users` (canonical for v1 per Apiary docs).
+    ///   2. Fall back to `/all-projects` — a known-good endpoint we use
+    ///      elsewhere in setup. If it returns 200 (auth OK) we synthesize a
+    ///      minimal `FreeloUser` from the supplied email so the rest of the
+    ///      sync pipeline has an identity to work with.
+    ///
+    /// A 404 from `/users` is treated as "endpoint missing on this Freelo
+    /// deployment" (NOT an auth error), and we proceed to step 2.
     pub async fn me(&self) -> Result<FreeloUser, FreeloError> {
-        let url = self.url("/users/manage-workers")?;
-        let result: Result<Value, FreeloError> = with_retry(|| async {
+        // --- Step 1: try /users -------------------------------------------
+        let url = self.url("/users")?;
+        let users_result: Result<Value, FreeloError> = with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
@@ -173,35 +183,41 @@ impl FreeloClient {
         })
         .await;
 
-        let body = result?;
-
-        // Try to find an entry whose email matches `self.email` (Freelo
-        // returns a list of workers including the caller).
-        if let Some(arr) = body.as_array() {
-            for u in arr {
-                if let Some(email) = u.get("email").and_then(|v| v.as_str()) {
-                    if email.eq_ignore_ascii_case(&self.email) {
-                        if let Ok(parsed) = serde_json::from_value::<FreeloUser>(u.clone()) {
-                            return Ok(parsed);
-                        }
-                    }
-                }
-            }
-            // Fallback: take the first entry if present.
-            if let Some(first) = arr.first() {
-                if let Ok(parsed) = serde_json::from_value::<FreeloUser>(first.clone()) {
+        match users_result {
+            Ok(body) => {
+                if let Some(parsed) = extract_user_matching_email(&body, &self.email) {
                     return Ok(parsed);
                 }
+                // Response shape unexpected — fall through to step 2 rather
+                // than fail. Auth clearly worked.
             }
+            // Bubble up auth errors — the user must fix the API key/email.
+            Err(FreeloError::Unauthorized) => return Err(FreeloError::Unauthorized),
+            // Anything else (404 = endpoint missing, 429 retried out, etc.)
+            // → fall through to step 2.
+            Err(_) => { /* fall through */ }
         }
-        // If the response was a single object (some Freelo deployments
-        // expose `/user/me` as a single-object endpoint), try that.
-        if let Ok(parsed) = serde_json::from_value::<FreeloUser>(body.clone()) {
-            return Ok(parsed);
-        }
-        Err(FreeloError::Api {
-            status: 200,
-            body: format!("unexpected /users/manage-workers shape: {body}"),
+
+        // --- Step 2: verify auth via /all-projects, synthesize identity ---
+        let projects_url = self.url("/all-projects")?;
+        let _: Value = with_retry(|| async {
+            let resp = self
+                .http
+                .get(projects_url.clone())
+                .basic_auth(&self.email, Some(&self.api_key))
+                .send()
+                .await?;
+            let resp = Self::check_status(resp).await?;
+            Ok(resp.json::<Value>().await?)
+        })
+        .await?;
+
+        Ok(FreeloUser {
+            id: 0,
+            email: Some(self.email.clone()),
+            display_name: Some(derive_name_from_email(&self.email)),
+            first_name: None,
+            last_name: None,
         })
     }
 
@@ -583,4 +599,39 @@ mod tests {
         .await;
         assert_eq!(res.unwrap(), 2);
     }
+}
+
+/// Try to find the entry in `body` (an array of user objects) whose `email`
+/// matches `wanted_email`. Returns `None` if `body` isn't an array, or no
+/// match is found.
+fn extract_user_matching_email(body: &Value, wanted_email: &str) -> Option<FreeloUser> {
+    let arr = body.as_array()?;
+    // Exact email match first.
+    for u in arr {
+        if let Some(email) = u.get("email").and_then(|v| v.as_str()) {
+            if email.eq_ignore_ascii_case(wanted_email) {
+                if let Ok(parsed) = serde_json::from_value::<FreeloUser>(u.clone()) {
+                    return Some(parsed);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Heuristic display name from an email: `igor.pocta@example.com` → `Igor Pocta`.
+fn derive_name_from_email(email: &str) -> String {
+    let local = email.split('@').next().unwrap_or(email);
+    local
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let mut c = s.chars();
+            match c.next() {
+                Some(first) => first.to_uppercase().chain(c).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
