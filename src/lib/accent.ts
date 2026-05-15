@@ -37,7 +37,7 @@ export interface PaletteSpec {
 
 /** Mono palettes — single primary accent. */
 export const MONO_PALETTES: PaletteSpec[] = [
-  { id: "aurora",    label: "SAB",       mode: "mono", primary: "#14B8A6", secondary: "#14B8A6" },
+  { id: "aurora",    label: "Tyrkysová", mode: "mono", primary: "#14B8A6", secondary: "#14B8A6" },
   { id: "trcker",    label: "Tracker",   mode: "mono", primary: "#EAB308", secondary: "#EAB308" },
   { id: "love",      label: "Love",      mode: "mono", primary: "#EC4899", secondary: "#EC4899" },
   { id: "halloween", label: "Halloween", mode: "mono", primary: "#F97316", secondary: "#F97316" },
