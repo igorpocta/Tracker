@@ -100,6 +100,45 @@ async fn list_projects_handles_wrapped_response() {
 }
 
 #[tokio::test]
+async fn list_projects_parses_real_freelo_v1_state_object() {
+    // Real Freelo v1 response shape (verified against the live API):
+    //   "state": { "id": 1, "state": "active" }   ← state is an OBJECT
+    // Previously our struct expected a string and parsing silently dropped
+    // every project. This test guards against that regression.
+    let (server, client) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/all-projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total": 2, "count": 2, "page": 0, "per_page": 100,
+            "data": { "projects": [
+                {
+                    "id": 57447,
+                    "name": "SAB vývoj - Ostatní",
+                    "owner": { "id": 46694, "fullname": "Pavel Černý" },
+                    "state": { "id": 1, "state": "active" },
+                    "date_add": "2019-07-10 16:38:48"
+                },
+                {
+                    "id": 305791,
+                    "name": "SAB vývoj - II.",
+                    "owner": { "id": 46694, "fullname": "Pavel Černý" },
+                    "state": { "id": 2, "state": "archived" },
+                    "date_add": "2023-10-04 12:54:54"
+                }
+            ]}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let projects = client.list_projects().await.expect("ok");
+    assert_eq!(projects.len(), 2);
+    assert_eq!(projects[0].id, 57447);
+    assert_eq!(projects[0].state, "active");
+    assert_eq!(projects[1].state, "archived");
+}
+
+#[tokio::test]
 async fn list_projects_walks_through_multiple_pages() {
     // When the server reports total > out.len() we keep paginating.
     let (server, client) = server_and_client().await;

@@ -51,14 +51,46 @@ impl FreeloUser {
 }
 
 /// One project that the authenticated user has access to.
+///
+/// Freelo's `state` field has been seen in two shapes:
+///   - String (older / legacy): `"state": "active"`
+///   - Object (current v1):     `"state": { "id": 1, "state": "active" }`
+/// `FreeloProjectState` accepts either via untagged deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreeloProject {
     pub id: i64,
     pub name: String,
-    /// `active`, `finished`, `archived`, etc. Defaults to `active` when the
-    /// API doesn't include the field.
-    #[serde(default = "default_state")]
+    #[serde(default = "default_state_object", deserialize_with = "deserialize_state")]
     pub state: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StateField {
+    /// Old API shape — bare string.
+    Plain(String),
+    /// Current v1 shape — `{ id, state }`. We pick `state`.
+    Wrapped {
+        #[allow(dead_code)]
+        id: Option<i64>,
+        state: String,
+    },
+}
+
+fn deserialize_state<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    Option::<StateField>::deserialize(d).map(|opt| match opt {
+        Some(StateField::Plain(s)) => s,
+        Some(StateField::Wrapped { state, .. }) => state,
+        None => default_state_object(),
+    })
+}
+
+fn default_state_object() -> String {
+    "active".to_string()
 }
 
 /// One task in a Freelo project. The tasks endpoint may also return tasks
