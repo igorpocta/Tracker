@@ -34,13 +34,32 @@ use tracker_lib::state::AppState;
 fn fresh_db() -> (TempDir, Db) {
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("t.db")).unwrap();
+    // `issues_v2` now carries an FK to `connections`; every test that
+    // upserts an issue needs at least one connection row to satisfy it.
+    // We seed one Jira connection up-front so existing `issue(...)`
+    // helpers keep working without a per-test ceremony.
+    tracker_lib::cache::connections::insert(
+        &db,
+        tracker_lib::cache::connections::NewConnection {
+            provider: "jira",
+            name: "test",
+            enabled: true,
+            config_json: "{}",
+        },
+    )
+    .expect("seed connection");
     (dir, db)
 }
 
 fn issue(key: &str, summary: &str, updated_at: i64) -> IssueRow {
     IssueRow {
+        connection_id: 1,
+        // `issues_v2` now enforces UNIQUE(connection_id, issue_id);
+        // reuse the key as the provider id so distinct keys stay
+        // distinct rows.
+        issue_id: key.into(),
         issue_key: key.into(),
-        summary: summary.into(),
+        name: summary.into(),
         updated_at,
         ..Default::default()
     }
@@ -144,19 +163,24 @@ fn record_local_stop_writes_worklog_and_clears_timer() {
     let row =
         record_local_stop(&db, &timer_state, 60_000, Some("done"), Some("J-1"), None).unwrap();
     assert!(row.id.is_some());
-    assert_eq!(row.duration_s, 60);
-    assert_eq!(row.issue_key, "ACME-1");
-    assert_eq!(row.summary.as_deref(), Some("fix the bug"));
-    assert_eq!(row.jira_worklog_id.as_deref(), Some("J-1"));
-    assert_eq!(row.comment.as_deref(), Some("done"));
+    assert_eq!(row.duration_s(), 60);
+    assert_eq!(row.issue_key.as_deref(), Some("ACME-1"));
+    assert_eq!(row.remote_id.as_deref(), Some("J-1"));
+    assert_eq!(row.description.as_deref(), Some("done"));
+    // `summary` is populated only by SELECTs that JOIN issues_v2 — the
+    // returned row from `record_local_stop` (which is what just got
+    // INSERTed) intentionally leaves it `None`.
+    assert!(row.summary.is_none());
 
     // Timer should be cleared.
     assert!(timer::get(&db).unwrap().is_none());
 
-    // The row should be visible in the recent_worklogs query.
+    // The row should be visible in the recent_worklogs query and there the
+    // JOIN fills `summary` from the cached issue.
     let recent: Vec<WorklogRow> = worklog_recent(&db, 10).unwrap();
     assert_eq!(recent.len(), 1);
-    assert_eq!(recent[0].issue_key, "ACME-1");
+    assert_eq!(recent[0].issue_key.as_deref(), Some("ACME-1"));
+    assert_eq!(recent[0].summary.as_deref(), Some("fix the bug"));
 }
 
 #[test]
@@ -169,7 +193,7 @@ fn record_local_stop_clamps_negative_duration_to_zero() {
     };
     // now < started_at → duration would be negative; we expect 0.
     let row = record_local_stop(&db, &timer_state, 0, None, None, None).unwrap();
-    assert_eq!(row.duration_s, 0);
+    assert_eq!(row.duration_s(), 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -299,13 +323,15 @@ fn set_density_rejects_invalid_values() {
 #[test]
 fn set_widget_format_and_app_icon_persist() {
     let (_dir, db) = fresh_db();
-    set_widget_format_inner(&db, "hh:mm:ss").unwrap();
+    // The validator was tightened to a case-sensitive whitelist —
+    // see `ALLOWED_WIDGET_FORMATS` in `commands/prefs.rs`.
+    set_widget_format_inner(&db, "HH:MM:SS").unwrap();
     set_app_icon_inner(&db, "dark").unwrap();
     // No public getter for these yet; verify via raw settings table.
     let v = tracker_lib::cache::settings::get(&db, "widget_format")
         .unwrap()
         .unwrap();
-    assert_eq!(v, "hh:mm:ss");
+    assert_eq!(v, "HH:MM:SS");
     let v = tracker_lib::cache::settings::get(&db, "app_icon")
         .unwrap()
         .unwrap();
