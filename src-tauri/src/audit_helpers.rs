@@ -31,11 +31,37 @@ pub fn now_unix() -> i64 {
 /// blobs stored in `audit_log`). Generic over the error type so each
 /// provider's `ReconstructError` (which already implements
 /// `From<serde_json::Error>` via thiserror's `#[from]`) keeps working.
+///
+/// **Why the `Value` middle step.** `WorklogRow`'s `Serialize` impl
+/// emits *both* the canonical key (`description`, `remote_id`) and the
+/// legacy frontend alias (`comment`, `jira_worklog_id`) for the same
+/// underlying field, plus derived keys (`duration_s`, `source`,
+/// `pending_assignment`). When the audit log captures this JSON and
+/// `parse_row` later deserialises it via the `#[serde(alias = "comment")]`
+/// rule on the `description` field, serde sees two writes to one field
+/// and panics with `duplicate field "description"`. We therefore parse
+/// into a `Value` first, strip the duplicated aliases when the canonical
+/// key is also present, drop the derived-only keys, and only then
+/// deserialise into `WorklogRow`. Round-trip stays lossless because the
+/// dropped keys are derivable from the kept ones.
 pub fn parse_row<E>(json: &str) -> Result<WorklogRow, E>
 where
     E: From<serde_json::Error>,
 {
-    serde_json::from_str::<WorklogRow>(json).map_err(Into::into)
+    let mut v: serde_json::Value = serde_json::from_str(json)?;
+    if let Some(obj) = v.as_object_mut() {
+        if obj.contains_key("description") {
+            obj.remove("comment");
+        }
+        if obj.contains_key("remote_id") {
+            obj.remove("jira_worklog_id");
+        }
+        // Derived-only keys never feed back into a `WorklogRow` field.
+        obj.remove("source");
+        obj.remove("pending_assignment");
+        obj.remove("duration_s");
+    }
+    serde_json::from_value::<WorklogRow>(v).map_err(Into::into)
 }
 
 /// Append a follow-up audit entry that links back to the audit row whose
@@ -116,6 +142,46 @@ mod tests {
     fn parse_row_propagates_serde_error_as_provider_error() {
         let res: Result<WorklogRow, TestErr> = parse_row("{ not json");
         assert!(matches!(res, Err(TestErr::Serde(_))));
+    }
+
+    #[test]
+    fn parse_row_round_trips_through_the_canonical_serialize_output() {
+        // Regression: `WorklogRow::Serialize` emits both the canonical key
+        // (`description`) and the legacy alias (`comment`) for the same
+        // underlying field. Round-tripping through `serde_json::to_string`
+        // and then back used to fail with a "duplicate field" error
+        // because of `#[serde(alias = "comment")]` on `description`. The
+        // workaround in Phase 0 was a hand-rolled `snapshot_json` that
+        // wrote only the canonical keys; that's fragile because any new
+        // caller that serialises with `serde_json::to_string` and stores
+        // the result in `audit_log` would re-introduce the bug.
+        let row = WorklogRow {
+            id: Some(7),
+            connection_id: Some(1),
+            issue_key: Some("ACME-1".into()),
+            description: Some("a comment".into()),
+            started_at: 100,
+            ended_at: 220,
+            logged_at: 220,
+            updated_at: 220,
+            is_synced: true,
+            synced_at: Some(220),
+            remote_id: Some("j-7".into()),
+            pending_delete_at: None,
+            tombstoned_at: None,
+            summary: Some("the summary".into()),
+        };
+        let json = serde_json::to_string(&row).expect("serialise");
+        // Sanity: the serialised blob really does contain BOTH the
+        // canonical key and the legacy alias — that's what makes the
+        // duplicate-field check meaningful.
+        assert!(json.contains("\"description\""));
+        assert!(json.contains("\"comment\""));
+        let parsed: WorklogRow = parse_row::<TestErr>(&json).expect("ok");
+        assert_eq!(parsed.id, Some(7));
+        assert_eq!(parsed.description.as_deref(), Some("a comment"));
+        assert_eq!(parsed.remote_id.as_deref(), Some("j-7"));
+        assert!(parsed.is_synced);
     }
 
     #[test]
