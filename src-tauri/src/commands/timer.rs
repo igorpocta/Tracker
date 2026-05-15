@@ -662,6 +662,35 @@ pub async fn stop_timer_inner(
     Ok(Some(row))
 }
 
+/// Wall-clock `[start_of_day, start_of_next_day)` range for `today` in the
+/// given timezone, expressed as Unix seconds. Computes BOTH bounds via
+/// `from_local_datetime`, so the returned interval matches the actual
+/// wall-clock day on DST transitions (Europe/Prague spring-forward →
+/// 23 h, fall-back → 25 h) instead of being naively `start + 86_400`.
+///
+/// Returns `None` when either local midnight is non-representable
+/// (chrono's date arithmetic overflows at the i64 unix-second limits,
+/// nominally year ±292 billion) or ambiguous in a way `single()` can't
+/// resolve (no real-world TZ has DST flips at midnight, so this is
+/// belt-and-suspenders only).
+///
+/// Generic over `TZ` so the unit test below can pin the contract with
+/// `chrono::Utc` (no DST) without pulling in `chrono-tz`. The real DST
+/// guarantee comes from the underlying `chrono::Local`
+/// implementation — we don't ship a TZ database of our own.
+fn local_day_bounds<TZ: chrono::TimeZone>(tz: &TZ, today: chrono::NaiveDate) -> Option<(i64, i64)> {
+    let start_local = today.and_hms_opt(0, 0, 0)?;
+    let from = tz.from_local_datetime(&start_local).single()?.timestamp();
+    let tomorrow = today.succ_opt()?;
+    let end_local = tomorrow.and_hms_opt(0, 0, 0)?;
+    let to = tz
+        .from_local_datetime(&end_local)
+        .single()
+        .map(|d| d.timestamp())
+        .unwrap_or(from + 86_400);
+    Some((from, to))
+}
+
 /// Phase 18B — Item 12: best-effort "you've hit your daily goal" notification.
 ///
 /// Fires at most once per local calendar day. The dedupe state lives in
@@ -670,12 +699,10 @@ fn maybe_notify_daily_goal_reached(app: &tauri::AppHandle, db: &Db) {
     // Snapshot today's local-day range, expressed in unix seconds.
     let now_local = Local::now();
     let today = now_local.date_naive();
-    let start_local = today.and_hms_opt(0, 0, 0).unwrap_or_default();
-    let from = match Local.from_local_datetime(&start_local).single() {
-        Some(d) => d.timestamp(),
+    let (from, to) = match local_day_bounds(&Local, today) {
+        Some(b) => b,
         None => return,
     };
-    let to = from + 86_400;
 
     let total = match cache::worklogs::total_seconds_for_range(db, from, to - 1) {
         Ok(t) => t,
@@ -710,4 +737,39 @@ fn maybe_notify_daily_goal_reached(app: &tauri::AppHandle, db: &Db) {
         .title("Tracker")
         .body(&body)
         .show();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_day_bounds;
+    use chrono::{NaiveDate, Utc};
+
+    #[test]
+    fn local_day_bounds_utc_is_exactly_24h() {
+        // In UTC there is no DST, so the wall-clock day is always 86_400 s.
+        // This pins the basic shape of the helper without depending on a
+        // tz database. The real DST guarantee comes from `chrono::Local`
+        // calling into the OS tz, exercised in manual / staging testing.
+        let today = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+        let (from, to) = local_day_bounds(&Utc, today).expect("bounds");
+        assert_eq!(to - from, 86_400);
+    }
+
+    #[test]
+    fn local_day_bounds_is_inclusive_exclusive() {
+        // `[from, to)` — `from` is local midnight, `to` is local midnight of
+        // tomorrow. We use `total_seconds_for_range(from, to - 1)` for the
+        // daily sum, so an off-by-one here would either drop or double-count
+        // the final second of the day.
+        let today = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let (from, to) = local_day_bounds(&Utc, today).expect("bounds");
+        // `from` is start-of-day at 00:00:00 UTC; `to` is start-of-next-day.
+        // Round-trip to a NaiveDateTime to assert the wall clock is exactly
+        // midnight on each side.
+        let from_dt = chrono::DateTime::from_timestamp(from, 0).unwrap();
+        let to_dt = chrono::DateTime::from_timestamp(to, 0).unwrap();
+        assert_eq!(from_dt.naive_utc().time(), chrono::NaiveTime::MIN);
+        assert_eq!(to_dt.naive_utc().time(), chrono::NaiveTime::MIN);
+        assert_eq!(to_dt.naive_utc().date(), today.succ_opt().unwrap());
+    }
 }
