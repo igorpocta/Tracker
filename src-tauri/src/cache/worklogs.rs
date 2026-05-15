@@ -224,6 +224,30 @@ pub fn recent(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+/// Rows that have an `issue_key` set but no upstream `remote_id` yet — the
+/// "still local, ready to push" set. Used by the startup flush task to
+/// retry worklogs whose original POST failed (offline browser, crashed
+/// app between `record_local_stop` and the upstream call, HTTP bridge
+/// `/stop-timer` before the fire-and-forget task finished, etc.).
+///
+/// Tombstoned and pending-delete rows are excluded — we won't resurrect
+/// a worklog the user already asked to delete.
+pub fn unsynced_with_issue(db: &Db, limit: u32) -> Result<Vec<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.is_synced = 0
+           AND w.remote_id IS NULL
+           AND w.issue_key IS NOT NULL
+           AND TRIM(w.issue_key) != ''
+           AND w.tombstoned_at IS NULL
+           AND w.pending_delete_at IS NULL
+         ORDER BY w.logged_at ASC LIMIT ?1"
+    ))?;
+    let rows = stmt.query_map([limit], row_to_worklog)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 /// Worklogs with `started_at` in `[from_unix_s, to_unix_s]`, ordered most
 /// recent first. Tombstoned rows are excluded.
 pub fn for_date_range(

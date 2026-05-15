@@ -952,6 +952,23 @@ pub async fn push_local_worklog(
     state: tauri::State<'_, AppState>,
     local_id: i64,
 ) -> Result<WorklogRow, String> {
+    push_local_worklog_inner(&app, &state, local_id).await
+}
+
+/// Tauri-State-free body of [`push_local_worklog`]. Exposed so the local
+/// HTTP server can dispatch the same flow as a fire-and-forget background
+/// task after `/stop-timer` records the local row — keeping the legacy
+/// "pull-only refresh" comment honest by actually getting the worklog to
+/// the provider, not leaving it stuck locally until the user clicks
+/// "Synchronizovat" by hand.
+///
+/// Generic over `Runtime` so it works under both `tauri::Wry` (real app)
+/// and `tauri::test::MockRuntime` (integration tests).
+pub async fn push_local_worklog_inner<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &AppState,
+    local_id: i64,
+) -> Result<WorklogRow, String> {
     let before = cache::worklogs::get_by_id(&state.db, local_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
@@ -965,7 +982,7 @@ pub async fn push_local_worklog(
         .ok_or_else(|| "Záznam nemá přiřazený úkol — nejprve ho přiřaďte".to_string())?;
 
     if freelo::is_freelo_key(&issue_key) {
-        let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
+        let (conn_id, client) = resolve_client_for_issue(state, &issue_key)?;
         let (client, cfg) = match client {
             ProviderClient::Freelo(svc) => (svc.client, svc.config),
             _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
@@ -994,7 +1011,7 @@ pub async fn push_local_worklog(
     }
 
     // Jira path — route to the connection that owns this issue.
-    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
+    let (_conn_id, client) = resolve_jira_client_for_issue(state, &issue_key)?;
     let started_dt = Utc
         .timestamp_opt(before.started_at, 0)
         .single()

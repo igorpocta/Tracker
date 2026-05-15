@@ -173,6 +173,55 @@ pub fn run() {
                 }
             });
 
+            // Startup flush for unsynced-but-assigned worklogs. Covers:
+            //   - rows recorded by the local HTTP bridge whose
+            //     fire-and-forget push didn't finish before the app
+            //     quit (the synchronous handler returned long before)
+            //   - rows stuck because the original provider POST failed
+            //     (network blip, 429, sub-minute Freelo duration, etc.)
+            //   - rows from a previous launch where the user assigned
+            //     an issue to a previously-unassigned row and then
+            //     closed the app before the assign-time push went out
+            //
+            // Bounded to 50 rows per launch so a long-offline session
+            // doesn't kick off hundreds of parallel HTTP requests at
+            // startup. The bound is generous — the typical "stuck"
+            // row count is 0–5.
+            let flush_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let state = flush_handle.state::<AppState>();
+                let candidates = match cache::worklogs::unsynced_with_issue(&state.db, 50) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("startup flush: cache scan failed: {e}");
+                        return;
+                    }
+                };
+                if candidates.is_empty() {
+                    return;
+                }
+                tracing::info!(
+                    "startup flush: pushing {} unsynced worklog(s)",
+                    candidates.len()
+                );
+                for row in candidates {
+                    let Some(local_id) = row.id else { continue };
+                    if let Err(e) =
+                        crate::commands::worklog::crud::push_local_worklog_inner(
+                            &flush_handle,
+                            &state,
+                            local_id,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "startup flush: push for local_id={local_id} failed: {e}"
+                        );
+                    }
+                }
+            });
+
             // Auto-sync issues + worklogs across all enabled connections.
             let auto_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

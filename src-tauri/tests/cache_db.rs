@@ -11,7 +11,7 @@ use tracker_lib::cache::worklogs::{
     clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id,
     get_by_remote_id_any, mark_pending_delete, mark_tombstoned, mark_tombstoned_by_remote_id,
     pending_deletes_older_than, recent as worklog_recent, record as worklog_record,
-    total_seconds_for_range, update_fields, upsert_from_remote, WorklogRow,
+    total_seconds_for_range, unsynced_with_issue, update_fields, upsert_from_remote, WorklogRow,
 };
 use tracker_lib::cache::Db;
 
@@ -900,4 +900,157 @@ fn audit_source_audit_id_linkage_persists() {
     let entry = audit_get_by_id(&db, restore_id).unwrap().expect("present");
     assert_eq!(entry.source_audit_id, Some(original));
     assert_eq!(entry.op, "restore");
+}
+
+// ---------------------------------------------------------------------------
+// unsynced_with_issue — startup-flush scan
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unsynced_with_issue_returns_only_pushable_rows() {
+    // Pin the predicates used by the startup-flush task in lib.rs so a
+    // future tweak doesn't accidentally pick up:
+    //   - rows already synced (have a remote_id)
+    //   - rows without an issue key (still "Nepřiřazen")
+    //   - rows the user soft-deleted (pending_delete_at set)
+    //   - tombstoned rows
+    //
+    // Only the "assigned + local + not pending delete" rows should come
+    // back, ordered oldest-first so the flush retries them in the same
+    // order the user created them.
+    let (_d, db, conn_id) = fresh_db();
+
+    // (a) Eligible: assigned, unsynced, not pending delete.
+    let eligible_a = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-1".into()),
+            description: Some("oldest".into()),
+            started_at: 100,
+            ended_at: 160,
+            logged_at: 100,
+            updated_at: 100,
+            is_synced: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let eligible_b = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-2".into()),
+            started_at: 200,
+            ended_at: 260,
+            logged_at: 200,
+            updated_at: 200,
+            is_synced: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // (b) Already synced — must be skipped.
+    let synced = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-3".into()),
+            started_at: 300,
+            ended_at: 360,
+            logged_at: 300,
+            updated_at: 300,
+            is_synced: true,
+            remote_id: Some("j-3".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // (c) Unassigned (no issue_key) — must be skipped.
+    let unassigned = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: None,
+            started_at: 400,
+            ended_at: 460,
+            logged_at: 400,
+            updated_at: 400,
+            is_synced: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // (d) Pending delete — skipped (user already asked for it to go away).
+    let pending = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-4".into()),
+            started_at: 500,
+            ended_at: 560,
+            logged_at: 500,
+            updated_at: 500,
+            is_synced: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    mark_pending_delete(&db, pending, 600).unwrap();
+
+    // (e) Tombstoned — skipped.
+    let tombstoned = worklog_record(
+        &db,
+        &WorklogRow {
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-5".into()),
+            started_at: 600,
+            ended_at: 660,
+            logged_at: 600,
+            updated_at: 600,
+            is_synced: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    mark_tombstoned(&db, tombstoned, 700).unwrap();
+
+    let ids: Vec<i64> = unsynced_with_issue(&db, 50)
+        .unwrap()
+        .into_iter()
+        .filter_map(|r| r.id)
+        .collect();
+
+    assert_eq!(
+        ids,
+        vec![eligible_a, eligible_b],
+        "expected only the two eligible rows in oldest-first order"
+    );
+    // Sanity: the other categories really were inserted.
+    assert!(synced > 0 && unassigned > 0 && pending > 0 && tombstoned > 0);
+}
+
+#[test]
+fn unsynced_with_issue_respects_the_limit_argument() {
+    let (_d, db, conn_id) = fresh_db();
+    for i in 0..5 {
+        worklog_record(
+            &db,
+            &WorklogRow {
+                connection_id: Some(conn_id),
+                issue_key: Some(format!("ACME-{i}")),
+                started_at: 100 + i,
+                ended_at: 160 + i,
+                logged_at: 100 + i,
+                updated_at: 100 + i,
+                is_synced: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(unsynced_with_issue(&db, 3).unwrap().len(), 3);
 }

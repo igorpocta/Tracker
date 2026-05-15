@@ -438,11 +438,8 @@ async fn stop_timer_handler<R: Runtime>(
 
     let comment = body.and_then(|Json(b)| b.comment);
 
-    // We deliberately don't talk to Jira here — that path lives in the
-    // Tauri command (which already handles event emission, error surfacing,
-    // etc.). The HTTP endpoint just records the local stop so the
-    // extension gets a synchronous answer; the desktop UI will catch up
-    // via the next refresh.
+    // Record the local row synchronously so the extension gets an
+    // immediate response.
     let row = match record_local_stop(
         &app_state.db,
         &timer,
@@ -458,6 +455,36 @@ async fn stop_timer_handler<R: Runtime>(
     use tauri::Emitter;
     let _ = state.app.emit("worklog-saved", &row);
     let _ = state.app.emit("timer-stopped", &row);
+
+    // Fire-and-forget upstream push so the row actually lands on the
+    // provider. Pre-fix the handler stopped here with a "the desktop UI
+    // will catch up via the next refresh" comment, but refresh is
+    // pull-only — local rows without `remote_id` would stay stuck until
+    // the user clicked "Synchronizovat" by hand. Re-use the same helper
+    // the Tauri command runs, so the dispatch (Jira / Freelo per
+    // connection + audit linkage) is identical to the desktop flow.
+    //
+    // Errors are logged but not surfaced — the extension caller already
+    // got its 200 with the local row; a transient network blip will be
+    // retried by the startup-flush task next launch.
+    if let Some(local_id) = row.id {
+        let app_handle = state.app.clone();
+        tauri::async_runtime::spawn(async move {
+            let Some(app_state) = app_handle.try_state::<AppState>() else {
+                tracing::warn!("/stop-timer flush: app state missing, skipping push");
+                return;
+            };
+            if let Err(e) = crate::commands::worklog::crud::push_local_worklog_inner(
+                &app_handle,
+                &app_state,
+                local_id,
+            )
+            .await
+            {
+                tracing::warn!("/stop-timer flush: upstream push failed: {e}");
+            }
+        });
+    }
 
     Json(row).into_response()
 }
