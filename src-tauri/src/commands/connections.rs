@@ -481,7 +481,10 @@ pub async fn list_my_issues(
 
     // Resolve the live client for this connection.
     let client = {
-        let conns = state.connections.read().unwrap();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
         let active = conns
             .iter()
             .find(|c| c.id == connection_id && c.enabled)
@@ -509,7 +512,7 @@ pub async fn list_my_issues(
             }
             Ok(out)
         }
-        crate::state::ProviderClient::Freelo(_client, _cfg) => {
+        crate::state::ProviderClient::Freelo(_svc) => {
             // For Freelo: recent tasks from the cache (the sync pass writes
             // them on the schedule). We filter to keys that start with the
             // Freelo prefix to avoid mixing with Jira issues.
@@ -537,7 +540,10 @@ pub async fn list_jira_statuses(
     connection_id: i64,
 ) -> Result<Vec<String>, String> {
     let client = {
-        let conns = state.connections.read().unwrap();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
         let c = conns
             .iter()
             .find(|c| c.id == connection_id)

@@ -4,9 +4,6 @@
 //! path layout is verified at runtime; this module's job is to render a
 //! typed Rust surface that the rest of the app can call.
 
-use std::future::Future;
-use std::time::Duration;
-
 use chrono::NaiveDate;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
@@ -15,11 +12,7 @@ use thiserror::Error;
 use url::Url;
 
 use super::models::{FreeloProject, FreeloTask, FreeloUser, FreeloWorkReport};
-
-/// Max retries after a 429.
-pub const MAX_RETRIES: u32 = 3;
-/// Cap on retry wait derived from `Retry-After` or backoff.
-pub const MAX_RETRY_WAIT_SECS: u64 = 60;
+use crate::http_base::{self, HttpError, RateLimitInfo};
 
 /// Errors produced by the Freelo API client.
 #[derive(Debug, Error)]
@@ -49,49 +42,25 @@ pub struct FreeloClient {
     api_key: String,
 }
 
-async fn default_sleep(d: Duration) {
-    tokio::time::sleep(d).await;
-}
-
-/// Retry wrapper for Freelo calls — same shape as the Jira one but typed for
-/// [`FreeloError::RateLimited`].
-pub async fn with_retry<F, Fut, T>(f: F) -> Result<T, FreeloError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, FreeloError>>,
-{
-    with_retry_using(f, default_sleep).await
-}
-
-pub(crate) async fn with_retry_using<F, Fut, T, S, SFut>(
-    mut f: F,
-    sleep: S,
-) -> Result<T, FreeloError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, FreeloError>>,
-    S: Fn(Duration) -> SFut,
-    SFut: Future<Output = ()>,
-{
-    let mut attempt: u32 = 0;
-    loop {
-        match f().await {
-            Err(FreeloError::RateLimited { retry_after_secs }) if attempt < MAX_RETRIES => {
-                let wait = retry_after_secs
-                    .unwrap_or_else(|| 2u64.saturating_pow(attempt))
-                    .min(MAX_RETRY_WAIT_SECS);
-                sleep(Duration::from_secs(wait)).await;
-                attempt += 1;
-            }
-            other => return other,
+impl HttpError for FreeloError {
+    fn as_rate_limit(&self) -> Option<RateLimitInfo> {
+        if let FreeloError::RateLimited { retry_after_secs } = self {
+            Some(RateLimitInfo {
+                retry_after_secs: *retry_after_secs,
+            })
+        } else {
+            None
         }
     }
-}
-
-fn parse_retry_after(h: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
-    let v = h?;
-    let s = v.to_str().ok()?.trim();
-    s.parse::<u64>().ok()
+    fn rate_limited(retry_after_secs: Option<u64>) -> Self {
+        FreeloError::RateLimited { retry_after_secs }
+    }
+    fn unauthorized() -> Self {
+        FreeloError::Unauthorized
+    }
+    fn api(status: u16, body: String) -> Self {
+        FreeloError::Api { status, body }
+    }
 }
 
 impl FreeloClient {
@@ -138,23 +107,6 @@ impl FreeloClient {
         Ok(base.join(trimmed)?)
     }
 
-    async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, FreeloError> {
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(FreeloError::Unauthorized);
-        }
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            let retry_after_secs = parse_retry_after(resp.headers().get("Retry-After"));
-            return Err(FreeloError::RateLimited { retry_after_secs });
-        }
-        let code = status.as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        Err(FreeloError::Api { status: code, body })
-    }
-
     /// `GET /users/me` — authentication health check + minimal user info.
     ///
     /// Per the official Freelo v1 docs (verified against the live API), the
@@ -164,14 +116,14 @@ impl FreeloClient {
     /// derived from the supplied email since the endpoint doesn't return them.
     pub async fn me(&self) -> Result<FreeloUser, FreeloError> {
         let url = self.url("/users/me")?;
-        let body: Value = with_retry(|| async {
+        let body: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.api_key))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<FreeloError>(resp).await?;
             Ok(resp.json::<Value>().await.unwrap_or(Value::Null))
         })
         .await?;
@@ -219,14 +171,14 @@ impl FreeloClient {
                 .append_pair("order", "asc")
                 .append_pair("p", &page.to_string());
 
-            let body: Value = with_retry(|| async {
+            let body: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
                 let resp = self
                     .http
                     .get(url.clone())
                     .basic_auth(&self.email, Some(&self.api_key))
                     .send()
                     .await?;
-                let resp = Self::check_status(resp).await?;
+                let resp = http_base::check_status::<FreeloError>(resp).await?;
                 Ok(resp.json::<Value>().await?)
             })
             .await?;
@@ -287,14 +239,14 @@ impl FreeloClient {
         project_id: i64,
     ) -> Result<Vec<FreeloTask>, FreeloError> {
         let url = self.url(&format!("/project/{project_id}/all-tasks"))?;
-        let body: Value = with_retry(|| async {
+        let body: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
             let resp = self
                 .http
                 .get(url.clone())
                 .basic_auth(&self.email, Some(&self.api_key))
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<FreeloError>(resp).await?;
             Ok(resp.json::<Value>().await?)
         })
         .await?;
@@ -397,14 +349,14 @@ impl FreeloClient {
                     q.append_pair("projects_ids[]", &pid.to_string());
                 }
             }
-            let body: Value = with_retry(|| async {
+            let body: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
                 let resp = self
                     .http
                     .get(url.clone())
                     .basic_auth(&self.email, Some(&self.api_key))
                     .send()
                     .await?;
-                let resp = Self::check_status(resp).await?;
+                let resp = http_base::check_status::<FreeloError>(resp).await?;
                 Ok(resp.json::<Value>().await?)
             })
             .await?;
@@ -513,14 +465,14 @@ impl FreeloClient {
                     q.append_pair("projects_ids[]", &pid.to_string());
                 }
             }
-            let body: Value = with_retry(|| async {
+            let body: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
                 let resp = self
                     .http
                     .get(url.clone())
                     .basic_auth(&self.email, Some(&self.api_key))
                     .send()
                     .await?;
-                let resp = Self::check_status(resp).await?;
+                let resp = http_base::check_status::<FreeloError>(resp).await?;
                 Ok(resp.json::<Value>().await?)
             })
             .await?;
@@ -593,7 +545,7 @@ impl FreeloClient {
         }
         let body_clone = body.clone();
 
-        let value: Value = with_retry(|| async {
+        let value: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -601,7 +553,7 @@ impl FreeloClient {
                 .json(&body_clone)
                 .send()
                 .await?;
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<FreeloError>(resp).await?;
             Ok(resp.json::<Value>().await?)
         })
         .await?;
@@ -675,7 +627,7 @@ impl FreeloClient {
         let body = Value::Object(body);
         let body_clone = body.clone();
 
-        let value: Value = with_retry(|| async {
+        let value: Value = http_base::with_retry::<_, _, _, FreeloError>(|| async {
             let resp = self
                 .http
                 .post(url.clone())
@@ -687,7 +639,7 @@ impl FreeloClient {
             if status == StatusCode::NOT_FOUND {
                 return Err(FreeloError::WorkReportNotFound);
             }
-            let resp = Self::check_status(resp).await?;
+            let resp = http_base::check_status::<FreeloError>(resp).await?;
             Ok(resp.json::<Value>().await?)
         })
         .await?;
@@ -699,7 +651,7 @@ impl FreeloClient {
     /// `DELETE /work-reports/{id}` — remove a work-report.
     pub async fn delete_work_report(&self, work_report_id: i64) -> Result<(), FreeloError> {
         let url = self.url(&format!("/work-reports/{work_report_id}"))?;
-        with_retry(|| async {
+        http_base::with_retry::<_, _, _, FreeloError>(|| async {
             let resp = self
                 .http
                 .delete(url.clone())
@@ -717,7 +669,8 @@ impl FreeloClient {
                 return Err(FreeloError::Unauthorized);
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
-                let retry_after_secs = parse_retry_after(resp.headers().get("Retry-After"));
+                let retry_after_secs =
+                    http_base::parse_retry_after(resp.headers().get("Retry-After"));
                 return Err(FreeloError::RateLimited { retry_after_secs });
             }
             let code = status.as_u16();
@@ -795,18 +748,25 @@ fn derive_name_from_email(email: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Smoke-test that `FreeloError` plugs into the shared retry primitives
+    /// correctly: non-429 errors should bubble out on the first attempt.
+    /// The retry-loop's behaviour itself is covered in `http_base::tests`.
     #[tokio::test]
-    async fn with_retry_propagates_non_429() {
-        let err: FreeloError = with_retry(|| async { Err::<(), _>(FreeloError::Unauthorized) })
-            .await
-            .unwrap_err();
+    async fn freelo_error_propagates_non_429_through_retry() {
+        let err: FreeloError =
+            http_base::with_retry(|| async { Err::<(), _>(FreeloError::Unauthorized) })
+                .await
+                .unwrap_err();
         assert!(matches!(err, FreeloError::Unauthorized));
     }
 
+    /// Smoke-test that `FreeloError::RateLimited` triggers a retry that
+    /// eventually succeeds. The exhaustive retry behaviour (clamps,
+    /// exponential backoff, max-retries) lives in `http_base::tests`.
     #[tokio::test]
-    async fn with_retry_succeeds_after_one_429() {
+    async fn freelo_rate_limit_triggers_retry_via_http_base() {
         let mut attempts: u32 = 0;
-        let res: Result<u32, FreeloError> = with_retry_using(
+        let res: Result<u32, FreeloError> = http_base::with_retry_using(
             || {
                 attempts += 1;
                 async move {

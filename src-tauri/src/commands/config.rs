@@ -15,12 +15,24 @@ use crate::state::AppState;
 /// reaches the main app instead of bouncing back to setup.
 #[tauri::command]
 pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    let has_jira_legacy =
-        state.jira_config.read().unwrap().is_some() && state.jira_client.read().unwrap().is_some();
+    let has_jira_legacy = state
+        .jira_config
+        .read()
+        .expect("AppState.jira_config RwLock poisoned")
+        .is_some()
+        && state
+            .jira_client
+            .read()
+            .expect("AppState.jira_client RwLock poisoned")
+            .is_some();
     if has_jira_legacy {
         return Ok(true);
     }
-    let any_connection = !state.connections.read().unwrap().is_empty();
+    let any_connection = !state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .is_empty();
     Ok(any_connection)
 }
 
@@ -54,7 +66,10 @@ pub async fn save_config(
     crate::keychain::save_jira_token(&state.app_data_dir, &args.token)
         .map_err(|e| e.to_string())?;
 
-    *state.jira_config.write().unwrap() = Some(args.config.clone());
+    *state
+        .jira_config
+        .write()
+        .expect("AppState.jira_config RwLock poisoned") = Some(args.config.clone());
     state.try_build_client().map_err(|e| e.to_string())?;
 
     // Phase 18A: upsert into `connections` so the new APIs see this account.
@@ -202,7 +217,10 @@ where
     if let Some(tok) = new_token.as_deref() {
         save_token(tok)?;
     }
-    *state.jira_config.write().unwrap() = Some(new_cfg);
+    *state
+        .jira_config
+        .write()
+        .expect("AppState.jira_config RwLock poisoned") = Some(new_cfg);
     // try_build_client picks up the (possibly new) token from the secret file.
     state.try_build_client().map_err(|e| e.to_string())?;
     Ok(())
@@ -220,8 +238,14 @@ where
         std::fs::remove_file(config_path).map_err(|e| e.to_string())?;
     }
     clear_token()?;
-    *state.jira_config.write().unwrap() = None;
-    *state.jira_client.write().unwrap() = None;
+    *state
+        .jira_config
+        .write()
+        .expect("AppState.jira_config RwLock poisoned") = None;
+    *state
+        .jira_client
+        .write()
+        .expect("AppState.jira_client RwLock poisoned") = None;
     Ok(())
 }
 

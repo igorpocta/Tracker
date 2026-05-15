@@ -42,12 +42,19 @@ pub async fn get_browser_context(
 pub async fn get_current_visible_ticket(
     state: tauri::State<'_, ServerState>,
 ) -> Result<Option<VisibleTicket>, String> {
-    Ok(state.visible_ticket.read().unwrap().clone())
+    Ok(state
+        .visible_ticket
+        .read()
+        .expect("WidgetState.visible_ticket RwLock poisoned")
+        .clone())
 }
 
 #[tauri::command]
 pub async fn get_extension_last_heartbeat(
     state: tauri::State<'_, ServerState>,
 ) -> Result<Option<i64>, String> {
-    Ok(*state.last_heartbeat.read().unwrap())
+    Ok(*state
+        .last_heartbeat
+        .read()
+        .expect("WidgetState.last_heartbeat RwLock poisoned"))
 }

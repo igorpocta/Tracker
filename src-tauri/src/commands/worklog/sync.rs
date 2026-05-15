@@ -1,0 +1,409 @@
+//! Sync orchestration: pulls issues + worklogs from each enabled connection,
+//! tracks per-connection error state, and exposes the audit history of past
+//! sync runs.
+
+use chrono::{Duration, Local, Utc};
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
+
+use crate::cache;
+use crate::jira;
+use crate::state::AppState;
+
+/// Result payload of [`refresh_all`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshAllResult {
+    pub issues: usize,
+    pub worklogs: usize,
+}
+
+/// Co se má syncovat. `Full` stáhne dlouhou historii — typicky první
+/// spuštění nebo manuální "Stáhnout celou historii". `Incremental` jede
+/// rolling 30denní okno worklogů — bleskové a stačí na běžný provoz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    Full,
+    Incremental,
+}
+
+impl SyncMode {
+    pub fn from_optional_str(s: Option<&str>) -> Self {
+        match s {
+            Some("full") => Self::Full,
+            // Default i pro neznámý string — incremental je levný a
+            // safe-by-default; full musí být explicitně vyžádán.
+            _ => Self::Incremental,
+        }
+    }
+
+    fn worklog_window_days(self) -> i64 {
+        match self {
+            // Full = 10 let zpět = v praxi vše. Incremental = rolling 30 dní,
+            // dle data záznamu (`started_at` / `worklogDate`).
+            Self::Full => 3650,
+            Self::Incremental => 30,
+        }
+    }
+}
+
+/// Klíč v `app_settings` pro persistovaný posledně viděný error per connection.
+/// Hodnota je JSON `{ phase, error, at }`; `at` je unix sec.
+fn sync_error_key(connection_id: i64) -> String {
+    format!("last_sync_error:{connection_id}")
+}
+
+fn store_sync_error(db: &cache::Db, connection_id: i64, phase: &str, error: &str) {
+    let payload = serde_json::json!({
+        "phase": phase,
+        "error": error,
+        "at": Utc::now().timestamp(),
+    });
+    let _ = cache::settings::set(db, &sync_error_key(connection_id), &payload.to_string());
+}
+
+fn clear_sync_error(db: &cache::Db, connection_id: i64) {
+    let _ = cache::settings::remove(db, &sync_error_key(connection_id));
+}
+
+/// Sync issues + worklogs pro **jedno** připojení a stáhne progress eventy.
+/// Vrací `(issues_count, worklogs_count)`. Chyby fáze emituje s `error: <msg>`
+/// a vrací 0 pro tu fázi (worklog sync se přeskočí, když issues fail).
+///
+/// Veřejné, protože ho používá i background auto-sync v `lib.rs` —
+/// předtím měl vlastní inline loop, který neuměl vyčistit
+/// `last_sync_error`. Sdílením této funkce držíme store/clear logiku na
+/// jednom místě.
+/// Zaznamenat audit záznam o dokončeném syncu do `sync_runs`. Volá se na
+/// konci `sync_one_connection`; jeden řádek per dokončený běh.
+#[allow(clippy::too_many_arguments)]
+fn record_sync_run(
+    db: &cache::Db,
+    connection_id: i64,
+    connection_name: &str,
+    provider: &str,
+    mode: SyncMode,
+    started_at: i64,
+    finished_at: i64,
+    issues_count: usize,
+    worklogs_count: usize,
+) {
+    // Error pro tenhle běh — pokud existuje `last_sync_error:{id}` PO běhu
+    // (tj. něco padlo a my jsme to nevyčistili), znamená to že běh failed.
+    let (error_phase, error_message) = read_sync_error(db, connection_id);
+    let row = cache::sync_log::SyncRunRow {
+        id: None,
+        connection_id: Some(connection_id),
+        connection_name: Some(connection_name.to_string()),
+        provider: Some(provider.to_string()),
+        mode: match mode {
+            SyncMode::Full => "full".into(),
+            SyncMode::Incremental => "incremental".into(),
+        },
+        started_at,
+        finished_at,
+        issues_count: issues_count as i64,
+        worklogs_count: worklogs_count as i64,
+        error_phase,
+        error_message,
+    };
+    let _ = cache::sync_log::record(db, &row);
+}
+
+fn read_sync_error(db: &cache::Db, connection_id: i64) -> (Option<String>, Option<String>) {
+    let raw = match cache::settings::get(db, &sync_error_key(connection_id)) {
+        Ok(Some(v)) => v,
+        _ => return (None, None),
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
+    let phase = v
+        .get("phase")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    let error = v
+        .get("error")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    (phase, error)
+}
+
+pub async fn sync_one_connection(
+    app: &tauri::AppHandle,
+    db: &cache::Db,
+    conn: crate::state::ActiveConnection,
+    idx: usize,
+    total_conns: usize,
+    mode: SyncMode,
+) -> (usize, usize) {
+    let conn_id = conn.id;
+    let conn_name = conn.name.clone();
+    // Phase B4: dispatch through the WorklogService trait. The provider
+    // tag and the two sync calls both go through `&dyn WorklogService` so
+    // adding Toggl/Clockify/… is one new variant + one new `impl
+    // WorklogService` away.
+    let svc = conn.client.as_service();
+    let provider = svc.provider_name();
+    let today = Local::now().date_naive();
+    let from = today - Duration::days(mode.worklog_window_days());
+    let started_at = Utc::now().timestamp();
+
+    let emit = |phase: &str, count: Option<usize>, error: Option<&str>| {
+        let _ = app.emit(
+            "auto-sync-progress",
+            serde_json::json!({
+                "phase": phase,
+                "current": idx + 1,
+                "total": total_conns,
+                "connection_id": conn_id,
+                "connection_name": conn_name,
+                "provider": provider,
+                "count": count,
+                "error": error,
+                "mode": match mode {
+                    SyncMode::Full => "full",
+                    SyncMode::Incremental => "incremental",
+                },
+            }),
+        );
+    };
+
+    emit("connection", None, None);
+
+    let issues_n: usize;
+    let mut worklogs_n = 0usize;
+    let mut any_error = false;
+
+    // ---- Issues ---------------------------------------------------------
+    emit("issues", None, None);
+    match svc.sync_issues(db, conn_id).await {
+        Ok(n) => {
+            issues_n = n;
+            emit("issues", Some(n), None);
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            store_sync_error(db, conn_id, "issues", &msg);
+            emit("issues", None, Some(&msg));
+            // Worklog phase is meaningless without a fresh issue catalog
+            // — preserve the pre-B4 short-circuit (no `sync_runs` row when
+            // we never made it past the issues phase).
+            return (0, 0);
+        }
+    }
+
+    // ---- Worklogs -------------------------------------------------------
+    // The per-provider impl is responsible for its own readiness gate
+    // (Jira: `myself()` round-trip; Freelo: cached `sync_user_id`). When
+    // the gate fails the impl returns Ok(0) — preserved from the pre-B4
+    // orchestrator that silently skipped the worklog phase.
+    emit("worklogs", None, None);
+    match svc.sync_worklogs(db, conn_id, from, today).await {
+        Ok(n) => {
+            worklogs_n = n;
+            emit("worklogs", Some(n), None);
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            store_sync_error(db, conn_id, "worklogs", &msg);
+            emit("worklogs", None, Some(&msg));
+            any_error = true;
+        }
+    }
+
+    // Když všechny fáze proběhly bez chyby, vyčistíme persistovaný error
+    // — od teď je connection "zdravá". Pokud cokoli padlo, persistujeme to
+    // (už jsme to udělali výš) a necháváme tam.
+    if !any_error {
+        clear_sync_error(db, conn_id);
+    }
+
+    // Zapsat audit záznam do sync_runs (pro UI „Historie synchronizací").
+    record_sync_run(
+        db,
+        conn_id,
+        &conn_name,
+        provider,
+        mode,
+        started_at,
+        Utc::now().timestamp(),
+        issues_n,
+        worklogs_n,
+    );
+
+    (issues_n, worklogs_n)
+}
+
+/// Sync issues + worklogs across all enabled connections.
+///
+/// `mode = "full"` táhne 10 let historie; cokoli jiného (`"incremental"` nebo
+/// nezadáno) jede 30denní rolling okno. Per-connection chyby tolerujeme.
+#[tauri::command]
+pub async fn refresh_all(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: Option<String>,
+) -> Result<RefreshAllResult, String> {
+    let mode = SyncMode::from_optional_str(mode.as_deref());
+
+    let mut total_issues = 0usize;
+    let mut total_worklogs = 0usize;
+
+    let active = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .clone();
+    let total_conns = active.len();
+
+    for (idx, conn) in active.into_iter().enumerate() {
+        let (i_n, w_n) = sync_one_connection(&app, &state.db, conn, idx, total_conns, mode).await;
+        total_issues += i_n;
+        total_worklogs += w_n;
+    }
+
+    // Legacy single-Jira shim: bez multi-connection rows, ale s legacy
+    // klientem v paměti — použijeme connection_id = 0 jako sentinel.
+    if state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned")
+        .is_empty()
+    {
+        if let Some(client) = state.jira_client_cloned() {
+            let conn_id: i64 = 0;
+            let today = Local::now().date_naive();
+            let from = today - Duration::days(mode.worklog_window_days());
+            if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db, conn_id).await {
+                total_issues += n;
+            }
+            if client.myself().await.is_ok() {
+                if let Ok(n) = jira::worklog_sync::sync_worklogs_for_range(
+                    &client, &state.db, conn_id, from, today,
+                )
+                .await
+                {
+                    total_worklogs += n;
+                }
+            }
+        }
+    }
+
+    let result = RefreshAllResult {
+        issues: total_issues,
+        worklogs: total_worklogs,
+    };
+    let _ = app.emit(
+        "auto-sync-complete",
+        serde_json::json!({
+            "issues": total_issues,
+            "worklogs": total_worklogs,
+        }),
+    );
+    let _ = app.emit("cache-refreshed", total_issues);
+    let _ = app.emit("worklogs-refreshed", total_worklogs);
+    Ok(result)
+}
+
+/// Historie syncov — read-only seznam pro UI "Historie synchronizací".
+#[tauri::command]
+pub async fn list_sync_runs(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<cache::sync_log::SyncRunRow>, String> {
+    let limit = limit.unwrap_or(100).clamp(1, 1000);
+    cache::sync_log::list_recent(&state.db, limit).map_err(|e| e.to_string())
+}
+
+/// DTO: poslední neúspěšná fáze syncu pro danou connection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncErrorEntry {
+    pub connection_id: i64,
+    pub phase: String,
+    pub error: String,
+    pub at: i64,
+}
+
+/// Vrátí seznam connections s persistovaným posledním sync errorem.
+/// Když je seznam prázdný, nic nepadlo. Po úspěšném syncu connection
+/// automaticky zmizí z výsledku — `sync_one_connection` ji při úspěchu
+/// vyčistí.
+#[tauri::command]
+pub async fn get_sync_errors(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SyncErrorEntry>, String> {
+    let rows = cache::settings::list_with_prefix(&state.db, "last_sync_error:")
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (key, value) in rows {
+        let connection_id: i64 = match key.strip_prefix("last_sync_error:") {
+            Some(s) => s.parse().unwrap_or(0),
+            None => continue,
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&value) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        out.push(SyncErrorEntry {
+            connection_id,
+            phase: parsed
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            error: parsed
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            at: parsed.get("at").and_then(|v| v.as_i64()).unwrap_or(0),
+        });
+    }
+    Ok(out)
+}
+
+/// Sync issues + worklogs jen pro jednu vybranou connection.
+///
+/// Z UI volá tlačítko „Stáhnout celou historii" v nastavení integrace
+/// (`mode = "full"`). Hodí se i pro per-account incremental refresh když
+/// uživatel chce ručně zatáhnout změny jen v jedné Jiře/Freelu, aniž by
+/// dráždil ostatní providery.
+#[tauri::command]
+pub async fn refresh_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    connection_id: i64,
+    mode: Option<String>,
+) -> Result<RefreshAllResult, String> {
+    let mode = SyncMode::from_optional_str(mode.as_deref());
+
+    let conn = {
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
+        conns
+            .iter()
+            .find(|c| c.id == connection_id && c.enabled)
+            .cloned()
+            .ok_or_else(|| "Připojení nenalezeno nebo není aktivní".to_string())?
+    };
+
+    let (issues_n, worklogs_n) = sync_one_connection(&app, &state.db, conn, 0, 1, mode).await;
+
+    let result = RefreshAllResult {
+        issues: issues_n,
+        worklogs: worklogs_n,
+    };
+    let _ = app.emit(
+        "auto-sync-complete",
+        serde_json::json!({
+            "issues": issues_n,
+            "worklogs": worklogs_n,
+        }),
+    );
+    let _ = app.emit("cache-refreshed", issues_n);
+    let _ = app.emit("worklogs-refreshed", worklogs_n);
+    Ok(result)
+}

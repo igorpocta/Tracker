@@ -32,13 +32,16 @@ fn freelo_config_for(
     state: &AppState,
     connection_id: i64,
 ) -> Result<(crate::freelo::FreeloClient, FreeloConnectionConfig), String> {
-    let conns = state.connections.read().unwrap();
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
     let active = conns
         .iter()
         .find(|c| c.id == connection_id && c.enabled)
         .ok_or_else(|| "Freelo připojení není aktivní".to_string())?;
     match &active.client {
-        ProviderClient::Freelo(client, cfg) => Ok((client.clone(), cfg.clone())),
+        ProviderClient::Freelo(svc) => Ok((svc.client.clone(), svc.config.clone())),
         _ => Err("Připojení není Freelo".into()),
     }
 }

@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorklogRow } from "../../api/types";
-import { bucketize } from "./DayTimeline";
+import { bucketize, canvasXToTimeMs } from "./DayTimeline";
 
 function mkRow(startISO: string, durationSeconds: number): WorklogRow {
   return {
@@ -64,5 +64,43 @@ describe("bucketize", () => {
     const fourteen = buckets.find((b) => b.hour === 14)!;
     expect(fourteen.fill).toBeLessThanOrEqual(1);
     expect(fourteen.fill).toBeGreaterThan(0.7);
+  });
+});
+
+describe("canvasXToTimeMs", () => {
+  const day = new Date("2026-05-14T00:00:00");
+
+  it("always returns an integer ms timestamp", () => {
+    // The Tauri commands `create_manual_worklog` and `split_worklog` are
+    // typed `started_at_ms: i64` / `split_at_ms: i64`. Serde rejects floats
+    // (`invalid type: floating point '...', expected i64`). The pixel→time
+    // math is inherently floating-point, so the function must round before
+    // returning. Regression for the 2026-05-15 crash on timeline-drag
+    // create.
+    const cssWidth = 731;
+    // Pick a deliberately ugly x that yields a fractional ms when
+    // multiplied through `frac * (END_HOUR - START_HOUR) * 3_600_000`.
+    for (const x of [0, 1, 17, 113, 365, 729, 730, 731]) {
+      const ms = canvasXToTimeMs(x, cssWidth, day);
+      expect(Number.isInteger(ms)).toBe(true);
+    }
+  });
+
+  it("maps x=0 to the start-of-window timestamp", () => {
+    const ms = canvasXToTimeMs(0, 1000, day);
+    const expected = new Date("2026-05-14T06:00:00").getTime();
+    expect(ms).toBe(expected);
+  });
+
+  it("clamps canvasX > cssWidth to the end-of-window timestamp", () => {
+    const ms = canvasXToTimeMs(2000, 1000, day);
+    const expected = new Date("2026-05-14T22:00:00").getTime();
+    expect(ms).toBe(expected);
+  });
+
+  it("clamps negative canvasX to the start-of-window timestamp", () => {
+    const ms = canvasXToTimeMs(-50, 1000, day);
+    const expected = new Date("2026-05-14T06:00:00").getTime();
+    expect(ms).toBe(expected);
   });
 });

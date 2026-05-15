@@ -16,15 +16,33 @@ use std::sync::RwLock;
 use crate::cache::{self, activity::ActivityRecorder, Db};
 use crate::commands::connections::{FreeloConnectionConfig, JiraConnectionConfig};
 use crate::config::JiraConfig;
-use crate::freelo::FreeloClient;
+use crate::freelo::{FreeloClient, FreeloService};
 use crate::jira::JiraClient;
+use crate::worklog_service::WorklogService;
 
 /// Discriminated provider clients. Phase 18E added the Freelo variant; future
 /// providers (Toggl, Clockify, …) get their own variant here.
+///
+/// Phase B4 — the Freelo variant now wraps both client and config in a
+/// [`FreeloService`] so it can implement the provider-agnostic
+/// [`WorklogService`] trait. Code that needs the underlying client should
+/// reach for `svc.client`; code that needs the config uses `svc.config`.
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
     Jira(JiraClient),
-    Freelo(FreeloClient, FreeloConnectionConfig),
+    Freelo(FreeloService),
+}
+
+impl ProviderClient {
+    /// Return a trait-object view of this provider for sync orchestration.
+    /// New providers plug in by adding a variant + `impl WorklogService`;
+    /// the orchestrator stays untouched.
+    pub fn as_service(&self) -> &dyn WorklogService {
+        match self {
+            ProviderClient::Jira(c) => c,
+            ProviderClient::Freelo(svc) => svc,
+        }
+    }
 }
 
 /// An "active" connection: the row from the DB plus a built HTTP client.
@@ -142,7 +160,7 @@ impl AppState {
                         kind: row.provider.clone(),
                         name: row.name.clone(),
                         enabled: row.enabled,
-                        client: ProviderClient::Freelo(client, cfg),
+                        client: ProviderClient::Freelo(FreeloService::new(client, cfg)),
                     });
                 }
                 _ => continue, // unknown provider
@@ -157,21 +175,36 @@ impl AppState {
                 // Should be unreachable because we filter on `kind == "jira"`.
                 _ => unreachable!("first_jira filter broken"),
             };
-            *self.jira_client.write().unwrap() = Some(client);
+            *self
+                .jira_client
+                .write()
+                .expect("AppState.jira_client RwLock poisoned") = Some(client);
             // Best-effort derive a JiraConfig from the persisted JSON.
             let row = cache::connections::get_by_id(&self.db, c.id)?.unwrap();
             if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(&row.config_json) {
-                *self.jira_config.write().unwrap() = Some(JiraConfig {
+                *self
+                    .jira_config
+                    .write()
+                    .expect("AppState.jira_config RwLock poisoned") = Some(JiraConfig {
                     base_url: cfg.base_url,
                     email: cfg.email,
                 });
             }
         } else {
-            *self.jira_client.write().unwrap() = None;
-            *self.jira_config.write().unwrap() = None;
+            *self
+                .jira_client
+                .write()
+                .expect("AppState.jira_client RwLock poisoned") = None;
+            *self
+                .jira_config
+                .write()
+                .expect("AppState.jira_config RwLock poisoned") = None;
         }
 
-        *self.connections.write().unwrap() = built;
+        *self
+            .connections
+            .write()
+            .expect("AppState.connections RwLock poisoned") = built;
         Ok(())
     }
 
@@ -180,26 +213,42 @@ impl AppState {
     /// `save_config`/`update_config` commands; new code paths go through
     /// [`hydrate_connections`].
     pub fn try_build_client(&self) -> Result<bool, anyhow::Error> {
-        let cfg = self.jira_config.read().unwrap().clone();
+        let cfg = self
+            .jira_config
+            .read()
+            .expect("AppState.jira_config RwLock poisoned")
+            .clone();
         let token = crate::keychain::load_jira_token(&self.app_data_dir)?;
         match (cfg, token) {
             (Some(c), Some(token)) => {
                 let client = JiraClient::new(c.base_url.clone(), c.email.clone(), token)?;
-                *self.jira_client.write().unwrap() = Some(client);
+                *self
+                    .jira_client
+                    .write()
+                    .expect("AppState.jira_client RwLock poisoned") = Some(client);
                 Ok(true)
             }
             _ => {
-                *self.jira_client.write().unwrap() = None;
+                *self
+                    .jira_client
+                    .write()
+                    .expect("AppState.jira_client RwLock poisoned") = None;
                 Ok(false)
             }
         }
     }
 
     pub fn jira_client_cloned(&self) -> Option<JiraClient> {
-        self.jira_client.read().unwrap().clone()
+        self.jira_client
+            .read()
+            .expect("AppState.jira_client RwLock poisoned")
+            .clone()
     }
 
     pub fn jira_config_cloned(&self) -> Option<JiraConfig> {
-        self.jira_config.read().unwrap().clone()
+        self.jira_config
+            .read()
+            .expect("AppState.jira_config RwLock poisoned")
+            .clone()
     }
 }
