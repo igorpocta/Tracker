@@ -157,6 +157,26 @@ pub fn run() {
                 let state = auto_handle.state::<AppState>();
                 let active = state.connections.read().unwrap().clone();
                 let total = active.len();
+
+                // Dev-time throttle: skip the per-connection auto-sync if we
+                // already synced within the last N minutes. Massively reduces
+                // API hammering during the `tauri dev` reload loop.
+                //
+                // Rules:
+                //   - Disabled by default in release builds.
+                //   - Default 60 minutes in debug builds (`cargo run`,
+                //     `tauri dev`).
+                //   - Override either with the env var
+                //     `TRACKER_SYNC_THROTTLE_MIN=<n>` (works in any build) or
+                //     `TRACKER_SYNC_THROTTLE_MIN=0` to force every restart to
+                //     sync (handy when you actually want fresh data in dev).
+                let throttle_min: i64 = std::env::var("TRACKER_SYNC_THROTTLE_MIN")
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or_else(|| if cfg!(debug_assertions) { 60 } else { 0 });
+                let throttle_secs = throttle_min.max(0) * 60;
+                let now_unix = chrono::Utc::now().timestamp();
+
                 // Phase 18B — Item 19: emit progress so the UI can show a
                 // banner with "Synchronizuji s Jira…".
                 let _ = auto_handle.emit(
@@ -168,6 +188,29 @@ pub fn run() {
                     }),
                 );
                 for (idx, active_conn) in active.into_iter().enumerate() {
+                    // Check throttle for this connection. The key combines
+                    // connection id so each provider/account has its own
+                    // cool-down (we don't skip Jira just because Freelo
+                    // synced recently, or vice versa).
+                    let throttle_key =
+                        format!("last_auto_sync_at:{}", active_conn.id);
+                    if throttle_secs > 0 {
+                        let last = cache::settings::get(&state.db, &throttle_key)
+                            .ok()
+                            .flatten()
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        if now_unix - last < throttle_secs {
+                            tracing::info!(
+                                target: "auto_sync",
+                                "throttle: skipping connection id={} (last sync {}s ago, threshold {}s)",
+                                active_conn.id,
+                                now_unix - last,
+                                throttle_secs,
+                            );
+                            continue;
+                        }
+                    }
                     let _ = auto_handle.emit(
                         "auto-sync-progress",
                         serde_json::json!({
@@ -235,6 +278,14 @@ pub fn run() {
                             .await;
                         }
                     }
+
+                    // Stamp the last-synced-at for this connection so the
+                    // dev throttle (above) can short-circuit the next boot.
+                    let _ = cache::settings::set(
+                        &state.db,
+                        &throttle_key,
+                        &now_unix.to_string(),
+                    );
                 }
 
                 let _ = auto_handle.emit("auto-sync-complete", ());
