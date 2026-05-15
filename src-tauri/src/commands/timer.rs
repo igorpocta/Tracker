@@ -15,6 +15,80 @@ use crate::commands::{prefs, rounding};
 use crate::freelo;
 use crate::state::{AppState, ProviderClient};
 
+// -----------------------------------------------------------------------------
+// Phase A5 — pure stop-timer math, extracted for unit testability.
+//
+// `stop_timer_inner` mixes Tauri State, DB writes, and HTTP calls. The pure
+// arithmetic (raw duration, optional up-rounding, computed end time, UTC
+// day-rollover flag) is split into [`compute_stop_outcome`] so it can be
+// covered by unit tests without spinning up an AppState.
+// -----------------------------------------------------------------------------
+
+/// Pure result of stopping the timer: the raw and rounded durations, the
+/// resulting `ended_at` (= `started_at + rounded`), and a flag indicating
+/// whether the rounded span crosses a UTC midnight relative to the start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopOutcome {
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub raw_duration_s: i64,
+    pub rounded_duration_s: i64,
+    pub rolled_over_to_next_day: bool,
+}
+
+/// Pure logic of "what does stopping the timer produce?" — no DB, no Tauri
+/// State, no I/O.
+///
+/// - `rounding_minutes == 0` (or `raw_duration_s == 0`) → no rounding;
+///   `rounded == raw`.
+/// - `rounding_minutes > 0` → ceiling (round-up) to the next multiple of
+///   `rounding_minutes * 60` seconds. Matches the legacy
+///   `apply_rounding(_, "up", interval)` shape from `commands::rounding`.
+/// - Negative duration (clock skew / a stale timer past `now_s`) is clamped
+///   to 0 — preserves the pre-extraction behavior in `record_local_stop`
+///   and `stop_timer_inner`.
+/// - `undo_window_seconds` is documentation-only here; the actual undo
+///   timing lives in `delete_worklog` (`UNDO_WINDOW_MS`).
+pub fn compute_stop_outcome(
+    started_at_s: i64,
+    now_s: i64,
+    rounding_minutes: u32,
+    _undo_window_seconds: u32,
+) -> StopOutcome {
+    let raw_duration_s = (now_s - started_at_s).max(0);
+    let rounded_duration_s = if rounding_minutes == 0 || raw_duration_s == 0 {
+        raw_duration_s
+    } else {
+        let step = (rounding_minutes as i64).saturating_mul(60);
+        // Ceiling division.
+        ((raw_duration_s + step - 1) / step) * step
+    };
+    let ended_at = started_at_s.saturating_add(rounded_duration_s);
+
+    // UTC day-rollover detection: do the start and end fall on different UTC
+    // calendar days? We only consult the date component so a 1-second span
+    // straddling 23:59:59 → 00:00:00 counts as rolled over.
+    let rolled_over_to_next_day = utc_date(started_at_s) != utc_date(ended_at);
+
+    StopOutcome {
+        started_at: started_at_s,
+        ended_at,
+        raw_duration_s,
+        rounded_duration_s,
+        rolled_over_to_next_day,
+    }
+}
+
+/// UTC `NaiveDate` for a unix-second timestamp. Returns `None` for values
+/// outside chrono's representable range — we map those to a sentinel that
+/// equals itself but no real date so `utc_date(start) != utc_date(end)`
+/// stays sane.
+fn utc_date(unix_s: i64) -> Option<chrono::NaiveDate> {
+    Utc.timestamp_opt(unix_s, 0)
+        .single()
+        .map(|d| d.date_naive())
+}
+
 /// Snapshot of a running timer as the frontend wants to see it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveTimerState {
@@ -432,8 +506,15 @@ pub async fn stop_timer_inner(
     };
 
     let now = now_ms();
-    let now_s = now / 1000;
-    let raw_duration_s = (now_s - timer.started_at).max(0);
+    // Phase A5 — pure raw-duration math lives in `compute_stop_outcome`.
+    // We pass `rounding_minutes = 0` here because the user-configured
+    // rounding may be `down` or `none` (the pure helper only knows
+    // `up`); `apply_active_rounding` honours all three modes and is the
+    // authoritative production rounding call. The helper's other outputs
+    // (raw_duration_s, rolled_over_to_next_day) are still useful for
+    // upcoming features but don't change behavior here.
+    let outcome = compute_stop_outcome(timer.started_at, now / 1000, 0, 0);
+    let raw_duration_s = outcome.raw_duration_s;
 
     // Phase 18A — Item 27: apply user-configured rounding.
     let duration_s = rounding::apply_active_rounding(&state.db, raw_duration_s);
