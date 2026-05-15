@@ -23,7 +23,7 @@
  */
 import { emitTo } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
-import { ExternalLink, LogOut, Settings as SettingsIcon } from "lucide-react";
+import { Clock, ExternalLink, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 
@@ -289,23 +289,34 @@ function StatusCard({ active }: { active: ActiveTimerState | null }) {
   const elapsed = active ? elapsedSeconds(active, now) : 0;
   return (
     <div className="mx-4 mt-1 mb-3 p-3 rounded-[var(--radius-md)]
-                    border border-[var(--border-subtle)] bg-[var(--bg-app)]">
+                    border border-[var(--border-subtle)] bg-[var(--bg-app)]
+                    flex items-center gap-3">
+      <span
+        aria-hidden
+        className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+        style={{
+          background: active ? "var(--accent-soft)" : "var(--bg-active)",
+          color: active ? "var(--accent)" : "var(--text-tertiary)",
+        }}
+      >
+        <Clock className="w-4 h-4" />
+      </span>
       <div className="min-w-0">
         {active ? (
           <>
-            <div className="text-base font-semibold tabular-nums" style={{ color: "var(--accent)" }}>
+            <div className="text-sm font-medium tabular-nums" style={{ color: "var(--accent)" }}>
               {formatDuration(elapsed)}
             </div>
-            <div className="text-[11px] text-[var(--text-tertiary)] truncate mt-0.5">
+            <div className="text-[11px] text-[var(--text-tertiary)] truncate">
               Sledování {active.issue_key}
             </div>
           </>
         ) : (
           <>
-            <div className="text-base font-semibold tabular-nums text-[var(--text-tertiary)]">
-              💤 —:—
+            <div className="text-sm font-medium text-[var(--text-primary)]">
+              Žádná časomíra neběží
             </div>
-            <div className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+            <div className="text-[11px] text-[var(--text-tertiary)]">
               Klikni na úkol pro spuštění
             </div>
           </>

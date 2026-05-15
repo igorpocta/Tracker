@@ -1,12 +1,13 @@
-//! Long-lived background task that keeps the tray icon + tooltip in sync with
-//! the active timer.
+//! Long-lived background task that keeps the tray title + tooltip in sync
+//! with the active timer.
 //!
-//! Tick rate: **4 Hz** (250 ms). When a timer is running, every tick swaps the
-//! tray icon to the next frame of the recording pulse (red dot fading in/out
-//! over ~1.75 s). The title (`{KEY} HH:MM`) is also updated every tick but
-//! changes at most once per minute. When idle, the ticker still runs at 4 Hz
-//! but only re-applies the static idle icon + title — the per-frame work is a
-//! cheap no-op when state hasn't changed.
+//! The tray ICON is intentionally cleared on startup — only the menu-bar
+//! TITLE text is updated. That text carries the recording state ("🔴 KEY
+//! 01:23") and goes monochrome with a sleep emoji when idle ("💤 —:—").
+//!
+//! Tick rate: 1 Hz. The 🔴 emoji alternates with an equal-width invisible
+//! braille blank (`U+2800`) every other tick to produce a blink effect
+//! without bouncing the text width.
 //!
 //! Polling (vs. event-driven) trades a tiny amount of CPU for simplicity: no
 //! shared join handle to thread through `AppState`, no abort/respawn dance on
@@ -19,35 +20,32 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::cache::timer as timer_cache;
 use crate::state::AppState;
-use crate::tray_pulse::FRAME_COUNT;
 
-/// Pulse animation cycle: 7 frames × 250 ms = 1.75 s per breath.
-const TICK_INTERVAL_MS: u64 = 250;
+const TICK_INTERVAL_MS: u64 = 1000;
 
 /// Spawn the background ticker. Returns immediately; the task lives for the
 /// lifetime of the Tokio runtime (which matches the app's lifetime under
 /// Tauri's setup model).
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
-        // Tracks last applied state so we only redraw on change.
-        let mut last_running: Option<bool> = None;
-        let mut last_pulse_frame: Option<usize> = None;
-        let mut last_title: Option<String> = None;
+        // Clear the declarative icon from tauri.conf.json once on startup so
+        // only the title text is visible in the menu bar from here on.
+        let _ = crate::tray::clear_icon(&app);
 
-        let mut pulse_idx: usize = 0;
+        let mut last_title: Option<String> = None;
+        let mut tick: u64 = 0;
         let mut interval = tokio::time::interval(Duration::from_millis(TICK_INTERVAL_MS));
-        // Don't fire on the first tick so the very first update reflects real
-        // wall time, not the moment we spawned.
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             interval.tick().await;
+            tick = tick.wrapping_add(1);
 
             // Snapshot the active timer; bail silently on transient DB errors.
             let timer = {
                 let state: tauri::State<'_, AppState> = match app.try_state::<AppState>() {
                     Some(s) => s,
-                    None => continue, // AppState not yet managed — early tick.
+                    None => continue,
                 };
                 match timer_cache::get(&state.db) {
                     Ok(t) => t,
@@ -55,7 +53,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                 }
             };
 
-            match timer {
+            let (title, tooltip) = match timer {
                 Some(t) => {
                     let now_s = Utc::now().timestamp();
                     let elapsed = (now_s - t.started_at).max(0);
@@ -64,46 +62,21 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                     } else {
                         t.issue_key.clone()
                     };
-                    let title = format!("{key_part} {}", format_hm(elapsed));
+                    // 🔴 emoji blinks every other second; replaced by an
+                    // invisible braille blank so width stays constant.
+                    let pulse = if tick % 2 == 0 { "🔴" } else { "\u{2800}\u{2800}" };
+                    let title = format!("{pulse} {key_part} {}", format_hm(elapsed));
                     let tooltip = format!("Tracker — {}", format_hms(elapsed));
-
-                    // Cycle the pulse frame index each tick.
-                    pulse_idx = (pulse_idx + 1) % FRAME_COUNT;
-
-                    // Always push the new pulse frame (cheap PNG re-encode +
-                    // tray.set_icon). Title only changes once a minute, but we
-                    // diff to avoid spurious set_title calls.
-                    if last_pulse_frame != Some(pulse_idx) {
-                        let _ = crate::tray::set_pulse_frame(&app, pulse_idx);
-                        last_pulse_frame = Some(pulse_idx);
-                    }
-                    if last_title.as_deref() != Some(title.as_str()) {
-                        let _ = crate::tray::set_title(&app, Some(title.as_str()));
-                        last_title = Some(title);
-                    }
-                    let _ = crate::tray::set_tooltip(&app, &tooltip);
-
-                    last_running = Some(true);
+                    (title, tooltip)
                 }
-                None => {
-                    // Idle. Static stopwatch icon (template, monochrome) +
-                    // a sleeping title with a placeholder time. Only redraw
-                    // when transitioning from running → idle so the menu-bar
-                    // entry doesn't churn while nothing's happening.
-                    if last_running != Some(false) {
-                        let _ = crate::tray::set_running_visual(&app, false);
-                        last_running = Some(false);
-                        last_pulse_frame = None;
-                        pulse_idx = 0;
-                    }
-                    let idle_title = "💤 —:—";
-                    if last_title.as_deref() != Some(idle_title) {
-                        let _ = crate::tray::set_title(&app, Some(idle_title));
-                        last_title = Some(idle_title.to_string());
-                    }
-                    let _ = crate::tray::set_tooltip(&app, "Tracker — nečinný");
-                }
+                None => ("💤 —:—".to_string(), "Tracker — nečinný".to_string()),
+            };
+
+            if last_title.as_deref() != Some(title.as_str()) {
+                let _ = crate::tray::set_title(&app, Some(title.as_str()));
+                last_title = Some(title);
             }
+            let _ = crate::tray::set_tooltip(&app, &tooltip);
         }
     });
 }

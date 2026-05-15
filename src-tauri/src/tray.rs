@@ -138,6 +138,17 @@ pub fn set_tooltip<R: Runtime>(app: &AppHandle<R>, text: &str) -> tauri::Result<
     Ok(())
 }
 
+/// Remove the tray icon image entirely, leaving only the title text in the
+/// macOS menu bar. Called once at startup so the menu-bar entry is just the
+/// "💤 —:—" / "🔴 DEV-123 01:23" string (no stopwatch glyph crowding it).
+pub fn clear_icon<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    tray.set_icon(None)?;
+    Ok(())
+}
+
 /// Phase 18A — Item 34: set the menu-bar title text on macOS.
 ///
 /// `text` is shown next to the tray icon (e.g. `"ACME-1 01:23"` when a timer
