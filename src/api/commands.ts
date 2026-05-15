@@ -785,3 +785,30 @@ export async function setAutostart(enabled: boolean): Promise<void> {
     await invoke<void>("plugin:autostart|disable");
   }
 }
+
+// -----------------------------------------------------------------------------
+// Phase 19 — Sentry opt-in
+// -----------------------------------------------------------------------------
+
+/**
+ * `get_install_id(): String` — stable anonymous UUID generated once per
+ * install. Used as Sentry's `user.id`; safe to log / display.
+ */
+export function getInstallId(): Promise<string> {
+  return invoke<string>("get_install_id");
+}
+
+/** `get_sentry_enabled(): bool` — current opt-in state (default `false`). */
+export function getSentryEnabled(): Promise<boolean> {
+  return invoke<boolean>("get_sentry_enabled");
+}
+
+/**
+ * `set_sentry_enabled(value): ()` — persist the new opt-in state. Backend
+ * opportunistically re-initialises its SDK when the user toggles ON. The
+ * caller is responsible for calling `initSentry` / `shutdownSentry` on the
+ * frontend half to make the change take effect immediately.
+ */
+export function setSentryEnabled(value: boolean): Promise<void> {
+  return invoke<void>("set_sentry_enabled", { value });
+}
