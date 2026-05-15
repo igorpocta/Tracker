@@ -45,9 +45,7 @@ pub fn resolve_dsn() -> Option<String> {
             return Some(v);
         }
     }
-    BUILD_DSN
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
+    BUILD_DSN.map(|s| s.to_string()).filter(|s| !s.is_empty())
 }
 
 /// Initialise Sentry if (and only if) we have a DSN AND the user opted in.
@@ -77,8 +75,10 @@ pub fn init_if_enabled(install_id: &str, enabled: bool) -> bool {
         "production".into()
     };
 
-    let before_send: sentry::BeforeCallback<Event<'static>> = Arc::new(|event| Some(scrub_event(event)));
-    let before_breadcrumb: sentry::BeforeCallback<Breadcrumb> = Arc::new(|b| Some(scrub_breadcrumb(b)));
+    let before_send: sentry::BeforeCallback<Event<'static>> =
+        Arc::new(|event| Some(scrub_event(event)));
+    let before_breadcrumb: sentry::BeforeCallback<Breadcrumb> =
+        Arc::new(|b| Some(scrub_breadcrumb(b)));
 
     let guard = sentry::init((
         dsn,
@@ -122,8 +122,7 @@ fn scrub_event(mut event: Event<'static>) -> Event<'static> {
         let headers = std::mem::take(&mut req.headers);
         for (name, value) in headers {
             let lname = name.to_lowercase();
-            let scrubbed = if header_name_is_sensitive(&lname)
-                || header_value_is_sensitive(&value)
+            let scrubbed = if header_name_is_sensitive(&lname) || header_value_is_sensitive(&value)
             {
                 "[redacted]".to_string()
             } else {

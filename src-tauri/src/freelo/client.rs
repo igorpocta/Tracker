@@ -241,10 +241,7 @@ impl FreeloClient {
                     }
                 }
             };
-            if let Some(arr) = body
-                .pointer("/data/projects")
-                .and_then(|v| v.as_array())
-            {
+            if let Some(arr) = body.pointer("/data/projects").and_then(|v| v.as_array()) {
                 push_arr(arr);
             } else if let Some(obj) = body.as_object() {
                 for key in ["projects", "owned_projects", "invited_projects"] {
@@ -258,7 +255,10 @@ impl FreeloClient {
 
             // Decide whether to fetch the next page.
             let added = out.len() - before;
-            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            let total = body
+                .get("total")
+                .and_then(|v| v.as_u64())
+                .map(|t| t as usize);
             // Stop when:
             //  • the response carried `total` and we've reached it, OR
             //  • this page added nothing (empty / non-paginated response), OR
@@ -445,7 +445,10 @@ impl FreeloClient {
                 }
             }
             let added = out.len() - before;
-            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            let total = body
+                .get("total")
+                .and_then(|v| v.as_u64())
+                .map(|t| t as usize);
             let reached_total = total.map(|t| out.len() >= t).unwrap_or(false);
             if added == 0 || reached_total || page + 1 >= MAX_PAGES {
                 break;
@@ -537,7 +540,10 @@ impl FreeloClient {
                 }
             }
             let added = out.len() - before;
-            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            let total = body
+                .get("total")
+                .and_then(|v| v.as_u64())
+                .map(|t| t as usize);
             let reached_total = total.map(|t| out.len() >= t).unwrap_or(false);
             if added == 0 || reached_total || page + 1 >= MAX_PAGES {
                 break;
@@ -590,10 +596,7 @@ impl FreeloClient {
 
         // The response shape on Freelo is `{ "work_report": { … } }` on some
         // endpoints, or a top-level object on others. Flatten if needed.
-        let mut v = value
-            .get("work_report")
-            .cloned()
-            .unwrap_or(value);
+        let mut v = value.get("work_report").cloned().unwrap_or(value);
 
         // Use the same flattener as the GET /work-reports list response so
         // nested task.id / author.id / worker.id / note get hoisted to the
@@ -717,11 +720,9 @@ mod tests {
 
     #[tokio::test]
     async fn with_retry_propagates_non_429() {
-        let err: FreeloError = with_retry(|| async {
-            Err::<(), _>(FreeloError::Unauthorized)
-        })
-        .await
-        .unwrap_err();
+        let err: FreeloError = with_retry(|| async { Err::<(), _>(FreeloError::Unauthorized) })
+            .await
+            .unwrap_err();
         assert!(matches!(err, FreeloError::Unauthorized));
     }
 

@@ -14,8 +14,7 @@ pub async fn open_jira_issue(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Result<(), String> {
-    let url = jira_url_for_key(&state, &key)
-        .ok_or_else(|| "jira config not loaded".to_string())?;
+    let url = jira_url_for_key(&state, &key).ok_or_else(|| "jira config not loaded".to_string())?;
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())
@@ -87,8 +86,7 @@ fn jira_url_for_key(state: &AppState, key: &str) -> Option<String> {
             _ => None,
         });
 
-    let base = base_from_conn
-        .or_else(|| state.jira_config_cloned().map(|c| c.base_url))?;
+    let base = base_from_conn.or_else(|| state.jira_config_cloned().map(|c| c.base_url))?;
     let base = base.trim_end_matches('/').to_string();
     Some(format!("{base}/browse/{key}"))
 }

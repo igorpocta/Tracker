@@ -46,7 +46,9 @@ impl FreeloUser {
         if !combined.is_empty() {
             return combined;
         }
-        self.email.clone().unwrap_or_else(|| format!("#{}", self.id))
+        self.email
+            .clone()
+            .unwrap_or_else(|| format!("#{}", self.id))
     }
 }
 
@@ -60,7 +62,10 @@ impl FreeloUser {
 pub struct FreeloProject {
     pub id: i64,
     pub name: String,
-    #[serde(default = "default_state_object", deserialize_with = "deserialize_state")]
+    #[serde(
+        default = "default_state_object",
+        deserialize_with = "deserialize_state"
+    )]
     pub state: String,
 }
 
@@ -113,7 +118,10 @@ pub struct FreeloTask {
     /// Optional tasklist id (Freelo's "list" within a project).
     #[serde(default)]
     pub tasklist_id: Option<i64>,
-    #[serde(default = "default_state_object", deserialize_with = "deserialize_state")]
+    #[serde(
+        default = "default_state_object",
+        deserialize_with = "deserialize_state"
+    )]
     pub state: String,
     /// ISO 8601 timestamp from Freelo's `date_edited_at` field. Used to set
     /// `IssueRow.updated_at` so search results sort by recency.

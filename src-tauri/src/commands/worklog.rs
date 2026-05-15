@@ -294,7 +294,15 @@ pub async fn create_manual_worklog(
 
     // Dispatch by provider.
     if freelo::is_freelo_key(&issue_key) {
-        return create_freelo_worklog(app, state, issue_key, started_at_ms, duration_seconds, comment).await;
+        return create_freelo_worklog(
+            app,
+            state,
+            issue_key,
+            started_at_ms,
+            duration_seconds,
+            comment,
+        )
+        .await;
     }
 
     let client = state

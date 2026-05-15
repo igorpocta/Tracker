@@ -326,8 +326,8 @@ pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<Prov
         "jira" => {
             let cfg: JiraConnectionConfig =
                 serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
-            let client = JiraClient::new(cfg.base_url, cfg.email, args.token)
-                .map_err(|e| e.to_string())?;
+            let client =
+                JiraClient::new(cfg.base_url, cfg.email, args.token).map_err(|e| e.to_string())?;
             let u: JiraUser = client.myself().await.map_err(|e| e.to_string())?;
             Ok(ProviderUser {
                 account_id: u.account_id,

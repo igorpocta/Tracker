@@ -15,8 +15,8 @@ use crate::state::AppState;
 /// reaches the main app instead of bouncing back to setup.
 #[tauri::command]
 pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    let has_jira_legacy = state.jira_config.read().unwrap().is_some()
-        && state.jira_client.read().unwrap().is_some();
+    let has_jira_legacy =
+        state.jira_config.read().unwrap().is_some() && state.jira_client.read().unwrap().is_some();
     if has_jira_legacy {
         return Ok(true);
     }

@@ -64,7 +64,11 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                     };
                     // 🔴 emoji blinks every other second; replaced by an
                     // invisible braille blank so width stays constant.
-                    let pulse = if tick % 2 == 0 { "🔴" } else { "\u{2800}\u{2800}" };
+                    let pulse = if tick % 2 == 0 {
+                        "🔴"
+                    } else {
+                        "\u{2800}\u{2800}"
+                    };
                     let title = format!("{pulse} {key_part} {}", format_hm(elapsed));
                     let tooltip = format!("Tracker — {}", format_hms(elapsed));
                     (title, tooltip)

@@ -34,9 +34,7 @@ pub async fn sync_issues_for_connection(
     selected_project_ids: &[i64],
 ) -> Result<usize, FreeloSyncError> {
     if selected_project_ids.is_empty() {
-        tracing::warn!(
-            "freelo: sync_issues called with no selected projects; skipping"
-        );
+        tracing::warn!("freelo: sync_issues called with no selected projects; skipping");
         return Ok(0);
     }
 
@@ -50,9 +48,7 @@ pub async fn sync_issues_for_connection(
     // Importantly we DO NOT upsert the projects themselves as cache rows —
     // projects in Freelo are not trackable units (no work-reports attach to
     // them); they live only as parent context on each task's row.
-    let tasks = client
-        .list_tasks_for_projects(selected_project_ids)
-        .await?;
+    let tasks = client.list_tasks_for_projects(selected_project_ids).await?;
     let now = Utc::now().timestamp();
 
     let mut upserted = 0usize;
@@ -86,8 +82,7 @@ pub async fn sync_worklogs_for_range(
         .list_work_reports(from, to, user_id, project_ids)
         .await?;
     let mut upserted = 0usize;
-    let mut seen_ids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for e in &entries {
         let row = work_report_to_row(e);
@@ -112,12 +107,7 @@ pub async fn sync_worklogs_for_range(
 
     // Mark-and-sweep: anything in our DB whose started_at falls in the
     // window AND has the freelo: prefix AND was not seen → tombstone.
-    let local_ids = cache::worklogs::jira_ids_in_range(
-        db,
-        from_ts,
-        to_ts,
-        &user_id.to_string(),
-    )?;
+    let local_ids = cache::worklogs::jira_ids_in_range(db, from_ts, to_ts, &user_id.to_string())?;
     let now_unix = Utc::now().timestamp();
     for local_id in &local_ids {
         if !local_id.starts_with(super::FREELO_WORKLOG_PREFIX) {

@@ -298,7 +298,10 @@ async fn create_work_report_unwraps_wrapped_response() {
         .await;
 
     let date = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    let resp = client.create_work_report(42, date, 5, None).await.expect("ok");
+    let resp = client
+        .create_work_report(42, date, 5, None)
+        .await
+        .expect("ok");
     assert_eq!(resp.id, 9);
 }
 

@@ -109,8 +109,7 @@ pub async fn get_freelo_selected_projects(
     if row.provider != "freelo" {
         return Err("Připojení není Freelo".into());
     }
-    let cfg: FreeloConnectionConfig =
-        serde_json::from_str(&row.config_json).unwrap_or_default();
+    let cfg: FreeloConnectionConfig = serde_json::from_str(&row.config_json).unwrap_or_default();
     Ok(cfg.selected_project_ids)
 }
 
@@ -123,13 +122,10 @@ pub async fn sync_freelo_now(
     connection_id: i64,
 ) -> Result<usize, String> {
     let (client, mut cfg) = freelo_config_for(&state, connection_id)?;
-    let issues = freelo_sync::sync_issues_for_connection(
-        &client,
-        &state.db,
-        &cfg.selected_project_ids,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let issues =
+        freelo_sync::sync_issues_for_connection(&client, &state.db, &cfg.selected_project_ids)
+            .await
+            .map_err(|e| e.to_string())?;
 
     // Cache sync_user_id if missing.
     if cfg.sync_user_id.is_none() {
