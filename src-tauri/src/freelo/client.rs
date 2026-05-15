@@ -619,24 +619,6 @@ mod tests {
     }
 }
 
-/// Try to find the entry in `body` (an array of user objects) whose `email`
-/// matches `wanted_email`. Returns `None` if `body` isn't an array, or no
-/// match is found.
-fn extract_user_matching_email(body: &Value, wanted_email: &str) -> Option<FreeloUser> {
-    let arr = body.as_array()?;
-    // Exact email match first.
-    for u in arr {
-        if let Some(email) = u.get("email").and_then(|v| v.as_str()) {
-            if email.eq_ignore_ascii_case(wanted_email) {
-                if let Ok(parsed) = serde_json::from_value::<FreeloUser>(u.clone()) {
-                    return Some(parsed);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Heuristic display name from an email: `igor.pocta@example.com` → `Igor Pocta`.
 fn derive_name_from_email(email: &str) -> String {
     let local = email.split('@').next().unwrap_or(email);
