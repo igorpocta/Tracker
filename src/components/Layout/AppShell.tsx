@@ -345,44 +345,7 @@ export function AppShell() {
     <div
       className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
     >
-      {/*
-       * macOS Overlay title bar drag strip.
-       *
-       * Three redundant mechanisms — at least one will hit:
-       *   1. `data-tauri-drag-region` — Tauri 2's documented attribute,
-       *      detected by injected JS that calls `start_dragging()` on
-       *      mousedown.
-       *   2. `WebkitAppRegion: "drag"` — Wry/WebKit native CSS property.
-       *   3. `appRegion: "drag"`      — modern un-prefixed equivalent.
-       *
-       * Positioning notes:
-       *   - `fixed` (not `absolute`) so the strip is anchored to the viewport,
-       *     immune to any future parent position/padding changes.
-       *   - `z-[9999]` so toasts, modals, popovers never accidentally sit over
-       *     the drag zone (toast root is z-40, our tooltip stack is well below
-       *     this).
-       *   - 32px tall — covers the macOS traffic-light area plus a few px of
-       *     slack so the drag target is comfortable.
-       *
-       * Traffic lights themselves are drawn by macOS *outside* the webview,
-       * so they receive clicks first; the strip never blocks them.
-       *
-       * Skipped on Windows/Linux (those use their own native chrome).
-       */}
-      {IS_MAC && (
-        <div
-          data-tauri-drag-region
-          aria-hidden
-          className="fixed top-0 left-0 right-0 h-8 z-[9999]"
-          style={
-            {
-              WebkitAppRegion: "drag",
-              // Modern un-prefixed form. Browsers ignore unknown properties.
-              appRegion: "drag",
-            } as React.CSSProperties
-          }
-        />
-      )}
+      {IS_MAC && <DragStrip />}
       <div className="flex-1 min-h-0 flex">
         <IconSidebar />
 
@@ -485,5 +448,67 @@ export function AppShell() {
 
       <Toaster toasts={toasts} onDismiss={dismissToast} />
     </div>
+  );
+}
+
+/**
+ * macOS Overlay title-bar drag strip.
+ *
+ * Why not just `data-tauri-drag-region`? In Tauri 2 + React the attribute
+ * mostly works, but in practice we saw flaky behaviour ("1 in 20 tries").
+ * Tauri's bootstrap script scans the DOM for the attribute on document.load,
+ * but if React re-renders the strip (new element identity), the handler can
+ * miss. The robust fix is to call `Window.startDragging()` ourselves from a
+ * React `onMouseDown` handler — that bypasses every detection path.
+ *
+ * Double-click toggles maximize/restore (macOS title-bar convention).
+ *
+ * Width-of-window strip, 32px tall, anchored to viewport. Traffic-light
+ * clicks are intercepted by the OS *outside* the webview, so our strip
+ * doesn't compete with them.
+ */
+function DragStrip() {
+  const onMouseDown = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only react to the primary (left) button — secondary/middle buttons can
+    // do their own thing.
+    if (e.button !== 0) return;
+    // Avoid hijacking if the user clicked an interactive descendant (defensive
+    // — the strip has none, but future-proofing).
+    if ((e.target as HTMLElement).closest("button, a, input, textarea, select"))
+      return;
+    e.preventDefault();
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().startDragging();
+    } catch {
+      /* outside Tauri (vitest, devtools standalone) — no-op */
+    }
+  }, []);
+
+  const onDoubleClick = useCallback(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().toggleMaximize();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  return (
+    <div
+      aria-hidden
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
+      className="fixed top-0 left-0 right-0 h-8 z-[9999]"
+      // Belt-and-braces: also expose the canonical Tauri attribute + CSS
+      // property in case the imperative path ever regresses.
+      data-tauri-drag-region
+      style={
+        {
+          WebkitAppRegion: "drag",
+          appRegion: "drag",
+        } as React.CSSProperties
+      }
+    />
   );
 }
