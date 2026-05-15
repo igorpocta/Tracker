@@ -580,7 +580,40 @@ pub async fn stop_timer_inner(
             }
             None => None,
         }
-    } else if let Some(client) = state.jira_client_cloned() {
+    } else if let Some(client) = {
+        // Route to the Jira connection that owns this issue (per
+        // `issues_v2.connection_id`), falling back to the first enabled
+        // Jira connection only when no row matches. Mirrors the lookup
+        // shape the Freelo branch above already uses, and replaces the
+        // legacy `state.jira_client_cloned()` shim that always picked
+        // the FIRST Jira regardless of tenant.
+        let issue_conn_id = cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
+            .ok()
+            .flatten();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
+        issue_conn_id
+            .and_then(|cid| {
+                conns
+                    .iter()
+                    .find(|c| c.id == cid && c.enabled)
+                    .and_then(|c| match &c.client {
+                        crate::state::ProviderClient::Jira(j) => Some(j.clone()),
+                        _ => None,
+                    })
+            })
+            .or_else(|| {
+                conns
+                    .iter()
+                    .filter(|c| c.enabled)
+                    .find_map(|c| match &c.client {
+                        crate::state::ProviderClient::Jira(j) => Some(j.clone()),
+                        _ => None,
+                    })
+            })
+    } {
         let started_dt = Utc
             .timestamp_opt(timer.started_at, 0)
             .single()

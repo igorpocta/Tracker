@@ -46,31 +46,71 @@ pub async fn get_suggested_issues(
     cache::issues::suggested(&state.db, limit).map_err(|e| e.to_string())
 }
 
-/// Sync issues from Jira into the local cache. Emits `cache-refreshed` with
-/// the number of issues processed.
+/// Sync issues from EVERY enabled Jira connection into the local cache.
+/// Emits `cache-refreshed` with the total number of issues processed.
+///
+/// Pre-fix this command used `jira_client_cloned()` and so refreshed only
+/// the FIRST Jira connection — any additional Jira tenants' issues went
+/// stale until the next per-connection sync. With multiple Jiras configured
+/// the user could click "Refresh" and only half their tickets would update.
+///
+/// The Jira list is captured under a short-lived read lock and then iterated
+/// outside the lock so the per-tenant `sync_issues_from_jira` calls don't
+/// hold the connections RwLock across `await`s.
 #[tauri::command]
 pub async fn refresh_cache(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "jira client not configured".to_string())?;
-    // Legacy single-Jira shim: when no multi-connection rows are configured,
-    // use connection_id = 0 as a sentinel for the legacy path.
-    let conn_id: i64 = state
-        .connections
-        .read()
-        .unwrap()
-        .iter()
-        .find(|c| matches!(c.client, crate::state::ProviderClient::Jira(_)))
-        .map(|c| c.id)
-        .unwrap_or(0);
-    let n = jira::sync_issues_from_jira(&client, &state.db, conn_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("cache-refreshed", n);
-    Ok(n)
+    let jiras: Vec<(i64, crate::jira::JiraClient)> = {
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
+        conns
+            .iter()
+            .filter(|c| c.enabled)
+            .filter_map(|c| match &c.client {
+                crate::state::ProviderClient::Jira(j) => Some((c.id, j.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+
+    if jiras.is_empty() {
+        // Pre-multi-connection legacy shim: nothing in `connections` yet but
+        // the old single-Jira state slot might still be hydrated. Honour it
+        // so first-launch installs keep working until they finish the
+        // connections-table migration.
+        if let Some(client) = state.jira_client_cloned() {
+            let n = jira::sync_issues_from_jira(&client, &state.db, 0)
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = app.emit("cache-refreshed", n);
+            return Ok(n);
+        }
+        return Err("jira client not configured".to_string());
+    }
+
+    let mut total = 0usize;
+    let mut last_err: Option<String> = None;
+    for (conn_id, client) in jiras {
+        match jira::sync_issues_from_jira(&client, &state.db, conn_id).await {
+            Ok(n) => total += n,
+            Err(e) => last_err = Some(e.to_string()),
+        }
+    }
+
+    // If at least one connection succeeded we still emit so the UI reflects
+    // what landed. Errors from individual tenants are surfaced only when
+    // EVERY tenant failed.
+    let _ = app.emit("cache-refreshed", total);
+    if total == 0 {
+        if let Some(e) = last_err {
+            return Err(e);
+        }
+    }
+    Ok(total)
 }
 
 /// Lightweight summary of what's in the local SQLite cache — exposed for

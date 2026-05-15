@@ -117,6 +117,82 @@ fn first_freelo_client(
         .ok_or_else(|| "Freelo klient není nakonfigurován".to_string())
 }
 
+/// Resolve the Jira client a given audit entry was originally posted from,
+/// without depending on the legacy `state.jira_client_cloned()` shim.
+///
+/// Audit rows pre-date the multi-tenant era and don't store `connection_id`
+/// directly, so we have to recover it the hard way:
+///
+///   1. Parse `before_json` / `after_json` (a serialised `WorklogRow`) and
+///      pick up `connection_id` from the snapshot. This is the strongest
+///      signal — it's exactly the tenant the original mutation hit.
+///   2. If snapshots don't carry a usable id (legacy WorklogRow shape, or
+///      `connection_id` was `NULL` at the time), fall back to mapping the
+///      audit row's `issue_key` through `issues_v2.connection_id`.
+///   3. As a last resort, return the first enabled Jira connection so the
+///      single-tenant install (and the legacy bisect window) still works.
+///
+/// The fallback is intentionally lossy: in a multi-tenant install with two
+/// Jiras configured, a restore of a worklog whose original tenant has been
+/// removed will land on the surviving Jira. The audit row carries
+/// `source_audit_id` linkage so the user sees the failure (mismatched issue
+/// key) up front rather than a silent cross-tenant write.
+fn resolve_jira_client_for_audit(
+    state: &tauri::State<'_, AppState>,
+    audit_id: i64,
+) -> Result<crate::jira::JiraClient, String> {
+    let entry = cache::audit::get_by_id(&state.db, audit_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Audit záznam nenalezen".to_string())?;
+
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
+    let find_jira_by_id = |cid: i64| -> Option<crate::jira::JiraClient> {
+        conns
+            .iter()
+            .find(|c| c.id == cid && c.enabled)
+            .and_then(|c| match &c.client {
+                ProviderClient::Jira(j) => Some(j.clone()),
+                _ => None,
+            })
+    };
+
+    // (1) connection_id from a snapshot.
+    for src in [entry.before_json.as_deref(), entry.after_json.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(src) {
+            if let Some(cid) = v.get("connection_id").and_then(|x| x.as_i64()) {
+                if let Some(j) = find_jira_by_id(cid) {
+                    return Ok(j);
+                }
+            }
+        }
+    }
+
+    // (2) connection_id derived from the row's issue_key via the cache.
+    if let Some(key) = entry.issue_key.as_deref() {
+        if let Ok(Some(cid)) = cache::issues::get_connection_id_by_key(&state.db, key) {
+            if let Some(j) = find_jira_by_id(cid) {
+                return Ok(j);
+            }
+        }
+    }
+
+    // (3) Fallback: first enabled Jira.
+    conns
+        .iter()
+        .filter(|c| c.enabled)
+        .find_map(|c| match &c.client {
+            ProviderClient::Jira(j) => Some(j.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())
+}
+
 /// Phase 16 — re-create a worklog in Jira from a previous audit entry's
 /// `before_json` snapshot.
 ///
@@ -143,9 +219,7 @@ pub async fn restore_deleted_worklog(
             .await
             .map_err(freelo_reconstruct_err_to_string)?
     } else {
-        let client = state
-            .jira_client_cloned()
-            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        let client = resolve_jira_client_for_audit(&state, audit_id)?;
         jira::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
             .await
             .map_err(reconstruct_err_to_string)?
@@ -172,9 +246,7 @@ pub async fn revert_worklog_update(
             .await
             .map_err(freelo_reconstruct_err_to_string)?
     } else {
-        let client = state
-            .jira_client_cloned()
-            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        let client = resolve_jira_client_for_audit(&state, audit_id)?;
         jira::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
             .await
             .map_err(reconstruct_err_to_string)?
@@ -204,9 +276,7 @@ pub async fn retry_failed_audit_action(
             .await
             .map_err(freelo_reconstruct_err_to_string)?
     } else {
-        let client = state
-            .jira_client_cloned()
-            .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+        let client = resolve_jira_client_for_audit(&state, audit_id)?;
         jira::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
             .await
             .map_err(reconstruct_err_to_string)?

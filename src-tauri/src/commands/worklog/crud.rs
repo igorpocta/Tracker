@@ -243,6 +243,27 @@ fn resolve_client_for_issue(
     Err("Žádné aktivní připojení pro tento úkol".into())
 }
 
+/// Typed Jira variant of [`resolve_client_for_issue`] for callers that know
+/// they need a Jira mutation. Errors when the resolved connection is Freelo
+/// (caller should have routed through the Freelo helper instead) or when no
+/// Jira connection at all can plausibly handle the key.
+///
+/// Replaces ad-hoc `state.jira_client_cloned()` calls scattered across the
+/// mutation paths — those silently used the FIRST Jira connection regardless
+/// of which tenant the issue actually belongs to. With two Jira accounts
+/// configured (e.g. SAB Jira + personal Jira) every PUT/POST/DELETE could
+/// land on the wrong tenant.
+pub fn resolve_jira_client_for_issue(
+    state: &AppState,
+    issue_key: &str,
+) -> Result<(i64, crate::jira::JiraClient), String> {
+    let (conn_id, client) = resolve_client_for_issue(state, issue_key)?;
+    match client {
+        ProviderClient::Jira(j) => Ok((conn_id, j)),
+        ProviderClient::Freelo(_) => Err(format!("Úkol {issue_key} patří do Freelo, ne Jira")),
+    }
+}
+
 /// Create a new worklog manually (the AddEntry panel) and push it to the
 /// provider. Dispatches by `issue_key` prefix:
 ///   - `FRL-…` → Freelo `add_work_report`
@@ -285,9 +306,10 @@ pub async fn create_manual_worklog(
         .await;
     }
 
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    // Route to the Jira connection that actually owns this issue — not
+    // the legacy "first Jira client" shim, which silently mis-targets in
+    // multi-tenant setups.
+    let (conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
 
     let started_dt = Utc
         .timestamp_millis_opt(started_at_ms)
@@ -312,14 +334,11 @@ pub async fn create_manual_worklog(
         }
     };
 
-    let connection_id = cache::issues::get_connection_id_by_key(&state.db, &issue_key)
-        .map_err(|e| e.to_string())?;
-
     let started_at_s = started_at_ms / 1000;
     let now_s = Utc::now().timestamp();
     let row = WorklogRow {
         id: None,
-        connection_id,
+        connection_id: Some(conn_id),
         issue_key: Some(issue_key.clone()),
         description: comment.clone(),
         started_at: started_at_s,
@@ -527,9 +546,8 @@ pub async fn update_worklog(
         .await;
     }
 
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    // Route to the Jira tenant that owns this issue.
+    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
 
     let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
@@ -789,9 +807,10 @@ pub async fn move_worklog(
     crate::validation::validate_issue_key(&old_issue_key)?;
     crate::validation::validate_issue_key(&new_issue_key)?;
 
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    // Move is Jira-only (Freelo has no analogous API). Route via the
+    // SOURCE issue's connection — Jira refuses cross-tenant moves anyway,
+    // but using `resolve_*` keeps us pointed at the right host.
+    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &old_issue_key)?;
 
     let started_dt = Utc
         .timestamp_millis_opt(started_at_ms)
@@ -933,10 +952,8 @@ pub async fn push_local_worklog(
         return Ok(saved);
     }
 
-    // Jira path.
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    // Jira path — route to the connection that owns this issue.
+    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
     let started_dt = Utc
         .timestamp_opt(before.started_at, 0)
         .single()
@@ -1036,9 +1053,8 @@ pub async fn assign_worklog_issue(
         return Ok(saved);
     }
 
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "Jira klient není nakonfigurován".to_string())?;
+    // Jira branch — route by issue connection.
+    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
 
     let started_dt = Utc
         .timestamp_opt(before.started_at, 0)
@@ -1231,10 +1247,10 @@ pub async fn commit_pending_delete(
         return;
     }
 
-    // Jira branch (original behaviour).
-    let client = match state.jira_client_cloned() {
-        Some(c) => c,
-        None => {
+    // Jira branch — route by the row's issue connection.
+    let client = match resolve_jira_client_for_issue(state, issue_key) {
+        Ok((_, c)) => c,
+        Err(err) => {
             // No client: clear the pending flag so the UI can recover.
             let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
             audit_failure(
@@ -1243,7 +1259,7 @@ pub async fn commit_pending_delete(
                 Some(issue_key),
                 Some(worklog_id),
                 Some(&row),
-                "Jira klient není nakonfigurován",
+                &err,
             );
             return;
         }
