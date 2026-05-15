@@ -194,7 +194,7 @@ pub fn run() {
                 let throttle_min: i64 = std::env::var("TRACKER_SYNC_THROTTLE_MIN")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
-                    .unwrap_or_else(|| if cfg!(debug_assertions) { 60 } else { 0 });
+                    .unwrap_or(if cfg!(debug_assertions) { 60 } else { 0 });
                 let throttle_secs = throttle_min.max(0) * 60;
                 let now_unix = chrono::Utc::now().timestamp();
 

@@ -714,41 +714,6 @@ impl FreeloClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn with_retry_propagates_non_429() {
-        let err: FreeloError = with_retry(|| async { Err::<(), _>(FreeloError::Unauthorized) })
-            .await
-            .unwrap_err();
-        assert!(matches!(err, FreeloError::Unauthorized));
-    }
-
-    #[tokio::test]
-    async fn with_retry_succeeds_after_one_429() {
-        let mut attempts: u32 = 0;
-        let res: Result<u32, FreeloError> = with_retry_using(
-            || {
-                attempts += 1;
-                async move {
-                    if attempts == 1 {
-                        Err(FreeloError::RateLimited {
-                            retry_after_secs: Some(0),
-                        })
-                    } else {
-                        Ok(attempts)
-                    }
-                }
-            },
-            |_| async {},
-        )
-        .await;
-        assert_eq!(res.unwrap(), 2);
-    }
-}
-
 /// Flatten the canonical `/work-reports` response shape into the flat fields
 /// `FreeloWorkReport` deserializes. Inserts:
 ///   - `task_id`   ← `task.id`
@@ -798,4 +763,39 @@ fn derive_name_from_email(email: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn with_retry_propagates_non_429() {
+        let err: FreeloError = with_retry(|| async { Err::<(), _>(FreeloError::Unauthorized) })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, FreeloError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn with_retry_succeeds_after_one_429() {
+        let mut attempts: u32 = 0;
+        let res: Result<u32, FreeloError> = with_retry_using(
+            || {
+                attempts += 1;
+                async move {
+                    if attempts == 1 {
+                        Err(FreeloError::RateLimited {
+                            retry_after_secs: Some(0),
+                        })
+                    } else {
+                        Ok(attempts)
+                    }
+                }
+            },
+            |_| async {},
+        )
+        .await;
+        assert_eq!(res.unwrap(), 2);
+    }
 }

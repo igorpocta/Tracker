@@ -51,6 +51,7 @@ pub fn ms_to_date(ms: i64) -> NaiveDate {
 ///
 /// `issue_key` must be a synthetic Freelo key (`FRL-{task_id}`); other
 /// shapes are rejected with `InvalidIssueKey`.
+#[allow(clippy::too_many_arguments)]
 pub async fn add_work_report(
     client: &FreeloClient,
     db: &Db,

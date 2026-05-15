@@ -64,7 +64,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                     };
                     // 🔴 emoji blinks every other second; replaced by an
                     // invisible braille blank so width stays constant.
-                    let pulse = if tick % 2 == 0 {
+                    let pulse = if tick.is_multiple_of(2) {
                         "🔴"
                     } else {
                         "\u{2800}\u{2800}"

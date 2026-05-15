@@ -57,6 +57,7 @@ impl FreeloUser {
 /// Freelo's `state` field has been seen in two shapes:
 ///   - String (older / legacy): `"state": "active"`
 ///   - Object (current v1):     `"state": { "id": 1, "state": "active" }`
+///
 /// `FreeloProjectState` accepts either via untagged deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreeloProject {
