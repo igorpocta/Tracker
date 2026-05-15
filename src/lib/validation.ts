@@ -30,6 +30,15 @@ export const emailSchema = z.string().email("musí být platný e-mail");
  */
 export const tokenSchema = z.string().min(10, "API token vypadá příliš krátký");
 
+/**
+ * Freelo API key. Freelo's keys are typically 20–80 chars; we accept a
+ * generous range to forward-cover future format changes.
+ */
+export const freeloApiKeySchema = z
+  .string()
+  .min(20, "API klíč vypadá příliš krátký")
+  .max(200, "API klíč je příliš dlouhý");
+
 // -----------------------------------------------------------------------------
 // Numeric setting schemas (Phase 18C — Item 23)
 // -----------------------------------------------------------------------------
@@ -94,7 +103,15 @@ export const timeOfDaySchema = z
   .string()
   .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "musí být ve formátu HH:MM");
 
-/** Jira issue key — uppercase project, hyphen, positive integer (no leading 0). */
+/**
+ * Provider issue key. Accepts:
+ *   - Jira-shaped keys: uppercase project, hyphen, positive integer
+ *     (`PROJ-123`).
+ *   - Freelo-shaped synthetic keys: `FRL-{task_id}` (Phase 18E).
+ *
+ * Both shapes are valid for inputs that get forwarded to backend mutations;
+ * the backend dispatches by prefix.
+ */
 export const issueKeySchema = z
   .string()
   .regex(

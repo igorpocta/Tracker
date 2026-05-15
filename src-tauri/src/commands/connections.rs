@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::cache::{self, connections::ConnectionRow};
+use crate::freelo::FreeloClient;
 use crate::jira::{JiraClient, JiraUser};
 use crate::state::AppState;
 
@@ -37,6 +38,27 @@ pub struct JiraConnectionConfig {
     pub my_issues_jql: Option<String>,
 }
 
+/// Freelo-specific config persisted in the `config_json` column.
+///
+/// The user must explicitly opt-in projects via the project picker
+/// (`set_freelo_selected_projects`); only tasks from those projects are
+/// pulled into the shared cache and surfaced in timer / search dropdowns.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FreeloConnectionConfig {
+    /// Defaults to [`crate::freelo::DEFAULT_BASE_URL`] when empty.
+    #[serde(default)]
+    pub base_url: String,
+    pub email: String,
+    /// Freelo project ids the user has opted in to syncing. Empty = no sync.
+    #[serde(default)]
+    pub selected_project_ids: Vec<i64>,
+    /// Freelo user id of the authenticated account, cached after the first
+    /// `me()` call. Used by the worklog sync to avoid re-discovering it on
+    /// every pull.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_user_id: Option<i64>,
+}
+
 /// DTO returned to the frontend. The token is NEVER included — it lives in
 /// the secret file under `connection:<id>:token`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +74,21 @@ pub struct ConnectionDto {
     /// `true` if a token is stored for this connection. We don't return the
     /// token itself but the UI uses this to know whether to prompt for one.
     pub has_token: bool,
+}
+
+/// Unified "who am I" result returned by [`test_connection_for_provider`].
+/// Provider-specific fields are surfaced under their own keys so the frontend
+/// can show a consistent "Connected as …" message regardless of provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUser {
+    /// Stable provider-specific account id (Jira account id, Freelo user id …).
+    pub account_id: String,
+    pub display_name: String,
+    pub email_address: Option<String>,
+    /// `"jira"` or `"freelo"`. Lets the frontend choose the right icon /
+    /// formatting without re-passing the provider key.
+    pub provider: String,
 }
 
 /// Validate the optional JQL fields on a `JiraConnectionConfig`. Empty
@@ -123,7 +160,7 @@ pub async fn add_connection(
     if args.name.trim().is_empty() {
         return Err("Název připojení nesmí být prázdný".into());
     }
-    if args.provider != "jira" {
+    if args.provider != "jira" && args.provider != "freelo" {
         return Err(format!(
             "Provider {:?} zatím není podporován",
             args.provider
@@ -281,24 +318,51 @@ pub struct TestProviderArgs {
     pub token: String,
 }
 
-/// Verify provider credentials without persisting. For Jira this delegates to
-/// `JiraClient::myself()`.
+/// Verify provider credentials without persisting. Dispatches per
+/// `provider`: Jira → `myself()`, Freelo → `me()`.
 #[tauri::command]
-pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<JiraUser, String> {
-    if args.provider != "jira" {
-        return Err(format!(
-            "Provider {:?} zatím není podporován",
-            args.provider
-        ));
+pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<ProviderUser, String> {
+    match args.provider.as_str() {
+        "jira" => {
+            let cfg: JiraConnectionConfig =
+                serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
+            let client = JiraClient::new(cfg.base_url, cfg.email, args.token)
+                .map_err(|e| e.to_string())?;
+            let u: JiraUser = client.myself().await.map_err(|e| e.to_string())?;
+            Ok(ProviderUser {
+                account_id: u.account_id,
+                display_name: u.display_name,
+                email_address: u.email_address,
+                provider: "jira".into(),
+            })
+        }
+        "freelo" => {
+            let cfg: FreeloConnectionConfig =
+                serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
+            let base_url = if cfg.base_url.is_empty() {
+                crate::freelo::DEFAULT_BASE_URL.to_string()
+            } else {
+                cfg.base_url
+            };
+            let client = FreeloClient::new(base_url, cfg.email.clone(), args.token)
+                .map_err(|e| e.to_string())?;
+            let u = client.me().await.map_err(|e| e.to_string())?;
+            Ok(ProviderUser {
+                account_id: u.id.to_string(),
+                display_name: u.best_name(),
+                email_address: u.email.clone().or(Some(cfg.email)),
+                provider: "freelo".into(),
+            })
+        }
+        other => Err(format!("Provider {:?} zatím není podporován", other)),
     }
-    let cfg: JiraConnectionConfig =
-        serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
-    let client = JiraClient::new(cfg.base_url, cfg.email, args.token).map_err(|e| e.to_string())?;
-    client.myself().await.map_err(|e| e.to_string())
 }
 
 /// Phase 18A — Item 15: list issues matching a connection's `my_issues_jql`.
 /// Falls back to the default "assigned to me, not done" query if unset.
+///
+/// For Freelo connections, returns the cached tasks from the user's selected
+/// projects (no JQL); the actual sync happens via the background pass.
 #[tauri::command]
 pub async fn list_my_issues(
     state: tauri::State<'_, AppState>,
@@ -309,11 +373,6 @@ pub async fn list_my_issues(
     let row = cache::connections::get_by_id(&state.db, connection_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
-    let cfg: JiraConnectionConfig = serde_json::from_str(&row.config_json).unwrap_or_default();
-
-    let jql = cfg.my_issues_jql.as_deref().unwrap_or(
-        r#"assignee = currentUser() AND statusCategory != "Done" ORDER BY updated DESC"#,
-    );
 
     // Resolve the live client for this connection.
     let client = {
@@ -322,22 +381,41 @@ pub async fn list_my_issues(
             .iter()
             .find(|c| c.id == connection_id && c.enabled)
             .ok_or_else(|| "Connection is not active".to_string())?;
-        let crate::state::ProviderClient::Jira(client) = &active.client;
-        client.clone()
+        active.client.clone()
     };
 
-    let page = client
-        .search_jql(jql, None, crate::jira::SYNC_FIELDS, limit)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut out = Vec::with_capacity(page.issues.len());
-    for issue in &page.issues {
-        let row = crate::jira::map_issue_to_row(issue);
-        cache::issues::upsert(&state.db, &row).map_err(|e| e.to_string())?;
-        out.push(row);
+    match client {
+        crate::state::ProviderClient::Jira(client) => {
+            let cfg: JiraConnectionConfig =
+                serde_json::from_str(&row.config_json).unwrap_or_default();
+            let jql = cfg.my_issues_jql.as_deref().unwrap_or(
+                r#"assignee = currentUser() AND statusCategory != "Done" ORDER BY updated DESC"#,
+            );
+            let page = client
+                .search_jql(jql, None, crate::jira::SYNC_FIELDS, limit)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut out = Vec::with_capacity(page.issues.len());
+            for issue in &page.issues {
+                let row = crate::jira::map_issue_to_row(issue);
+                cache::issues::upsert(&state.db, &row).map_err(|e| e.to_string())?;
+                out.push(row);
+            }
+            Ok(out)
+        }
+        crate::state::ProviderClient::Freelo(_client, _cfg) => {
+            // For Freelo: recent tasks from the cache (the sync pass writes
+            // them on the schedule). We filter to keys that start with the
+            // Freelo prefix to avoid mixing with Jira issues.
+            let recent = cache::issues::recent(&state.db, limit * 4)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|r| crate::freelo::is_freelo_key(&r.issue_key))
+                .take(limit as usize)
+                .collect();
+            Ok(recent)
+        }
     }
-    Ok(out)
 }
 
 #[cfg(test)]

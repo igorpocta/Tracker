@@ -30,20 +30,40 @@ function renderSetup() {
   );
 }
 
+/**
+ * Helper: drive past the new provider-picker step (step 0) into the Jira
+ * flow so existing tests can keep their step numbering ("URL is step 1").
+ */
+async function selectJiraProvider(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("provider-card-jira"));
+  await user.click(screen.getByRole("button", { name: /^další$/i }));
+}
+
 describe("Setup wizard", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
   });
 
-  it("starts on step 1 (URL)", () => {
+  it("starts on the provider picker (step 1 of 4)", () => {
     renderSetup();
+    expect(screen.getByText(/vyberte poskytovatele/i)).toBeInTheDocument();
+    // Now showing 4 steps for Jira (picker + url + email + token).
+    expect(screen.getByText(/krok 1 z 4/i)).toBeInTheDocument();
+  });
+
+  it("shows the URL step after picking Jira", async () => {
+    const user = userEvent.setup();
+    renderSetup();
+    await selectJiraProvider(user);
     expect(screen.getByLabelText(/základní url jiry/i)).toBeInTheDocument();
-    expect(screen.getByText(/krok 1 z 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/krok 2 z 4/i)).toBeInTheDocument();
   });
 
   it("keeps Další disabled until URL is valid https://", async () => {
     const user = userEvent.setup();
     renderSetup();
+    await selectJiraProvider(user);
+
     const input = screen.getByLabelText(/základní url jiry/i);
     const next = screen.getByRole("button", { name: /^další$/i });
     expect(next).toBeDisabled();
@@ -60,16 +80,17 @@ describe("Setup wizard", () => {
   it("advances through the steps with valid input", async () => {
     const user = userEvent.setup();
     renderSetup();
+    await selectJiraProvider(user);
 
-    // Step 1 → 2.
+    // Step 2 → 3.
     await user.type(
       screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
     );
     await user.click(screen.getByRole("button", { name: /^další$/i }));
 
-    // Step 2.
-    expect(screen.getByText(/krok 2 z 3/i)).toBeInTheDocument();
+    // Step 3.
+    expect(screen.getByText(/krok 3 z 4/i)).toBeInTheDocument();
     const emailInput = screen.getByLabelText(/e-mail atlassian/i);
     const next2 = screen.getByRole("button", { name: /^další$/i });
     expect(next2).toBeDisabled();
@@ -81,8 +102,8 @@ describe("Setup wizard", () => {
     expect(next2).toBeEnabled();
     await user.click(next2);
 
-    // Step 3.
-    expect(screen.getByText(/krok 3 z 3/i)).toBeInTheDocument();
+    // Step 4.
+    expect(screen.getByText(/krok 4 z 4/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /otestovat připojení/i }),
     ).toBeInTheDocument();
@@ -92,8 +113,9 @@ describe("Setup wizard", () => {
   it("enables Dokončit only after a successful connection test", async () => {
     const user = userEvent.setup();
     renderSetup();
+    await selectJiraProvider(user);
 
-    // Drive through to step 3.
+    // Drive through to step 4.
     await user.type(
       screen.getByLabelText(/základní url jiry/i),
       "https://acme.atlassian.net",
@@ -142,6 +164,7 @@ describe("Setup wizard", () => {
   it("calls save_config and enter_main_app on Dokončit, then navigates home", async () => {
     const user = userEvent.setup();
     renderSetup();
+    await selectJiraProvider(user);
 
     await user.type(
       screen.getByLabelText(/základní url jiry/i),
@@ -196,6 +219,7 @@ describe("Setup wizard", () => {
   it("shows an error if the connection test fails", async () => {
     const user = userEvent.setup();
     renderSetup();
+    await selectJiraProvider(user);
 
     await user.type(
       screen.getByLabelText(/základní url jiry/i),
@@ -221,5 +245,94 @@ describe("Setup wizard", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(/unauthorized/i),
     );
     expect(screen.getByRole("button", { name: /^dokončit$/i })).toBeDisabled();
+  });
+
+  // ----- Phase 18E: Freelo flow -----
+
+  it("renders Freelo credentials when Freelo is picked", async () => {
+    const user = userEvent.setup();
+    renderSetup();
+    await user.click(screen.getByTestId("provider-card-freelo"));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
+    expect(screen.getByLabelText(/freelo e-mail/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/freelo api klíč/i)).toBeInTheDocument();
+    expect(screen.getByText(/krok 2 z 3/i)).toBeInTheDocument();
+  });
+
+  it("shows the project picker after a successful Freelo test+save", async () => {
+    const user = userEvent.setup();
+    renderSetup();
+    await user.click(screen.getByTestId("provider-card-freelo"));
+    await user.click(screen.getByRole("button", { name: /^další$/i }));
+
+    await user.type(
+      screen.getByLabelText(/freelo e-mail/i),
+      "alice@example.com",
+    );
+    await user.type(
+      screen.getByLabelText(/freelo api klíč/i),
+      "abcdefghij1234567890",
+    );
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      switch (cmd) {
+        case "test_connection_for_provider":
+          return {
+            accountId: "7",
+            displayName: "Alice Example",
+            emailAddress: "alice@example.com",
+            provider: "freelo",
+          };
+        case "add_connection":
+          return {
+            id: 1,
+            provider: "freelo",
+            name: "Freelo · Alice Example",
+            enabled: true,
+            created_at: 0,
+            updated_at: 0,
+            config: {},
+            has_token: true,
+          };
+        case "list_freelo_projects":
+          return [
+            { id: 1, name: "Web", state: "active", selected: false },
+            { id: 2, name: "Mobile", state: "active", selected: false },
+          ];
+        default:
+          throw new Error(`unexpected command: ${cmd}`);
+      }
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /otestovat připojení/i }),
+    );
+
+    // Should advance to the project picker step.
+    await waitFor(() =>
+      expect(screen.getByTestId("freelo-projects-list")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/krok 3 z 3/i)).toBeInTheDocument();
+    expect(screen.getByTestId("freelo-project-1")).toBeInTheDocument();
+    expect(screen.getByTestId("freelo-project-2")).toBeInTheDocument();
+
+    // Initially nothing selected → Finish disabled.
+    expect(
+      screen.getByRole("button", { name: /^dokončit$/i }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByTestId("freelo-project-1"));
+    expect(
+      screen.getByRole("button", { name: /^dokončit$/i }),
+    ).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: /^dokončit$/i }));
+
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("set_freelo_selected_projects", {
+        connectionId: 1,
+        projectIds: [1],
+      }),
+    );
   });
 });

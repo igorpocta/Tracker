@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod commands;
 pub mod config;
+pub mod freelo;
 pub mod jira;
 pub mod keychain;
 pub mod popover;
@@ -153,7 +154,6 @@ pub fn run() {
                     }),
                 );
                 for (idx, active_conn) in active.into_iter().enumerate() {
-                    let ProviderClient::Jira(client) = active_conn.client;
                     let _ = auto_handle.emit(
                         "auto-sync-progress",
                         serde_json::json!({
@@ -162,26 +162,60 @@ pub fn run() {
                             "total": total,
                         }),
                     );
-                    let _ = jira::sync_issues_from_jira(&client, &state.db).await;
+                    match active_conn.client {
+                        ProviderClient::Jira(client) => {
+                            let _ = jira::sync_issues_from_jira(&client, &state.db).await;
 
-                    let me = match client.myself().await {
-                        Ok(u) => u.account_id,
-                        Err(_) => continue,
-                    };
-                    let today = chrono::Local::now().date_naive();
-                    let from = today - chrono::Duration::days(30);
-                    let _ = auto_handle.emit(
-                        "auto-sync-progress",
-                        serde_json::json!({
-                            "phase": "worklogs",
-                            "current": idx,
-                            "total": total,
-                        }),
-                    );
-                    let _ = jira::worklog_sync::sync_worklogs_for_range(
-                        &client, &state.db, &me, from, today,
-                    )
-                    .await;
+                            let me = match client.myself().await {
+                                Ok(u) => u.account_id,
+                                Err(_) => continue,
+                            };
+                            let today = chrono::Local::now().date_naive();
+                            let from = today - chrono::Duration::days(30);
+                            let _ = auto_handle.emit(
+                                "auto-sync-progress",
+                                serde_json::json!({
+                                    "phase": "worklogs",
+                                    "current": idx,
+                                    "total": total,
+                                }),
+                            );
+                            let _ = jira::worklog_sync::sync_worklogs_for_range(
+                                &client, &state.db, &me, from, today,
+                            )
+                            .await;
+                        }
+                        ProviderClient::Freelo(client, cfg) => {
+                            let _ = freelo::sync::sync_issues_for_connection(
+                                &client,
+                                &state.db,
+                                &cfg.selected_project_ids,
+                            )
+                            .await;
+
+                            let user_id = match cfg.sync_user_id {
+                                Some(uid) => uid,
+                                None => match client.me().await {
+                                    Ok(u) => u.id,
+                                    Err(_) => continue,
+                                },
+                            };
+                            let today = chrono::Local::now().date_naive();
+                            let from = today - chrono::Duration::days(30);
+                            let _ = auto_handle.emit(
+                                "auto-sync-progress",
+                                serde_json::json!({
+                                    "phase": "worklogs",
+                                    "current": idx,
+                                    "total": total,
+                                }),
+                            );
+                            let _ = freelo::sync::sync_worklogs_for_range(
+                                &client, &state.db, user_id, from, today,
+                            )
+                            .await;
+                        }
+                    }
                 }
 
                 let _ = auto_handle.emit("auto-sync-complete", ());
@@ -226,6 +260,11 @@ pub fn run() {
             commands::connections::enable_connection,
             commands::connections::test_connection_for_provider,
             commands::connections::list_my_issues,
+            // Freelo (Phase 18E)
+            commands::freelo::list_freelo_projects,
+            commands::freelo::set_freelo_selected_projects,
+            commands::freelo::get_freelo_selected_projects,
+            commands::freelo::sync_freelo_now,
             // Timer
             commands::timer::get_timer_state,
             commands::timer::start_timer,

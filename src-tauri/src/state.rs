@@ -14,15 +14,17 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 use crate::cache::{self, activity::ActivityRecorder, Db};
-use crate::commands::connections::JiraConnectionConfig;
+use crate::commands::connections::{FreeloConnectionConfig, JiraConnectionConfig};
 use crate::config::JiraConfig;
+use crate::freelo::FreeloClient;
 use crate::jira::JiraClient;
 
-/// Discriminated provider clients. Currently only Jira; future variants
-/// (Toggl, Clockify, Freelo, …) will be added here.
+/// Discriminated provider clients. Phase 18E added the Freelo variant; future
+/// providers (Toggl, Clockify, …) get their own variant here.
 #[derive(Debug, Clone)]
 pub enum ProviderClient {
     Jira(JiraClient),
+    Freelo(FreeloClient, FreeloConnectionConfig),
 }
 
 /// An "active" connection: the row from the DB plus a built HTTP client.
@@ -105,6 +107,32 @@ impl AppState {
                         client: ProviderClient::Jira(client),
                     });
                 }
+                "freelo" => {
+                    let cfg: FreeloConnectionConfig =
+                        serde_json::from_str(&row.config_json).unwrap_or_default();
+                    let key = cache::connections::token_key(row.id);
+                    let api_key = match crate::keychain::get(
+                        &self.app_data_dir,
+                        crate::keychain::KEYCHAIN_SERVICE,
+                        &key,
+                    )? {
+                        Some(t) => t,
+                        None => continue,
+                    };
+                    let base_url = if cfg.base_url.is_empty() {
+                        crate::freelo::DEFAULT_BASE_URL.to_string()
+                    } else {
+                        cfg.base_url.clone()
+                    };
+                    let client = FreeloClient::new(base_url, cfg.email.clone(), api_key)?;
+                    built.push(ActiveConnection {
+                        id: row.id,
+                        kind: row.provider.clone(),
+                        name: row.name.clone(),
+                        enabled: row.enabled,
+                        client: ProviderClient::Freelo(client, cfg),
+                    });
+                }
                 _ => continue, // unknown provider
             }
         }
@@ -112,8 +140,12 @@ impl AppState {
         // Refresh legacy shims from the first Jira connection (if any).
         let first_jira = built.iter().find(|c| c.kind == "jira");
         if let Some(c) = first_jira {
-            let ProviderClient::Jira(client) = &c.client;
-            *self.jira_client.write().unwrap() = Some(client.clone());
+            let client = match &c.client {
+                ProviderClient::Jira(client) => client.clone(),
+                // Should be unreachable because we filter on `kind == "jira"`.
+                _ => unreachable!("first_jira filter broken"),
+            };
+            *self.jira_client.write().unwrap() = Some(client);
             // Best-effort derive a JiraConfig from the persisted JSON.
             let row = cache::connections::get_by_id(&self.db, c.id)?.unwrap();
             if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(&row.config_json) {

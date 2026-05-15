@@ -126,6 +126,22 @@ pub fn count(db: &Db) -> Result<i64, DbError> {
     Ok(n)
 }
 
+/// Look up the `connection_id` column for a given issue key. Returns `None`
+/// if the issue is unknown or has no associated connection (legacy rows).
+pub fn get_connection_id_by_key(db: &Db, key: &str) -> Result<Option<i64>, DbError> {
+    let conn = db.pool().get()?;
+    let r = conn.query_row(
+        "SELECT connection_id FROM issues WHERE issue_key = ?1",
+        [key],
+        |r| r.get::<_, Option<i64>>(0),
+    );
+    match r {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn search(db: &Db, query: &str, limit: u32) -> Result<Vec<IssueRow>, DbError> {
     let conn = db.pool().get()?;
     let q = format!("%{}%", query.to_lowercase());

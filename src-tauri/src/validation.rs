@@ -117,7 +117,17 @@ mod tests {
 
     #[test]
     fn issue_key_accepts_canonical() {
-        for k in ["ACME-1", "ACME-12345", "AB-9", "ABC123-7", "PROJ-1000000"] {
+        for k in [
+            "ACME-1",
+            "ACME-12345",
+            "AB-9",
+            "ABC123-7",
+            "PROJ-1000000",
+            // Phase 18E: Freelo synthetic keys (`FRL-{task_id}`) must also
+            // pass — the backend dispatches by prefix downstream.
+            "FRL-1",
+            "FRL-99999",
+        ] {
             assert!(validate_issue_key(k).is_ok(), "{k} should be accepted");
         }
     }

@@ -1,26 +1,39 @@
 /**
- * Settings → Connection Setup.
+ * Settings → Připojení.
  *
- * Reference: `screens/SCR-20260514-rjmh-2.png`.
+ * Phase 18E: multi-provider/multi-connection management.
  *
- *   ┌──────────────────────────────────────────────┐
- *   │  ⓘ  Igor Počta                          ✏  ↻ │
- *   └──────────────────────────────────────────────┘
- *   ┌──────────────────────────────────────────────┐
- *   │  🔒  Add new connection                      │   (disabled)
- *   └──────────────────────────────────────────────┘
+ * Shows a card per configured connection (Jira or Freelo) with provider
+ * badge, current account label, and basic actions:
+ *   - Test connection
+ *   - Edit URL / email
+ *   - Replace token / API key
+ *   - For Freelo: expand the project picker
+ *   - Remove (disconnect)
  *
- * The account card shows the configured Jira identity. Edit (pencil) opens
- * the existing inline edit form (URL + email); the refresh icon re-pulls
- * `myself` to update the display name. "Add new connection" is locked —
- * multi-tenant support is a premium feature we don't pretend to offer here.
+ * The legacy single-Jira section (URL + e-mail + sign out) still appears at
+ * the top for backwards compatibility with the original config.toml flow.
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, Pencil, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { Lock, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { getCurrentConfig, signOut, updateConfig } from "../../api/commands";
-import type { JiraConfig } from "../../api/types";
+import {
+  getCurrentConfig,
+  getFreeloSelectedProjects,
+  listConnections,
+  listFreeloProjects,
+  removeConnection,
+  setFreeloSelectedProjects,
+  signOut,
+  syncFreeloNow,
+  updateConfig,
+} from "../../api/commands";
+import type {
+  ConnectionDto,
+  FreeloProjectDto,
+  JiraConfig,
+} from "../../api/types";
 
 export default function Connection() {
   const queryClient = useQueryClient();
@@ -28,6 +41,10 @@ export default function Connection() {
   const cfgQ = useQuery({
     queryKey: ["current-config"],
     queryFn: getCurrentConfig,
+  });
+  const connsQ = useQuery({
+    queryKey: ["connections"],
+    queryFn: listConnections,
   });
 
   const cfg = cfgQ.data ?? null;
@@ -43,11 +60,12 @@ export default function Connection() {
       </header>
 
       <div className="flex flex-col gap-2">
-        {/* Account card */}
-        {!editing ? (
+        {/* Legacy Jira account card ----------------------------------------- */}
+        {cfg && !editing && (
           <div
             className="flex items-center gap-3 p-3 rounded-[var(--radius-md)]
                        border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+            data-testid="connection-card-jira-legacy"
           >
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center
@@ -65,7 +83,7 @@ export default function Connection() {
               </div>
               {cfg?.base_url && (
                 <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-                  {cfg.base_url}
+                  Jira · {cfg.base_url}
                 </div>
               )}
             </div>
@@ -88,7 +106,8 @@ export default function Connection() {
               <RefreshCw className="w-4 h-4" aria-hidden />
             </button>
           </div>
-        ) : (
+        )}
+        {cfg && editing && (
           <EditCard
             config={cfg}
             onSaved={() => {
@@ -99,33 +118,249 @@ export default function Connection() {
           />
         )}
 
-        {/* "Add new connection" — locked */}
-        <div
-          aria-disabled="true"
+        {/* Multi-connection list (Freelo, additional Jiras, …) -------------- */}
+        {(connsQ.data ?? []).map((conn) => (
+          <ConnectionCard
+            key={conn.id}
+            conn={conn}
+            onChanged={() =>
+              queryClient.invalidateQueries({ queryKey: ["connections"] })
+            }
+          />
+        ))}
+
+        {/* "Add new connection" — opens the setup wizard. */}
+        <button
+          type="button"
+          onClick={() => {
+            window.location.hash = "#/setup";
+          }}
           className="flex items-center gap-3 p-3 rounded-[var(--radius-md)]
                      border border-dashed border-[var(--border-subtle)]
-                     text-[var(--text-tertiary)] opacity-70 cursor-not-allowed"
+                     text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]
+                     transition-colors duration-150"
+          data-testid="add-connection-button"
         >
-          <Lock className="w-4 h-4" aria-hidden />
+          <Plus className="w-4 h-4" aria-hidden />
           <span className="text-sm">Přidat nové připojení</span>
-        </div>
+        </button>
+
+        {connsQ.data && connsQ.data.length === 0 && !cfg && (
+          <div className="flex items-center gap-3 p-3 rounded-[var(--radius-md)]
+                          border border-[var(--border-subtle)] bg-[var(--bg-surface)]
+                          text-[var(--text-tertiary)]"
+          >
+            <Lock className="w-4 h-4" aria-hidden />
+            <span className="text-sm">Žádná připojení nejsou nakonfigurována</span>
+          </div>
+        )}
       </div>
 
-      <button
-        type="button"
-        onClick={async () => {
-          try {
-            await signOut();
-          } catch {
-            /* ignore */
-          }
-        }}
-        className="self-start text-[11px] text-[var(--text-tertiary)] hover:text-[var(--danger)]
-                   transition-colors duration-150"
-      >
-        Odhlásit a odpojit
-      </button>
+      {cfg && (
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await signOut();
+            } catch {
+              /* ignore */
+            }
+          }}
+          className="self-start text-[11px] text-[var(--text-tertiary)] hover:text-[var(--danger)]
+                     transition-colors duration-150"
+        >
+          Odhlásit a odpojit (zastaralé Jira)
+        </button>
+      )}
     </div>
+  );
+}
+
+function providerLabel(p: string): string {
+  if (p === "jira") return "Jira";
+  if (p === "freelo") return "Freelo";
+  return p;
+}
+
+function ConnectionCard({
+  conn,
+  onChanged,
+}: {
+  conn: ConnectionDto;
+  onChanged: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const email =
+    typeof conn.config["email"] === "string"
+      ? (conn.config["email"] as string)
+      : null;
+  const initials = (email?.[0] ?? conn.provider[0] ?? "?").toUpperCase();
+
+  return (
+    <div
+      className="flex flex-col gap-2 p-3 rounded-[var(--radius-md)]
+                 border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      data-testid={`connection-card-${conn.id}`}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center
+                     text-sm font-semibold"
+          style={{
+            background: "var(--accent-soft)",
+            color: "var(--accent)",
+          }}
+        >
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-[var(--text-primary)]">
+            {conn.name}
+          </div>
+          <div className="text-[11px] text-[var(--text-tertiary)] truncate">
+            {providerLabel(conn.provider)}
+            {email ? ` · ${email}` : ""}
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Odpojit"
+          onClick={async () => {
+            if (!window.confirm(`Odpojit ${conn.name}?`)) return;
+            try {
+              await removeConnection(conn.id);
+              onChanged();
+            } catch {
+              /* ignore */
+            }
+          }}
+          className="text-[var(--text-tertiary)] hover:text-[var(--danger)]
+                     transition-colors duration-150"
+        >
+          <Trash2 className="w-4 h-4" aria-hidden />
+        </button>
+      </div>
+
+      {conn.provider === "freelo" && (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="self-start text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors duration-150"
+          >
+            {expanded ? "Skrýt projekty" : "Vybrané projekty"}
+          </button>
+          {expanded && <FreeloProjectsPanel connectionId={conn.id} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
+  const [projects, setProjects] = useState<FreeloProjectDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listFreeloProjects(connectionId);
+        const selected = await getFreeloSelectedProjects(connectionId);
+        if (cancelled) return;
+        const sel = new Set(selected);
+        setProjects(
+          list.map((p) => ({ ...p, selected: sel.has(p.id) })),
+        );
+      } catch (e) {
+        if (cancelled) return;
+        setError(
+          typeof e === "string"
+            ? e
+            : e instanceof Error
+              ? e.message
+              : "Načtení projektů se nezdařilo",
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId]);
+
+  async function persist(next: FreeloProjectDto[]) {
+    setSaving(true);
+    try {
+      const ids = next.filter((p) => p.selected).map((p) => p.id);
+      await setFreeloSelectedProjects(connectionId, ids);
+      try {
+        await syncFreeloNow(connectionId);
+      } catch {
+        /* best-effort */
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggle(id: number) {
+    setProjects((prev) => {
+      const next = prev.map((p) =>
+        p.id === id ? { ...p, selected: !p.selected } : p,
+      );
+      void persist(next);
+      return next;
+    });
+  }
+
+  if (loading) {
+    return (
+      <p className="text-xs text-[var(--text-tertiary)]">Načítám projekty…</p>
+    );
+  }
+  if (error) {
+    return (
+      <p className="text-xs text-[var(--danger)]" role="alert">
+        {error}
+      </p>
+    );
+  }
+  if (projects.length === 0) {
+    return (
+      <p className="text-xs text-[var(--text-tertiary)]">
+        Žádné projekty nenalezeny.
+      </p>
+    );
+  }
+  return (
+    <ul
+      className="flex flex-col gap-0.5 max-h-[240px] overflow-y-auto"
+      data-testid={`freelo-projects-${connectionId}`}
+    >
+      {projects.map((p) => (
+        <li key={p.id}>
+          <label className="flex items-center gap-2 px-1 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] rounded-[var(--radius-sm)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={p.selected}
+              onChange={() => toggle(p.id)}
+              disabled={saving}
+              className="accent-[var(--accent)]"
+            />
+            <span className="flex-1 truncate">{p.name}</span>
+            {p.state !== "active" && (
+              <span className="text-[10px] uppercase text-[var(--text-tertiary)]">
+                {p.state}
+              </span>
+            )}
+          </label>
+        </li>
+      ))}
+    </ul>
   );
 }
 

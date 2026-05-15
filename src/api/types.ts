@@ -20,6 +20,49 @@ export interface JiraUser {
   emailAddress?: string | null;
 }
 
+/**
+ * Unified provider-user payload returned by `test_connection_for_provider`.
+ * Tracker uses this for both Jira and Freelo so the UI can show a uniform
+ * "Connected as …" without provider-specific branches.
+ */
+export interface ProviderUser {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string | null;
+  /** `"jira"` or `"freelo"`. */
+  provider: string;
+}
+
+/** Provider kinds supported by Tracker. */
+export type ProviderKind = "jira" | "freelo" | "toggl" | "clockify";
+
+/**
+ * Mirrors `src-tauri/src/commands/connections.rs::ConnectionDto`. Used by
+ * `listConnections` and the multi-connection Settings UI.
+ */
+export interface ConnectionDto {
+  id: number;
+  provider: string;
+  name: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+  config: Record<string, unknown>;
+  has_token: boolean;
+}
+
+/**
+ * Freelo project DTO returned by `list_freelo_projects` (mirrors
+ * `src-tauri/src/commands/freelo.rs::FreeloProjectDto`).
+ */
+export interface FreeloProjectDto {
+  id: number;
+  name: string;
+  state: string;
+  /** Pre-filled from the persisted `config.selected_project_ids`. */
+  selected: boolean;
+}
+
 /** Payload shape for the `save_config` command (matches `SaveConfigArgs`). */
 export interface SaveConfigArgs {
   config: JiraConfig;

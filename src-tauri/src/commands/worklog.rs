@@ -17,10 +17,11 @@ use tauri::{Emitter, Manager};
 
 use crate::cache::{self, audit::AuditOp, worklogs::WorklogRow};
 use crate::commands::rounding;
+use crate::freelo;
 use crate::jira;
 use crate::jira::worklog_ops::{MoveWorklogArgs, MoveWorklogError};
 use crate::jira::JiraError;
-use crate::state::AppState;
+use crate::state::{AppState, ProviderClient};
 
 const DEFAULT_LIMIT: u32 = 50;
 
@@ -65,44 +66,98 @@ pub struct RefreshAllResult {
     pub worklogs: usize,
 }
 
-/// Sync both issues AND worklogs (for the last `from_days` days) in one go.
+/// Sync both issues AND worklogs (for the last `from_days` days) in one go,
+/// across all enabled connections (Jira + Freelo).
 ///
-/// Errors fetching the current user (or running the worklog sync) are
-/// reported via the return type, not swallowed — but issue sync failures
-/// short-circuit early because the worklog sync depends on the issue cache
-/// for summary lookups.
+/// Errors per connection are tolerated — we keep going so a misconfigured
+/// Freelo connection doesn't block the Jira sync (and vice versa). The
+/// totals returned cover all connections that succeeded.
 #[tauri::command]
 pub async fn refresh_all(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     from_days: Option<u32>,
 ) -> Result<RefreshAllResult, String> {
-    let client = state
-        .jira_client_cloned()
-        .ok_or_else(|| "jira client not configured".to_string())?;
-
-    let issues = jira::sync_issues_from_jira(&client, &state.db)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let me = client.myself().await.map_err(|e| e.to_string())?;
     let days = from_days.unwrap_or(30);
     let today = Local::now().date_naive();
     let from = today - Duration::days(days as i64);
 
-    let worklogs = jira::worklog_sync::sync_worklogs_for_range(
-        &client,
-        &state.db,
-        &me.account_id,
-        from,
-        today,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let mut total_issues = 0usize;
+    let mut total_worklogs = 0usize;
 
-    let result = RefreshAllResult { issues, worklogs };
-    let _ = app.emit("cache-refreshed", issues);
-    let _ = app.emit("worklogs-refreshed", worklogs);
+    let active = state.connections.read().unwrap().clone();
+    for conn in active {
+        match conn.client {
+            ProviderClient::Jira(client) => {
+                if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db).await {
+                    total_issues += n;
+                }
+                if let Ok(me) = client.myself().await {
+                    if let Ok(n) = jira::worklog_sync::sync_worklogs_for_range(
+                        &client,
+                        &state.db,
+                        &me.account_id,
+                        from,
+                        today,
+                    )
+                    .await
+                    {
+                        total_worklogs += n;
+                    }
+                }
+            }
+            ProviderClient::Freelo(client, cfg) => {
+                if let Ok(n) = freelo::sync::sync_issues_for_connection(
+                    &client,
+                    &state.db,
+                    &cfg.selected_project_ids,
+                )
+                .await
+                {
+                    total_issues += n;
+                }
+                if let Some(user_id) = cfg.sync_user_id {
+                    if let Ok(n) = freelo::sync::sync_worklogs_for_range(
+                        &client, &state.db, user_id, from, today,
+                    )
+                    .await
+                    {
+                        total_worklogs += n;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback for the legacy single-Jira shim if no connections are
+    // configured but a legacy client is set up.
+    if state.connections.read().unwrap().is_empty() {
+        if let Some(client) = state.jira_client_cloned() {
+            if let Ok(n) = jira::sync_issues_from_jira(&client, &state.db).await {
+                total_issues += n;
+            }
+            if let Ok(me) = client.myself().await {
+                if let Ok(n) = jira::worklog_sync::sync_worklogs_for_range(
+                    &client,
+                    &state.db,
+                    &me.account_id,
+                    from,
+                    today,
+                )
+                .await
+                {
+                    total_worklogs += n;
+                }
+            }
+        }
+    }
+
+    let result = RefreshAllResult {
+        issues: total_issues,
+        worklogs: total_worklogs,
+    };
+    let _ = app.emit("cache-refreshed", total_issues);
+    let _ = app.emit("worklogs-refreshed", total_worklogs);
     Ok(result)
 }
 
@@ -174,11 +229,43 @@ fn audit_success(
     .unwrap_or(0)
 }
 
-/// Create a new worklog manually (the AddEntry panel) and push it to Jira.
+/// Look up the active client for the connection that owns `issue_key`.
+/// Falls back to the first matching provider client if the issues table
+/// doesn't have a `connection_id` recorded (legacy rows).
+fn resolve_client_for_issue(
+    state: &AppState,
+    issue_key: &str,
+) -> Result<(i64, ProviderClient), String> {
+    let conn_id =
+        cache::issues::get_connection_id_by_key(&state.db, issue_key).map_err(|e| e.to_string())?;
+    let conns = state.connections.read().unwrap();
+    // If we know the connection id, prefer that.
+    if let Some(cid) = conn_id {
+        if let Some(active) = conns.iter().find(|c| c.id == cid && c.enabled) {
+            return Ok((active.id, active.client.clone()));
+        }
+    }
+    // Fallback: pick the first connection whose provider can plausibly
+    // handle this key (FRL- prefix → Freelo, anything else → Jira).
+    let want_freelo = freelo::is_freelo_key(issue_key);
+    for c in conns.iter().filter(|c| c.enabled) {
+        match (&c.client, want_freelo) {
+            (ProviderClient::Freelo(_, _), true) => return Ok((c.id, c.client.clone())),
+            (ProviderClient::Jira(_), false) => return Ok((c.id, c.client.clone())),
+            _ => {}
+        }
+    }
+    Err("Žádné aktivní připojení pro tento úkol".into())
+}
+
+/// Create a new worklog manually (the AddEntry panel) and push it to the
+/// provider. Dispatches by `issue_key` prefix:
+///   - `FRL-…` → Freelo `add_work_report`
+///   - anything else → Jira `add_worklog`
 ///
-/// Strategy: call Jira FIRST (so the local row gets `jira_worklog_id`
-/// populated correctly), then insert the row. If Jira fails the local DB is
-/// untouched and we return the error to the UI.
+/// Strategy: call the provider FIRST (so the local row gets the upstream id
+/// populated correctly), then insert/upsert the row. If the provider fails
+/// the local DB is untouched and we return the error to the UI.
 #[tauri::command]
 pub async fn create_manual_worklog(
     app: tauri::AppHandle,
@@ -197,8 +284,13 @@ pub async fn create_manual_worklog(
     }
     crate::validation::validate_issue_key(&issue_key)?;
 
-    // Phase 18A — Item 27: apply rounding before talking to Jira.
+    // Phase 18A — Item 27: apply rounding before talking to the provider.
     let duration_seconds = rounding::apply_active_rounding(&state.db, duration_seconds);
+
+    // Dispatch by provider.
+    if freelo::is_freelo_key(&issue_key) {
+        return create_freelo_worklog(app, state, issue_key, started_at_ms, duration_seconds, comment).await;
+    }
 
     let client = state
         .jira_client_cloned()
@@ -278,8 +370,73 @@ pub async fn create_manual_worklog(
     Ok(saved)
 }
 
-/// Update an existing worklog. Updates Jira first, then the local DB so a
-/// Jira failure leaves the cache untouched.
+/// Freelo branch of [`create_manual_worklog`]. Extracted to keep the main
+/// function readable.
+async fn create_freelo_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    issue_key: String,
+    started_at_ms: i64,
+    duration_seconds: i64,
+    comment: Option<String>,
+) -> Result<WorklogRow, String> {
+    // Reject 0-minute entries (Freelo requires ≥ 1 minute and surfaces it as
+    // a generic 400 — give the user a clearer message up front).
+    if duration_seconds < 60 {
+        return Err("Doba musí být alespoň minuta".into());
+    }
+
+    let (conn_id, client) = resolve_client_for_issue(&state, &issue_key)?;
+    let (client, cfg) = match client {
+        ProviderClient::Freelo(c, cfg) => (c, cfg),
+        _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
+    };
+    let user_id = cfg
+        .sync_user_id
+        .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+
+    let saved = match freelo::ops::add_work_report(
+        &client,
+        &state.db,
+        &issue_key,
+        started_at_ms,
+        duration_seconds,
+        comment.as_deref(),
+        conn_id,
+        user_id,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            audit_failure(
+                &state.db,
+                AuditOp::Create,
+                Some(&issue_key),
+                None,
+                None,
+                &e.to_string(),
+            );
+            return Err(format!("Freelo: {e}"));
+        }
+    };
+
+    audit_success(
+        &state.db,
+        AuditOp::Create,
+        Some(&issue_key),
+        saved.jira_worklog_id.as_deref(),
+        None,
+        Some(&saved),
+    );
+
+    let _ = app.emit("worklog-created", &saved);
+    Ok(saved)
+}
+
+/// Update an existing worklog. Updates the provider first, then the local
+/// DB so an upstream failure leaves the cache untouched. Dispatches by
+/// `issue_key` prefix (FRL- → Freelo, else Jira).
 #[tauri::command]
 pub async fn update_worklog(
     app: tauri::AppHandle,
@@ -299,6 +456,19 @@ pub async fn update_worklog(
         if d > 24 * 3600 {
             return Err("Trvání nesmí přesáhnout 24 hodin".into());
         }
+    }
+
+    if freelo::is_freelo_key(&issue_key) {
+        return update_freelo_worklog(
+            app,
+            state,
+            worklog_id,
+            issue_key,
+            new_started_at_ms,
+            new_duration_seconds,
+            new_comment,
+        )
+        .await;
     }
 
     let client = state
@@ -389,6 +559,71 @@ pub async fn update_worklog(
         AuditOp::Update,
         Some(&issue_key),
         Some(&resp.id),
+        Some(&before),
+        Some(&after),
+    );
+
+    let _ = app.emit("worklog-updated", &after);
+    Ok(after)
+}
+
+/// Freelo branch of [`update_worklog`].
+async fn update_freelo_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    worklog_id: String,
+    issue_key: String,
+    new_started_at_ms: Option<i64>,
+    new_duration_seconds: Option<i64>,
+    new_comment: Option<String>,
+) -> Result<WorklogRow, String> {
+    let before = cache::worklogs::get_by_jira_id(&state.db, &worklog_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
+    let local_id = before
+        .id
+        .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
+
+    // Parse the freelo:N synthetic id back into the numeric work_report_id.
+    let wr_id = freelo::parse_worklog_id(&worklog_id)
+        .ok_or_else(|| format!("Neplatné Freelo id záznamu: {worklog_id}"))?;
+
+    let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
+    let client = match client {
+        ProviderClient::Freelo(c, _) => c,
+        _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
+    };
+
+    let after = match freelo::ops::update_work_report(
+        &client,
+        &state.db,
+        local_id,
+        wr_id,
+        new_started_at_ms,
+        new_duration_seconds,
+        new_comment.as_deref(),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            audit_failure(
+                &state.db,
+                AuditOp::Update,
+                Some(&issue_key),
+                Some(&worklog_id),
+                Some(&before),
+                &e.to_string(),
+            );
+            return Err(format!("Freelo: {e}"));
+        }
+    };
+
+    audit_success(
+        &state.db,
+        AuditOp::Update,
+        Some(&issue_key),
+        Some(&worklog_id),
         Some(&before),
         Some(&after),
     );
@@ -731,9 +966,9 @@ pub async fn retry_failed_audit_action(
 // -----------------------------------------------------------------------------
 
 /// Assign an issue to a previously-unassigned worklog (one that was stopped
-/// without a selected issue). Pushes a fresh POST to Jira so the worklog
-/// becomes "real", links the Jira id locally, and clears
-/// `pending_assignment`.
+/// without a selected issue). Pushes a fresh POST to the provider so the
+/// worklog becomes "real", links the provider id locally, and clears
+/// `pending_assignment`. Dispatches by issue key prefix.
 #[tauri::command]
 pub async fn assign_worklog_issue(
     app: tauri::AppHandle,
@@ -749,6 +984,57 @@ pub async fn assign_worklog_issue(
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
     if !before.pending_assignment {
         return Err("Záznam již má přiřazený úkol".into());
+    }
+
+    if freelo::is_freelo_key(&issue_key) {
+        // Freelo path: build a work-report and link its id locally.
+        let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
+        let (client, cfg) = match client {
+            ProviderClient::Freelo(c, cfg) => (c, cfg),
+            _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
+        };
+        let user_id = cfg
+            .sync_user_id
+            .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+        let saved = match freelo::ops::add_work_report(
+            &client,
+            &state.db,
+            &issue_key,
+            before.started_at.saturating_mul(1000),
+            before.duration_s,
+            before.comment.as_deref(),
+            0,
+            user_id,
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                audit_failure(
+                    &state.db,
+                    AuditOp::Update,
+                    Some(&issue_key),
+                    None,
+                    Some(&before),
+                    &e.to_string(),
+                );
+                return Err(format!("Freelo: {e}"));
+            }
+        };
+        // The freelo upsert created a NEW row keyed by freelo:N. We now need
+        // to remove the old (local-only) pending-assignment row to avoid
+        // having two rows for the same logical entry.
+        let _ = cache::worklogs::delete_local_only(&state.db, worklog_id);
+        audit_success(
+            &state.db,
+            AuditOp::Update,
+            Some(&issue_key),
+            saved.jira_worklog_id.as_deref(),
+            Some(&before),
+            Some(&saved),
+        );
+        let _ = app.emit("worklog-updated", &saved);
+        return Ok(saved);
     }
 
     let client = state
@@ -856,7 +1142,8 @@ pub async fn delete_local_only_worklog(
 /// Background task body: commit a pending delete if it's still pending.
 ///
 /// Public so the startup recovery in `lib.rs` can call the same code path
-/// for orphaned pending deletes left behind after a crash.
+/// for orphaned pending deletes left behind after a crash. Dispatches by
+/// issue key prefix (Freelo vs Jira).
 pub async fn commit_pending_delete(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -876,6 +1163,77 @@ pub async fn commit_pending_delete(
         return; // Already committed by an earlier task.
     }
 
+    // Freelo branch.
+    if freelo::is_freelo_key(issue_key) {
+        let wr_id = match freelo::parse_worklog_id(worklog_id) {
+            Some(id) => id,
+            None => {
+                let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
+                audit_failure(
+                    &state.db,
+                    AuditOp::Delete,
+                    Some(issue_key),
+                    Some(worklog_id),
+                    Some(&row),
+                    "Neplatné Freelo id záznamu",
+                );
+                return;
+            }
+        };
+        // Resolve the live freelo client.
+        let client = {
+            let conns = state.connections.read().unwrap();
+            conns.iter().find_map(|c| match &c.client {
+                ProviderClient::Freelo(client, _) => Some(client.clone()),
+                _ => None,
+            })
+        };
+        let client = match client {
+            Some(c) => c,
+            None => {
+                let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
+                audit_failure(
+                    &state.db,
+                    AuditOp::Delete,
+                    Some(issue_key),
+                    Some(worklog_id),
+                    Some(&row),
+                    "Freelo klient není nakonfigurován",
+                );
+                return;
+            }
+        };
+        let now_s = Utc::now().timestamp();
+        match freelo::ops::delete_work_report(&client, wr_id).await {
+            Ok(()) => {
+                let _ = cache::worklogs::mark_tombstoned(&state.db, local_id, now_s);
+                audit_success(
+                    &state.db,
+                    AuditOp::Delete,
+                    Some(issue_key),
+                    Some(worklog_id),
+                    Some(&row),
+                    None,
+                );
+                let _ = app.emit("worklog-delete-committed", worklog_id.to_string());
+            }
+            Err(e) => {
+                let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
+                audit_failure(
+                    &state.db,
+                    AuditOp::Delete,
+                    Some(issue_key),
+                    Some(worklog_id),
+                    Some(&row),
+                    &e.to_string(),
+                );
+                let _ = app.emit("worklog-error", e.to_string());
+            }
+        }
+        return;
+    }
+
+    // Jira branch (original behaviour).
     let client = match state.jira_client_cloned() {
         Some(c) => c,
         None => {

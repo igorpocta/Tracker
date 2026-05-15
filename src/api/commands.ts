@@ -12,12 +12,15 @@ import type {
   AuditEntry,
   AuditLogFilter,
   CacheStats,
+  ConnectionDto,
   DensityPref,
   FontSizePref,
+  FreeloProjectDto,
   IssueRow,
   JiraConfig,
   JiraUser,
   MoveWorklogResult,
+  ProviderUser,
   RefreshAllResult,
   SaveConfigArgs,
   ThemePref,
@@ -534,16 +537,9 @@ export function isFavorite(issueKey: string): Promise<boolean> {
 // Phase 18A — Multi-connection / multi-provider
 // -----------------------------------------------------------------------------
 
-export interface ConnectionDto {
-  id: number;
-  provider: string;
-  name: string;
-  enabled: boolean;
-  created_at: number;
-  updated_at: number;
-  config: Record<string, unknown>;
-  has_token: boolean;
-}
+// Re-export so existing imports of `ConnectionDto` from `./commands` keep
+// working. Canonical definition lives in `./types`.
+export type { ConnectionDto } from "./types";
 
 export function listConnections(): Promise<ConnectionDto[]> {
   return invoke<ConnectionDto[]>("list_connections");
@@ -580,8 +576,38 @@ export function testConnectionForProvider(args: {
   provider: string;
   config: Record<string, unknown>;
   token: string;
-}): Promise<JiraUser> {
-  return invoke<JiraUser>("test_connection_for_provider", { args });
+}): Promise<ProviderUser> {
+  return invoke<ProviderUser>("test_connection_for_provider", { args });
+}
+
+// -----------------------------------------------------------------------------
+// Phase 18E — Freelo project picker
+// -----------------------------------------------------------------------------
+
+export function listFreeloProjects(
+  connectionId: number,
+): Promise<FreeloProjectDto[]> {
+  return invoke<FreeloProjectDto[]>("list_freelo_projects", { connectionId });
+}
+
+export function setFreeloSelectedProjects(
+  connectionId: number,
+  projectIds: number[],
+): Promise<void> {
+  return invoke<void>("set_freelo_selected_projects", {
+    connectionId,
+    projectIds,
+  });
+}
+
+export function getFreeloSelectedProjects(
+  connectionId: number,
+): Promise<number[]> {
+  return invoke<number[]>("get_freelo_selected_projects", { connectionId });
+}
+
+export function syncFreeloNow(connectionId: number): Promise<number> {
+  return invoke<number>("sync_freelo_now", { connectionId });
 }
 
 export function listMyIssues(

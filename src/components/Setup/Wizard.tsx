@@ -2,8 +2,20 @@
  * Visual shell for the setup wizard: the progress indicator + content slot.
  * The individual step components handle their own validation and call
  * `onNext` / `onBack`.
+ *
+ * Phase 18E: the step list is now provider-aware. The default 3-step Jira
+ * flow stays untouched; Freelo gets its own 4-step flow with a project
+ * picker as the final step.
  */
-import { Circle, CircleCheck, Globe, KeyRound, Mail } from "lucide-react";
+import {
+  Circle,
+  CircleCheck,
+  Globe,
+  KeyRound,
+  Layers,
+  Mail,
+  Server,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 export interface WizardStepMeta {
@@ -15,15 +27,31 @@ export interface WizardStepMeta {
   Icon: typeof Globe;
 }
 
-export const SETUP_STEPS: WizardStepMeta[] = [
-  { index: 1, label: "URL", Icon: Globe },
-  { index: 2, label: "E-mail", Icon: Mail },
-  { index: 3, label: "Token", Icon: KeyRound },
+/** Step list for the Jira flow (preserved from Phase 17). */
+export const JIRA_SETUP_STEPS: WizardStepMeta[] = [
+  { index: 1, label: "Poskytovatel", Icon: Server },
+  { index: 2, label: "URL", Icon: Globe },
+  { index: 3, label: "E-mail", Icon: Mail },
+  { index: 4, label: "Token", Icon: KeyRound },
 ];
+
+/** Step list for the Freelo flow (Phase 18E). */
+export const FREELO_SETUP_STEPS: WizardStepMeta[] = [
+  { index: 1, label: "Poskytovatel", Icon: Server },
+  { index: 2, label: "Přihlášení", Icon: KeyRound },
+  { index: 3, label: "Projekty", Icon: Layers },
+];
+
+/** Legacy alias kept so existing tests / imports continue to compile. */
+export const SETUP_STEPS = JIRA_SETUP_STEPS;
 
 export interface WizardProps {
   /** 0-based index of the active step. */
   step: number;
+  /** Step list to use (defaults to the Jira flow). */
+  steps?: WizardStepMeta[];
+  /** Custom header label (e.g. "Připojit Freelo"). */
+  title?: string;
   /** Step content. */
   children: ReactNode;
 }
@@ -33,7 +61,8 @@ export interface WizardProps {
  * progress indicator on top. Steps before the current one show
  * `CircleCheck`; the current step highlights its associated icon.
  */
-export function Wizard({ step, children }: WizardProps) {
+export function Wizard({ step, steps, title, children }: WizardProps) {
+  const list = steps ?? JIRA_SETUP_STEPS;
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <section
@@ -42,9 +71,11 @@ export function Wizard({ step, children }: WizardProps) {
         aria-label="Průvodce nastavením"
       >
         <header className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Připojit k Jira</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
+            {title ?? "Připojit účet"}
+          </h1>
           <p className="text-sm text-[var(--text-tertiary)] mt-1">
-            Krok {step + 1} z {SETUP_STEPS.length}
+            Krok {step + 1} z {list.length}
           </p>
         </header>
 
@@ -52,7 +83,7 @@ export function Wizard({ step, children }: WizardProps) {
           className="flex items-center justify-between mb-8"
           aria-label="Postup nastavení"
         >
-          {SETUP_STEPS.map((s, i) => {
+          {list.map((s, i) => {
             const isDone = i < step;
             const isCurrent = i === step;
             const StepIcon = s.Icon;
@@ -83,7 +114,9 @@ export function Wizard({ step, children }: WizardProps) {
                 <span
                   className={
                     "text-xs " +
-                    (isCurrent ? "text-[var(--text-primary)]" : "text-[var(--text-tertiary)]")
+                    (isCurrent
+                      ? "text-[var(--text-primary)]"
+                      : "text-[var(--text-tertiary)]")
                   }
                 >
                   {s.label}

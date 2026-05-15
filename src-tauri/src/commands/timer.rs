@@ -12,7 +12,8 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::cache::{self, timer::ActiveTimer, worklogs::WorklogRow, Db};
 use crate::commands::{prefs, rounding};
-use crate::state::AppState;
+use crate::freelo;
+use crate::state::{AppState, ProviderClient};
 
 /// Snapshot of a running timer as the frontend wants to see it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -315,7 +316,6 @@ pub async fn stop_timer_inner(
         None => return Ok(None),
     };
 
-    let client = state.jira_client_cloned();
     let now = now_ms();
     let now_s = now / 1000;
     let raw_duration_s = (now_s - timer.started_at).max(0);
@@ -324,7 +324,7 @@ pub async fn stop_timer_inner(
     let duration_s = rounding::apply_active_rounding(&state.db, raw_duration_s);
 
     // Phase 18A — Item 4: an unassigned timer (issue_key == "") must NOT be
-    // pushed to Jira; we save locally with `pending_assignment = 1`.
+    // pushed to a provider; we save locally with `pending_assignment = 1`.
     let is_unassigned = timer.issue_key.is_empty();
 
     // Phase 18B — Item 6: fall back to the timer's in-flight comment when the
@@ -335,10 +335,50 @@ pub async fn stop_timer_inner(
         _ => None,
     };
 
-    // Talk to Jira if possible (and we have an issue key).
+    // Dispatch by issue key prefix. Freelo: post a work_report and skip
+    // `record_local_stop` (the freelo ops already insert the row). Jira:
+    // legacy path through `state.jira_client_cloned()` for backwards compat.
+    let mut freelo_saved: Option<WorklogRow> = None;
     let jira_worklog_id = if is_unassigned {
         None
-    } else if let Some(client) = client {
+    } else if freelo::is_freelo_key(&timer.issue_key) {
+        // Find a live Freelo client.
+        let freelo_pair = {
+            let conns = state.connections.read().unwrap();
+            conns.iter().find_map(|c| match &c.client {
+                ProviderClient::Freelo(client, cfg) => Some((client.clone(), cfg.clone())),
+                _ => None,
+            })
+        };
+        match freelo_pair {
+            Some((client, cfg)) => {
+                let user_id = cfg.sync_user_id.unwrap_or(0);
+                match freelo::ops::add_work_report(
+                    &client,
+                    &state.db,
+                    &timer.issue_key,
+                    timer.started_at.saturating_mul(1000),
+                    duration_s,
+                    effective_comment.as_deref(),
+                    0, // connection id unused inside add_work_report
+                    user_id,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let id = row.jira_worklog_id.clone();
+                        freelo_saved = Some(row);
+                        id
+                    }
+                    Err(e) => {
+                        let _ = app.emit("worklog-error", e.to_string());
+                        None
+                    }
+                }
+            }
+            None => None,
+        }
+    } else if let Some(client) = state.jira_client_cloned() {
         let started_dt = Utc
             .timestamp_opt(timer.started_at, 0)
             .single()
@@ -363,14 +403,21 @@ pub async fn stop_timer_inner(
         None
     };
 
-    let row = record_local_stop(
-        &state.db,
-        &timer,
-        now,
-        effective_comment.as_deref(),
-        jira_worklog_id.as_deref(),
-        Some(duration_s),
-    )?;
+    let row = if let Some(saved) = freelo_saved {
+        // The Freelo ops already inserted the row via upsert_from_jira; we
+        // just need to stop the timer to keep behaviour identical.
+        cache::timer::stop(&state.db).map_err(|e| e.to_string())?;
+        saved
+    } else {
+        record_local_stop(
+            &state.db,
+            &timer,
+            now,
+            effective_comment.as_deref(),
+            jira_worklog_id.as_deref(),
+            Some(duration_s),
+        )?
+    };
     let _ = app.emit("worklog-saved", &row);
     let _ = app.emit("timer-stopped", &row);
 
