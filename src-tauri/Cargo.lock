@@ -5206,7 +5206,6 @@ dependencies = [
  "reqwest 0.12.28",
  "rusqlite",
  "sentry",
- "sentry-tracing",
  "serde",
  "serde_json",
  "tauri",
