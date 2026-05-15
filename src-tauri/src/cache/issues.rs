@@ -90,6 +90,7 @@ pub fn recent(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
                 issue_type, time_spent, aggregate_time_spent, time_original_estimate,
                 time_estimate, epic_key, epic_summary, updated_at
          FROM issues
+         WHERE NOT (issue_key LIKE 'FREELO-P-%' OR issue_key LIKE 'FRL-P-%')
          ORDER BY updated_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], row_to_issue)?;
@@ -112,6 +113,7 @@ pub fn suggested(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {
             FROM recent_worklogs
             GROUP BY issue_key
          ) w ON w.issue_key = i.issue_key
+         WHERE NOT (i.issue_key LIKE 'FREELO-P-%' OR i.issue_key LIKE 'FRL-P-%')
          ORDER BY w.last_logged DESC
          LIMIT ?1",
     )?;
@@ -151,7 +153,8 @@ pub fn search(db: &Db, query: &str, limit: u32) -> Result<Vec<IssueRow>, DbError
                 issue_type, time_spent, aggregate_time_spent, time_original_estimate,
                 time_estimate, epic_key, epic_summary, updated_at
          FROM issues
-         WHERE lower(issue_key) LIKE ?1 OR lower(summary) LIKE ?1
+         WHERE (lower(issue_key) LIKE ?1 OR lower(summary) LIKE ?1)
+           AND NOT (issue_key LIKE 'FREELO-P-%' OR issue_key LIKE 'FRL-P-%')
          ORDER BY updated_at DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(rusqlite::params![q, limit], row_to_issue)?;

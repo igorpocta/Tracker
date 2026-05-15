@@ -168,6 +168,15 @@ export function AppShell() {
   );
   useTauriEvent<WorklogRow>("worklog-saved", onWorklogSaved);
 
+  // `timer-discarded` fires when the timer is dropped (no worklog written) —
+  // could originate here, in the popover, or via tray. Always clear the
+  // store so the running chip vanishes everywhere.
+  const onTimerDiscarded = useCallback(() => {
+    setActive(null);
+    setStopOpen(false);
+  }, [setActive]);
+  useTauriEvent<boolean>("timer-discarded", onTimerDiscarded);
+
   // Phase 15 — mutation events. All four invalidate the same query keys so the
   // visible Tímové Log refreshes immediately.
   const invalidateWorklogQueries = useCallback(() => {
@@ -448,6 +457,11 @@ export function AppShell() {
           onDiscard={async () => {
             try {
               await discardTimer();
+              // Clear the timer state in the Zustand store so the running
+              // chip / Stop button disappear from the UI immediately. The
+              // backend has already cleared active_timer; this just keeps
+              // the React state in sync with reality.
+              setActive(null);
               setStopOpen(false);
               pushToast("info", "Časomíra zahozena bez uložení.");
             } catch (e) {
