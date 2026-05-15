@@ -346,26 +346,41 @@ export function AppShell() {
       className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
     >
       {/*
-       * macOS Overlay title bar: the OS draws the close/min/max buttons over
-       * our content at the top-left. We add a transparent 28px drag strip so
-       * the user can grab the empty area to the right of the traffic lights
-       * and drag the window. We use BOTH `data-tauri-drag-region` (Tauri
-       * convention) and CSS `-webkit-app-region: drag` (Wry/WebKit canonical)
-       * for maximum reliability. Z-index is intentionally above content
-       * (z-[100]) so toasts/modals at z-50 don't sit over the drag area.
+       * macOS Overlay title bar drag strip.
        *
-       * Traffic lights are drawn by the OS *outside* the webview, so the
-       * strip doesn't block them — clicks on them are intercepted by macOS
-       * before reaching the webview.
+       * Three redundant mechanisms — at least one will hit:
+       *   1. `data-tauri-drag-region` — Tauri 2's documented attribute,
+       *      detected by injected JS that calls `start_dragging()` on
+       *      mousedown.
+       *   2. `WebkitAppRegion: "drag"` — Wry/WebKit native CSS property.
+       *   3. `appRegion: "drag"`      — modern un-prefixed equivalent.
        *
-       * Skipped on other platforms (Windows has its own non-overlay chrome).
+       * Positioning notes:
+       *   - `fixed` (not `absolute`) so the strip is anchored to the viewport,
+       *     immune to any future parent position/padding changes.
+       *   - `z-[9999]` so toasts, modals, popovers never accidentally sit over
+       *     the drag zone (toast root is z-40, our tooltip stack is well below
+       *     this).
+       *   - 32px tall — covers the macOS traffic-light area plus a few px of
+       *     slack so the drag target is comfortable.
+       *
+       * Traffic lights themselves are drawn by macOS *outside* the webview,
+       * so they receive clicks first; the strip never blocks them.
+       *
+       * Skipped on Windows/Linux (those use their own native chrome).
        */}
       {IS_MAC && (
         <div
           data-tauri-drag-region
           aria-hidden
-          className="absolute top-0 left-0 right-0 h-7 z-[100]"
-          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+          className="fixed top-0 left-0 right-0 h-8 z-[9999]"
+          style={
+            {
+              WebkitAppRegion: "drag",
+              // Modern un-prefixed form. Browsers ignore unknown properties.
+              appRegion: "drag",
+            } as React.CSSProperties
+          }
         />
       )}
       <div className="flex-1 min-h-0 flex">
