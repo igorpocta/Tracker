@@ -150,8 +150,15 @@ pub async fn sync_freelo_now(
     if let Some(user_id) = cfg.sync_user_id {
         let today = chrono::Local::now().date_naive();
         let from = today - chrono::Duration::days(30);
-        let _ = freelo_sync::sync_worklogs_for_range(&client, &state.db, user_id, from, today)
-            .await;
+        let _ = freelo_sync::sync_worklogs_for_range(
+            &client,
+            &state.db,
+            user_id,
+            from,
+            today,
+            &cfg.selected_project_ids,
+        )
+        .await;
     }
 
     let _ = app.emit("cache-refreshed", issues);

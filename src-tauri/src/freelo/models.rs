@@ -94,7 +94,10 @@ fn default_state_object() -> String {
 }
 
 /// One task in a Freelo project. The tasks endpoint may also return tasks
-/// nested under tasklists — we flatten the response in [`crate::freelo::client::FreeloClient::list_tasks_for_project`].
+/// nested under tasklists — we flatten the response in the client.
+///
+/// `state` is the same `{id, state}`-object-or-string union as on
+/// [`FreeloProject`] — the same custom deserializer handles both shapes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreeloTask {
     pub id: i64,
@@ -103,12 +106,19 @@ pub struct FreeloTask {
     /// sometimes as a nested `project.id`; the client flattens both shapes.
     #[serde(default)]
     pub project_id: Option<i64>,
+    /// Cached display name of the parent project. Filled in by the client
+    /// when the `/all-tasks` response includes `project.name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
     /// Optional tasklist id (Freelo's "list" within a project).
     #[serde(default)]
     pub tasklist_id: Option<i64>,
-    /// `active`, `finished`, etc. Defaults to `active`.
-    #[serde(default = "default_state")]
+    #[serde(default = "default_state_object", deserialize_with = "deserialize_state")]
     pub state: String,
+    /// ISO 8601 timestamp from Freelo's `date_edited_at` field. Used to set
+    /// `IssueRow.updated_at` so search results sort by recency.
+    #[serde(default)]
+    pub date_edited_at: Option<String>,
 }
 
 /// One work-report (time entry) in Freelo.
@@ -128,10 +138,6 @@ pub struct FreeloWorkReport {
     pub description: Option<String>,
     /// Numeric Freelo user id of the author.
     pub user_id: i64,
-}
-
-fn default_state() -> String {
-    "active".into()
 }
 
 /// Map a [`FreeloProject`] into the synthetic `issues` row used as the
@@ -161,15 +167,24 @@ pub fn project_to_issue_row(p: &FreeloProject, now_unix_s: i64) -> crate::cache:
     }
 }
 
-/// Map a [`FreeloTask`] into a row in the shared `issues` cache, using the
-/// supplied project for the `parent_*` and `epic_*` columns.
-pub fn task_to_issue_row(
-    t: &FreeloTask,
-    project: &FreeloProject,
-    now_unix_s: i64,
-) -> crate::cache::issues::IssueRow {
+/// Map a [`FreeloTask`] into a row in the shared `issues` cache.
+///
+/// Project metadata (id + name) is pulled from the task's own `project_id` /
+/// `project_name` fields — these are populated by the client when the
+/// `/all-tasks` response carries a nested `project: {...}` object. If both
+/// are absent the parent columns are left `None`.
+pub fn task_to_issue_row(t: &FreeloTask, now_unix_s: i64) -> crate::cache::issues::IssueRow {
     let key = super::task_key(t.id);
-    let parent_key = super::project_key(project.id);
+    let parent_key = t.project_id.map(super::project_key);
+    // Prefer the task's own `date_edited_at` so search results can sort by
+    // recency-of-edit (not recency-of-sync). Falls back to `now_unix_s` if
+    // Freelo didn't include the timestamp or it failed to parse.
+    let updated_at = t
+        .date_edited_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc).timestamp())
+        .unwrap_or(now_unix_s);
     crate::cache::issues::IssueRow {
         issue_key: key,
         issue_id: Some(t.id.to_string()),
@@ -178,18 +193,18 @@ pub fn task_to_issue_row(
         priority_order: None,
         assignee_email: None,
         assignee_account_id: None,
-        parent_key: Some(parent_key.clone()),
-        parent_summary: Some(project.name.clone()),
+        parent_key: parent_key.clone(),
+        parent_summary: t.project_name.clone(),
         issue_type: Some("task".into()),
         time_spent: None,
         aggregate_time_spent: None,
         time_original_estimate: None,
         time_estimate: None,
-        // Freelo doesn't have epics, but we surface the project as the "epic"
-        // so the UI's grouping logic (which keys off epic_key) works as-is.
-        epic_key: Some(parent_key),
-        epic_summary: Some(project.name.clone()),
-        updated_at: now_unix_s,
+        // Freelo doesn't have epics; project doubles as the "epic" so the
+        // UI's grouping logic (which keys off epic_key) works as-is.
+        epic_key: parent_key,
+        epic_summary: t.project_name.clone(),
+        updated_at,
     }
 }
 
@@ -220,22 +235,30 @@ mod tests {
 
     #[test]
     fn task_to_row_uses_synthetic_keys() {
-        let p = FreeloProject {
-            id: 10,
-            name: "Web".into(),
-            state: "active".into(),
-        };
         let t = FreeloTask {
             id: 42,
             name: "Landing page".into(),
             project_id: Some(10),
+            project_name: Some("Web".into()),
             tasklist_id: None,
             state: "active".into(),
+            date_edited_at: None,
         };
-        let r = task_to_issue_row(&t, &p, 1_700_000_000);
-        assert_eq!(r.issue_key, "FRL-42");
-        assert_eq!(r.parent_key.as_deref(), Some("FRL-P-10"));
+        let r = task_to_issue_row(&t, 1_700_000_000);
+        assert_eq!(r.issue_key, "FREELO-42");
+        assert_eq!(r.parent_key.as_deref(), Some("FREELO-P-10"));
         assert_eq!(r.parent_summary.as_deref(), Some("Web"));
-        assert_eq!(r.epic_key.as_deref(), Some("FRL-P-10"));
+        assert_eq!(r.epic_key.as_deref(), Some("FREELO-P-10"));
+    }
+
+    #[test]
+    fn freelo_task_state_handles_object_shape() {
+        // Live v1 shape — state is an object, not a string.
+        let j = json!({
+            "id": 42, "name": "Hi", "project_id": 10,
+            "state": { "id": 1, "state": "active" }
+        });
+        let t: FreeloTask = serde_json::from_value(j).unwrap();
+        assert_eq!(t.state, "active");
     }
 }

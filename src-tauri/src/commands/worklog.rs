@@ -118,7 +118,12 @@ pub async fn refresh_all(
                 }
                 if let Some(user_id) = cfg.sync_user_id {
                     if let Ok(n) = freelo::sync::sync_worklogs_for_range(
-                        &client, &state.db, user_id, from, today,
+                        &client,
+                        &state.db,
+                        user_id,
+                        from,
+                        today,
+                        &cfg.selected_project_ids,
                     )
                     .await
                     {

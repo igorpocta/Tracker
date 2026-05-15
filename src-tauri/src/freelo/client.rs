@@ -155,15 +155,16 @@ impl FreeloClient {
         Err(FreeloError::Api { status: code, body })
     }
 
-    /// `GET /users/me` — authentication health check.
+    /// `GET /users/me` — authentication health check + minimal user info.
     ///
-    /// Per the official Freelo v1 docs this returns `{result: "success"}`
-    /// (200) on valid credentials and 401 on bad ones. The response doesn't
-    /// carry user-detail fields, so we synthesize a minimal `FreeloUser`
-    /// from the supplied email (used downstream as the worklog author tag).
+    /// Per the official Freelo v1 docs (verified against the live API), the
+    /// response is `{ result: "success", user: { id: N } }` on 200, and 401
+    /// on bad credentials. We pull `user.id` so worklog filters can scope to
+    /// the caller without an extra round-trip; full name + email are still
+    /// derived from the supplied email since the endpoint doesn't return them.
     pub async fn me(&self) -> Result<FreeloUser, FreeloError> {
         let url = self.url("/users/me")?;
-        let _: Value = with_retry(|| async {
+        let body: Value = with_retry(|| async {
             let resp = self
                 .http
                 .get(url.clone())
@@ -171,14 +172,17 @@ impl FreeloClient {
                 .send()
                 .await?;
             let resp = Self::check_status(resp).await?;
-            // Body is `{result: "success"}` — we don't need to inspect it,
-            // but consuming the JSON keeps the wire reusable.
             Ok(resp.json::<Value>().await.unwrap_or(Value::Null))
         })
         .await?;
 
+        let id = body
+            .pointer("/user/id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
         Ok(FreeloUser {
-            id: 0,
+            id,
             email: Some(self.email.clone()),
             display_name: Some(derive_name_from_email(&self.email)),
             first_name: None,
@@ -343,6 +347,18 @@ impl FreeloClient {
                         obj.insert("project_id".into(), json!(project_id));
                     }
                 }
+                if v.get("project_name").is_none() {
+                    if let Some(name) = v
+                        .get("project")
+                        .and_then(|p| p.get("name"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                    {
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("project_name".into(), json!(name));
+                        }
+                    }
+                }
                 if let Ok(t) = serde_json::from_value::<FreeloTask>(v) {
                     out.push(t);
                 }
@@ -351,84 +367,185 @@ impl FreeloClient {
         Ok(out)
     }
 
-    /// `GET /timesheets` — list work-reports in a date range, optionally
-    /// filtered to a specific user. Freelo's endpoint accepts ISO dates for
-    /// `date_from` / `date_to`.
+    /// `GET /all-tasks?projects_ids[]=X&p=N` — global paginated task search
+    /// filtered to a set of project ids. Per the official v1 docs:
+    /// <https://api.freelo.io/docs/v1/freelo-api>.
+    ///
+    /// Response shape:
+    ///   `{ total, count, page, per_page, data: { tasks: [ ... ] } }`
+    /// Each task carries `project: { id, name, state }`, `state: { id, state }`,
+    /// `worker: { id, name }`, `tasklist: { id, name, state }`. We flatten the
+    /// nested project info into `project_id` + `project_name` so the model can
+    /// deserialize cleanly.
+    pub async fn list_tasks_for_projects(
+        &self,
+        project_ids: &[i64],
+    ) -> Result<Vec<FreeloTask>, FreeloError> {
+        let mut out: Vec<FreeloTask> = Vec::new();
+        let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        if project_ids.is_empty() {
+            return Ok(out);
+        }
+        let mut page: u32 = 0;
+        const MAX_PAGES: u32 = 200;
+        loop {
+            let mut url = self.url("/all-tasks")?;
+            {
+                let mut q = url.query_pairs_mut();
+                q.append_pair("p", &page.to_string());
+                for pid in project_ids {
+                    q.append_pair("projects_ids[]", &pid.to_string());
+                }
+            }
+            let body: Value = with_retry(|| async {
+                let resp = self
+                    .http
+                    .get(url.clone())
+                    .basic_auth(&self.email, Some(&self.api_key))
+                    .send()
+                    .await?;
+                let resp = Self::check_status(resp).await?;
+                Ok(resp.json::<Value>().await?)
+            })
+            .await?;
+
+            let before = out.len();
+            let arr = body
+                .pointer("/data/tasks")
+                .and_then(|v| v.as_array())
+                .or_else(|| body.get("tasks").and_then(|v| v.as_array()))
+                .or_else(|| body.as_array());
+            if let Some(arr) = arr {
+                for v in arr {
+                    let mut v = v.clone();
+                    // Flatten {project: {id, name}} into top-level fields the
+                    // deserializer understands.
+                    let nested_project = v.get("project").cloned();
+                    if let Some(np) = nested_project.as_ref() {
+                        if v.get("project_id").is_none() {
+                            if let Some(pid) = np.get("id").and_then(|x| x.as_i64()) {
+                                if let Some(obj) = v.as_object_mut() {
+                                    obj.insert("project_id".into(), json!(pid));
+                                }
+                            }
+                        }
+                        if v.get("project_name").is_none() {
+                            if let Some(pname) = np.get("name").and_then(|x| x.as_str()) {
+                                if let Some(obj) = v.as_object_mut() {
+                                    obj.insert("project_name".into(), json!(pname));
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(t) = serde_json::from_value::<FreeloTask>(v) {
+                        if seen_ids.insert(t.id) {
+                            out.push(t);
+                        }
+                    }
+                }
+            }
+            let added = out.len() - before;
+            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            let reached_total = total.map(|t| out.len() >= t).unwrap_or(false);
+            if added == 0 || reached_total || page + 1 >= MAX_PAGES {
+                break;
+            }
+            if total.is_none() {
+                break;
+            }
+            page += 1;
+        }
+        Ok(out)
+    }
+
+    /// `GET /work-reports` — paginated list of work reports filtered by
+    /// projects + user. Per the official v1 docs this is the canonical
+    /// "list time entries" endpoint.
+    ///
+    /// We pass:
+    ///   - `projects_ids[]` for each selected project (limits the scope to
+    ///     projects the user has chosen to track in this app)
+    ///   - `users_ids[]` for the authenticated user (so we never see other
+    ///     people's entries even on shared projects)
+    ///   - `date_from` / `date_to` to limit the range
+    ///
+    /// Response shape is the canonical PaginatedResponse:
+    ///   `{ total, count, page, per_page, data: { reports: [ ... ] } }`
+    /// where each report carries nested `task: {id, name}`, `project: {id,
+    /// name}`, `author: {id}`, `worker: {id}`, `date_reported` (ISO 8601 with
+    /// TZ), and `note` for the comment. We flatten those into the flat fields
+    /// `FreeloWorkReport` expects.
     pub async fn list_work_reports(
         &self,
         from: NaiveDate,
         to: NaiveDate,
         user_id: i64,
+        project_ids: &[i64],
     ) -> Result<Vec<FreeloWorkReport>, FreeloError> {
-        let mut url = self.url("/timesheets")?;
-        url.query_pairs_mut()
-            .append_pair("date_from", &from.format("%Y-%m-%d").to_string())
-            .append_pair("date_to", &to.format("%Y-%m-%d").to_string())
-            .append_pair("users_ids[]", &user_id.to_string());
+        let mut out: Vec<FreeloWorkReport> = Vec::new();
+        let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut page: u32 = 0;
+        const MAX_PAGES: u32 = 200;
+        loop {
+            let mut url = self.url("/work-reports")?;
+            {
+                let mut q = url.query_pairs_mut();
+                q.append_pair("date_from", &from.format("%Y-%m-%d").to_string())
+                    .append_pair("date_to", &to.format("%Y-%m-%d").to_string())
+                    .append_pair("p", &page.to_string());
+                if user_id > 0 {
+                    q.append_pair("users_ids[]", &user_id.to_string());
+                }
+                for pid in project_ids {
+                    q.append_pair("projects_ids[]", &pid.to_string());
+                }
+            }
+            let body: Value = with_retry(|| async {
+                let resp = self
+                    .http
+                    .get(url.clone())
+                    .basic_auth(&self.email, Some(&self.api_key))
+                    .send()
+                    .await?;
+                let resp = Self::check_status(resp).await?;
+                Ok(resp.json::<Value>().await?)
+            })
+            .await?;
 
-        let body: Value = with_retry(|| async {
-            let resp = self
-                .http
-                .get(url.clone())
-                .basic_auth(&self.email, Some(&self.api_key))
-                .send()
-                .await?;
-            let resp = Self::check_status(resp).await?;
-            Ok(resp.json::<Value>().await?)
-        })
-        .await?;
-
-        let mut out = Vec::new();
-        let arr_opt = if let Some(a) = body.as_array() {
-            Some(a.clone())
-        } else {
-            body.get("work_reports")
-                .or_else(|| body.get("timesheets"))
+            let before = out.len();
+            let arr = body
+                .pointer("/data/reports")
                 .and_then(|v| v.as_array())
-                .cloned()
-        };
-
-        if let Some(a) = arr_opt {
-            for v in a {
-                let mut v = v;
-                // Flatten {"task": {"id": N}} into top-level `task_id`.
-                if v.get("task_id").is_none() {
-                    if let Some(tid) = v
-                        .get("task")
-                        .and_then(|t| t.get("id"))
-                        .and_then(|x| x.as_i64())
-                    {
-                        if let Some(obj) = v.as_object_mut() {
-                            obj.insert("task_id".into(), json!(tid));
+                .or_else(|| body.get("reports").and_then(|v| v.as_array()))
+                .or_else(|| body.get("work_reports").and_then(|v| v.as_array()))
+                .or_else(|| body.as_array());
+            if let Some(arr) = arr {
+                for v in arr {
+                    let mut v = v.clone();
+                    flatten_work_report_fields(&mut v);
+                    if let Ok(w) = serde_json::from_value::<FreeloWorkReport>(v) {
+                        // Defensive client-side filter: even if the server
+                        // ignored our users_ids[] filter, never let another
+                        // user's reports leak into our cache.
+                        if user_id > 0 && w.user_id != user_id {
+                            continue;
                         }
-                    }
-                }
-                // Same for user.
-                if v.get("user_id").is_none() {
-                    if let Some(uid) = v
-                        .get("worker")
-                        .and_then(|u| u.get("id"))
-                        .and_then(|x| x.as_i64())
-                    {
-                        if let Some(obj) = v.as_object_mut() {
-                            obj.insert("user_id".into(), json!(uid));
+                        if seen.insert(w.id) {
+                            out.push(w);
                         }
-                    } else if let Some(uid) = v
-                        .get("user")
-                        .and_then(|u| u.get("id"))
-                        .and_then(|x| x.as_i64())
-                    {
-                        if let Some(obj) = v.as_object_mut() {
-                            obj.insert("user_id".into(), json!(uid));
-                        }
-                    }
-                }
-                if let Ok(w) = serde_json::from_value::<FreeloWorkReport>(v) {
-                    if w.user_id == user_id {
-                        out.push(w);
                     }
                 }
             }
+            let added = out.len() - before;
+            let total = body.get("total").and_then(|v| v.as_u64()).map(|t| t as usize);
+            let reached_total = total.map(|t| out.len() >= t).unwrap_or(false);
+            if added == 0 || reached_total || page + 1 >= MAX_PAGES {
+                break;
+            }
+            if total.is_none() {
+                break;
+            }
+            page += 1;
         }
         Ok(out)
     }
@@ -616,6 +733,40 @@ mod tests {
         )
         .await;
         assert_eq!(res.unwrap(), 2);
+    }
+}
+
+/// Flatten the canonical `/work-reports` response shape into the flat fields
+/// `FreeloWorkReport` deserializes. Inserts:
+///   - `task_id`   ← `task.id`
+///   - `user_id`   ← `author.id` (preferred) or `worker.id`
+///   - `description` ← `note`
+fn flatten_work_report_fields(v: &mut Value) {
+    if v.get("task_id").is_none() {
+        if let Some(tid) = v.pointer("/task/id").and_then(|x| x.as_i64()) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("task_id".into(), json!(tid));
+            }
+        }
+    }
+    if v.get("user_id").is_none() {
+        let uid = v
+            .pointer("/author/id")
+            .and_then(|x| x.as_i64())
+            .or_else(|| v.pointer("/worker/id").and_then(|x| x.as_i64()))
+            .or_else(|| v.pointer("/user/id").and_then(|x| x.as_i64()));
+        if let Some(uid) = uid {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("user_id".into(), json!(uid));
+            }
+        }
+    }
+    if v.get("description").is_none() {
+        if let Some(note) = v.get("note").cloned() {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("description".into(), note);
+            }
+        }
     }
 }
 

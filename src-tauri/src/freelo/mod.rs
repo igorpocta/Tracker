@@ -29,9 +29,10 @@ pub use client::{FreeloClient, FreeloError};
 pub use models::{FreeloProject, FreeloTask, FreeloUser, FreeloWorkReport};
 
 /// Synthetic prefix for Freelo task keys in the shared `issues` table.
-pub const FREELO_TASK_PREFIX: &str = "FRL-";
+/// User-visible — must match what the UI pill renders (`FREELO-12345`).
+pub const FREELO_TASK_PREFIX: &str = "FREELO-";
 /// Synthetic prefix for Freelo project keys (parent / epic).
-pub const FREELO_PROJECT_PREFIX: &str = "FRL-P-";
+pub const FREELO_PROJECT_PREFIX: &str = "FREELO-P-";
 /// Prefix used inside the `jira_worklog_id` column for Freelo work-report ids.
 pub const FREELO_WORKLOG_PREFIX: &str = "freelo:";
 
@@ -88,27 +89,27 @@ mod tests {
 
     #[test]
     fn task_key_roundtrips() {
-        assert_eq!(task_key(42), "FRL-42");
-        assert_eq!(parse_task_key("FRL-42"), Some(42));
-        assert_eq!(parse_task_key("FRL-9999"), Some(9999));
+        assert_eq!(task_key(42), "FREELO-42");
+        assert_eq!(parse_task_key("FREELO-42"), Some(42));
+        assert_eq!(parse_task_key("FREELO-9999"), Some(9999));
     }
 
     #[test]
     fn project_key_roundtrips() {
-        assert_eq!(project_key(7), "FRL-P-7");
-        assert_eq!(parse_project_key("FRL-P-7"), Some(7));
+        assert_eq!(project_key(7), "FREELO-P-7");
+        assert_eq!(parse_project_key("FREELO-P-7"), Some(7));
     }
 
     #[test]
     fn project_key_doesnt_parse_as_task() {
-        assert_eq!(parse_task_key("FRL-P-7"), None);
+        assert_eq!(parse_task_key("FREELO-P-7"), None);
     }
 
     #[test]
     fn jira_key_is_not_freelo() {
         assert!(!is_freelo_key("ACME-1"));
-        assert!(is_freelo_key("FRL-1"));
-        assert!(is_freelo_key("FRL-P-1"));
+        assert!(is_freelo_key("FREELO-1"));
+        assert!(is_freelo_key("FREELO-P-1"));
     }
 
     #[test]

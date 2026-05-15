@@ -365,60 +365,90 @@ async fn rate_limit_retry_uses_retry_after() {
 // ---------- list_work_reports ----------
 
 #[tokio::test]
-async fn list_work_reports_filters_to_user() {
+async fn list_work_reports_uses_real_freelo_v1_shape() {
+    // Verified against the live API — /work-reports returns:
+    //   { total, count, page, per_page, data: { reports: [...] } }
+    // Each report nests task/project/author/worker objects + `note` field
+    // (we flatten to task_id/user_id/description on parse).
     let (server, client) = server_and_client().await;
     Mock::given(method("GET"))
-        .and(path("/timesheets"))
-        .and(query_param("date_from", "2026-05-01"))
-        .and(query_param("date_to", "2026-05-14"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            { "id": 1, "task_id": 10, "minutes": 30, "date_reported": "2026-05-14", "user_id": 7 },
-            { "id": 2, "task_id": 11, "minutes": 45, "date_reported": "2026-05-13", "user_id": 99 }
-        ])))
+        .and(path("/work-reports"))
+        .and(query_param("date_from", "2026-04-01"))
+        .and(query_param("date_to", "2026-04-15"))
+        .and(query_param("users_ids[]", "140342"))
+        .and(query_param("projects_ids[]", "446399"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total": 1, "count": 1, "page": 0, "per_page": 100,
+            "data": {
+                "reports": [
+                    {
+                        "id": 10037133,
+                        "date_add": "2026-04-15T13:13:46+02:00",
+                        "date_reported": "2026-04-15T12:24:27+02:00",
+                        "note": "Optimalizace",
+                        "minutes": 50,
+                        "task": { "id": 27660453, "name": "Opt fáze 2" },
+                        "project": { "id": 446399, "name": "SAB" },
+                        "author": { "id": 140342, "fullname": "Igor" },
+                        "worker": { "id": 140342, "fullname": "Igor" },
+                        "date_edited_at": "2026-04-15T13:13:46+02:00"
+                    }
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let from = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let to = NaiveDate::from_ymd_opt(2026, 4, 15).unwrap();
+    let entries = client
+        .list_work_reports(from, to, 140342, &[446399])
+        .await
+        .expect("ok");
+    assert_eq!(entries.len(), 1);
+    let r = &entries[0];
+    assert_eq!(r.id, 10037133);
+    assert_eq!(r.task_id, 27660453);
+    assert_eq!(r.user_id, 140342);
+    assert_eq!(r.minutes, 50);
+    assert_eq!(r.description.as_deref(), Some("Optimalizace"));
+}
+
+#[tokio::test]
+async fn list_work_reports_filters_other_users_client_side() {
+    let (server, client) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/work-reports"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total": 2, "count": 2, "page": 0, "per_page": 100,
+            "data": {
+                "reports": [
+                    { "id": 1, "minutes": 30, "date_reported": "2026-05-14",
+                      "task": {"id": 10}, "author": {"id": 7} },
+                    { "id": 2, "minutes": 45, "date_reported": "2026-05-13",
+                      "task": {"id": 11}, "author": {"id": 99} }
+                ]
+            }
+        })))
         .mount(&server)
         .await;
 
     let from = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
     let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    let entries = client.list_work_reports(from, to, 7).await.expect("ok");
+    let entries = client
+        .list_work_reports(from, to, 7, &[])
+        .await
+        .expect("ok");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].user_id, 7);
 }
 
-#[tokio::test]
-async fn list_work_reports_flattens_nested_task_and_user() {
-    let (server, client) = server_and_client().await;
-    Mock::given(method("GET"))
-        .and(path("/timesheets"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
-            {
-                "id": 5,
-                "task": { "id": 100 },
-                "worker": { "id": 7 },
-                "minutes": 12,
-                "date_reported": "2026-05-14"
-            }
-        ])))
-        .mount(&server)
-        .await;
-
-    let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    let entries = client.list_work_reports(from, to, 7).await.expect("ok");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].task_id, 100);
-    assert_eq!(entries[0].user_id, 7);
-    assert_eq!(entries[0].minutes, 12);
-}
-
-// Sanity check: dropping the `_` (mark variable as used) by checking the
-// projects helper produces a deterministic output.
+// Sanity check: synthetic key helpers produce the user-visible prefix.
 #[tokio::test]
 async fn projects_keys_are_freelo_synthetic() {
     use tracker_lib::freelo::{project_key, task_key};
-    assert_eq!(project_key(1), "FRL-P-1");
-    assert_eq!(task_key(2), "FRL-2");
-    // Suppress unused-import warnings.
+    assert_eq!(project_key(1), "FREELO-P-1");
+    assert_eq!(task_key(2), "FREELO-2");
     let _ = json!({});
     let _: Value = serde_json::json!({});
 }

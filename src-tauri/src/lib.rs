@@ -225,7 +225,12 @@ pub fn run() {
                                 }),
                             );
                             let _ = freelo::sync::sync_worklogs_for_range(
-                                &client, &state.db, user_id, from, today,
+                                &client,
+                                &state.db,
+                                user_id,
+                                from,
+                                today,
+                                &cfg.selected_project_ids,
                             )
                             .await;
                         }

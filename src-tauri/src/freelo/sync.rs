@@ -7,7 +7,7 @@ use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
-use super::models::{project_to_issue_row, task_to_issue_row, FreeloWorkReport};
+use super::models::{task_to_issue_row, FreeloWorkReport};
 use crate::cache::{self, worklogs::WorklogRow, Db, DbError};
 
 /// Errors from [`sync_issues_for_connection`] / [`sync_worklogs_for_range`].
@@ -40,35 +40,25 @@ pub async fn sync_issues_for_connection(
         return Ok(0);
     }
 
-    // Pull the projects list so we can match selected ids to project metadata.
-    let projects = client.list_projects().await?;
+    // Use the global /all-tasks endpoint with projects_ids[] filter — fewer
+    // requests than one-per-project and matches the official v1 docs as the
+    // canonical task search path. Each returned task carries its parent
+    // `project: {id, name}` so the FreeloTask deserializer fills in
+    // project_id + project_name and `task_to_issue_row` can write the
+    // parent / epic columns without an extra fetch.
+    //
+    // Importantly we DO NOT upsert the projects themselves as cache rows —
+    // projects in Freelo are not trackable units (no work-reports attach to
+    // them); they live only as parent context on each task's row.
+    let tasks = client
+        .list_tasks_for_projects(selected_project_ids)
+        .await?;
     let now = Utc::now().timestamp();
 
     let mut upserted = 0usize;
-    for project_id in selected_project_ids {
-        let Some(project) = projects.iter().find(|p| p.id == *project_id) else {
-            tracing::warn!(
-                "freelo: selected project {project_id} not found in /all-projects; skipping"
-            );
-            continue;
-        };
-        // Upsert the project itself so it can be looked up via parent_key /
-        // epic_key.
-        cache::issues::upsert(db, &project_to_issue_row(project, now))?;
-
-        let tasks = match client.list_tasks_for_project(*project_id).await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!(
-                    "freelo: list_tasks_for_project({project_id}) failed: {e}"
-                );
-                continue;
-            }
-        };
-        for t in &tasks {
-            cache::issues::upsert(db, &task_to_issue_row(t, project, now))?;
-            upserted += 1;
-        }
+    for t in &tasks {
+        cache::issues::upsert(db, &task_to_issue_row(t, now))?;
+        upserted += 1;
     }
     Ok(upserted)
 }
@@ -84,6 +74,7 @@ pub async fn sync_worklogs_for_range(
     user_id: i64,
     from: NaiveDate,
     to: NaiveDate,
+    project_ids: &[i64],
 ) -> Result<usize, FreeloSyncError> {
     if to < from {
         return Err(FreeloSyncError::InvalidRange(format!(
@@ -91,7 +82,9 @@ pub async fn sync_worklogs_for_range(
         )));
     }
 
-    let entries = client.list_work_reports(from, to, user_id).await?;
+    let entries = client
+        .list_work_reports(from, to, user_id, project_ids)
+        .await?;
     let mut upserted = 0usize;
     let mut seen_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
@@ -144,10 +137,18 @@ pub async fn sync_worklogs_for_range(
 /// reported date as `started_at` so the row sorts predictably; the UI knows
 /// to render the date without a clock time.
 pub fn work_report_to_row(w: &FreeloWorkReport) -> WorklogRow {
-    let started_at = NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d")
+    // Freelo `date_reported` is either an ISO 8601 timestamp with TZ
+    // ("2026-04-15T12:24:27+02:00") in the current API or a bare date
+    // ("2026-05-14") in older shapes. Try the richer parse first.
+    let started_at = chrono::DateTime::parse_from_rfc3339(&w.date_reported)
         .ok()
-        .and_then(|d| Utc.from_local_datetime(&d.and_hms_opt(0, 0, 0)?).single())
-        .map(|dt| dt.timestamp())
+        .map(|dt| dt.with_timezone(&Utc).timestamp())
+        .or_else(|| {
+            NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d")
+                .ok()
+                .and_then(|d| Utc.from_local_datetime(&d.and_hms_opt(0, 0, 0)?).single())
+                .map(|dt| dt.timestamp())
+        })
         .unwrap_or_else(|| Utc::now().timestamp());
 
     WorklogRow {
@@ -187,7 +188,7 @@ mod tests {
         };
         let row = work_report_to_row(&w);
         assert_eq!(row.duration_s, 900);
-        assert_eq!(row.issue_key, "FRL-99");
+        assert_eq!(row.issue_key, "FREELO-99");
         assert_eq!(row.jira_worklog_id.as_deref(), Some("freelo:1"));
         assert_eq!(row.author_account_id.as_deref(), Some("7"));
         assert_eq!(row.source, "jira");
