@@ -31,6 +31,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import {
   createManualWorklog,
+  discardTimer,
   hasConfig,
   refreshAll,
   refreshCache,
@@ -444,6 +445,18 @@ export function AppShell() {
           busy={timerBusy}
           onClose={() => setStopOpen(false)}
           onConfirm={handleStopConfirm}
+          onDiscard={async () => {
+            try {
+              await discardTimer();
+              setStopOpen(false);
+              pushToast("info", "Časomíra zahozena bez uložení.");
+            } catch (e) {
+              pushToast(
+                "error",
+                typeof e === "string" ? e : "Zahození časomíry selhalo.",
+              );
+            }
+          }}
         />
       )}
 

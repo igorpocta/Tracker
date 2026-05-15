@@ -299,6 +299,33 @@ pub async fn update_timer_start(
     Ok(res)
 }
 
+/// Discard the running timer WITHOUT creating any worklog (local or remote).
+///
+/// The original Trcker exposed this as a `discard_timer` Tauri command. Use
+/// cases:
+///   - User started a timer by mistake.
+///   - User worked on something unrelated and doesn't want to log it.
+///   - User picked the wrong issue and prefers to start fresh.
+///
+/// Returns `true` if a timer was actually cleared, `false` if there was
+/// nothing running. Emits `timer-discarded` so the UI (StartTrackingBar,
+/// popover, tray) can refetch state.
+#[tauri::command]
+pub async fn discard_timer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let had_timer = cache::timer::get(&state.db)
+        .map_err(|e| e.to_string())?
+        .is_some();
+    cache::timer::stop(&state.db).map_err(|e| e.to_string())?;
+    let _ = app.emit("timer-discarded", had_timer);
+    // Also emit timer-stopped so listeners that just watch for "any stop"
+    // (popover, tray) don't need to subscribe to a second event name.
+    let _ = app.emit::<Option<WorklogRow>>("timer-stopped", None);
+    Ok(had_timer)
+}
+
 /// Stop the running timer, push the elapsed duration to Jira (if a client is
 /// configured), then record a row in `recent_worklogs`.
 ///

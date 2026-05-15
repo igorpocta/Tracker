@@ -135,6 +135,16 @@ export function updateTimerStart(startedAtMs: number): Promise<ActiveTimerState>
   });
 }
 
+/**
+ * `discard_timer(): bool` — completely cancels the running timer without
+ * creating any worklog. Returns `true` if a timer was cleared, `false` if
+ * none was running. Emits `timer-discarded` + `timer-stopped` so all
+ * surfaces (popover, tray) refresh.
+ */
+export function discardTimer(): Promise<boolean> {
+  return invoke<boolean>("discard_timer");
+}
+
 // -----------------------------------------------------------------------------
 // Issues
 // -----------------------------------------------------------------------------

@@ -36,7 +36,9 @@ pub use prefs::{
     get_daily_goal, get_density, get_font_size, get_hourly_rate, get_theme, set_app_icon,
     set_daily_goal, set_density, set_font_size, set_hourly_rate, set_theme, set_widget_format,
 };
-pub use timer::{get_timer_state, start_timer, stop_timer_inner, update_timer_start};
+pub use timer::{
+    discard_timer, get_timer_state, start_timer, stop_timer_inner, update_timer_start,
+};
 pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
 pub use worklog::{
     create_manual_worklog, delete_worklog, get_audit_log, get_worklog_issues,

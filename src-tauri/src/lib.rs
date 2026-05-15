@@ -288,6 +288,7 @@ pub fn run() {
             commands::timer::get_timer_state,
             commands::timer::start_timer,
             commands::timer::stop_timer_inner,
+            commands::timer::discard_timer,
             commands::timer::update_timer_start,
             commands::timer::update_timer_comment,
             commands::timer::assign_active_timer,

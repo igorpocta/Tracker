@@ -25,6 +25,12 @@ export interface StopDialogProps {
     comment: string;
     startedAtMs: number | null;
   }) => Promise<void>;
+  /**
+   * Called when the user wants to throw the timer away without saving any
+   * worklog (neither locally nor remotely). Consumer should invoke
+   * `discardTimer()` from the api wrappers.
+   */
+  onDiscard?: () => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -33,6 +39,7 @@ export function StopDialog({
   active,
   busy = false,
   onConfirm,
+  onDiscard,
   onClose,
 }: StopDialogProps) {
   const [comment, setComment] = useState("");
@@ -108,14 +115,38 @@ export function StopDialog({
 
         <CommentInput value={comment} onChange={setComment} disabled={busy} />
 
-        <footer className="flex items-center justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Zrušit
-          </Button>
-          <Button variant="primary" onClick={handleConfirm} disabled={busy}>
-            {busy && <Spinner className="w-3.5 h-3.5" />}
-            Zastavit a uložit
-          </Button>
+        <footer className="flex items-center justify-between gap-2 pt-1">
+          {onDiscard ? (
+            <button
+              type="button"
+              onClick={async () => {
+                if (busy) return;
+                if (
+                  !window.confirm(
+                    "Opravdu zahodit záznam? Časomíra bude zrušena a žádný worklog se neuloží.",
+                  )
+                ) {
+                  return;
+                }
+                await onDiscard();
+              }}
+              disabled={busy}
+              className="text-xs text-[var(--danger)] hover:underline underline-offset-2 disabled:opacity-50"
+            >
+              Zahodit záznam
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>
+              Zavřít
+            </Button>
+            <Button variant="primary" onClick={handleConfirm} disabled={busy}>
+              {busy && <Spinner className="w-3.5 h-3.5" />}
+              Zastavit a uložit
+            </Button>
+          </div>
         </footer>
       </div>
     </div>
