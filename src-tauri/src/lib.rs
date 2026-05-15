@@ -390,6 +390,7 @@ pub fn run() {
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,
             commands::browser::get_extension_last_heartbeat,
+            commands::browser::get_browser_bridge_token,
             // Tray
             commands::tray::show_tray_popover,
             commands::tray::hide_tray_popover,

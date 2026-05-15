@@ -26,11 +26,13 @@
 //! "nested runtime" panics.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{Request, State},
+    http::{header, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -48,6 +50,85 @@ use crate::state::AppState;
 /// Port the local HTTP server binds to. Hard-coded for now — the future
 /// extension is expected to dial the same port.
 pub const SERVER_PORT: u16 = 27420;
+
+/// File name (under `appDataDir`) where the per-install bearer token for
+/// the local HTTP server is stored. Generated on first launch.
+const BRIDGE_TOKEN_FILE: &str = "browser-bridge-token";
+
+/// Load the persisted bearer token, generating + writing a fresh UUID v4
+/// the first time. Stored as plain text in `appDataDir` with `0600` on
+/// Unix so other local users can't read it.
+///
+/// **Why a shared secret at all.** The server binds on loopback, but
+/// "loopback" doesn't mean "only my code" — every web page the user has
+/// open in any browser also runs on the same machine and can issue
+/// `fetch("http://127.0.0.1:27420/...")`. Pre-fix the router was
+/// unprotected AND used `CorsLayer::permissive()`, so any page could
+/// read the configured Jira host + email and start/stop the timer for
+/// any issue key. The bearer token blocks that — only software that
+/// has been explicitly handed the token (i.e. the user pasted it into
+/// their browser extension's settings) can hit the endpoints.
+pub fn load_or_create_bridge_token(app_data_dir: &Path) -> std::io::Result<String> {
+    let path = app_data_dir.join(BRIDGE_TOKEN_FILE);
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let trimmed = existing.trim().to_string();
+        if !trimmed.is_empty() {
+            return Ok(trimmed);
+        }
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    std::fs::create_dir_all(app_data_dir).ok();
+    std::fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = std::fs::set_permissions(&path, perms);
+    }
+    Ok(token)
+}
+
+/// Constant-time string compare. Avoids leaking the matched prefix length
+/// via timing — irrelevant on localhost in practice, but cheap insurance
+/// and keeps reviewers happy.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Axum middleware that requires `Authorization: Bearer <token>` on every
+/// request. The expected token is captured into the middleware closure
+/// when the router is built so each request doesn't re-read it from disk.
+///
+/// Responses are intentionally terse (`401` with empty body) — no leaking
+/// of "did the token even have the right shape" details.
+async fn require_bearer(
+    State(expected): State<Arc<String>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let header_value = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+    let provided = match header_value {
+        Some(v) => v
+            .strip_prefix("Bearer ")
+            .or_else(|| v.strip_prefix("bearer "))
+            .unwrap_or(""),
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+    if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(next.run(req).await)
+}
 
 /// Shared state passed to every axum handler.
 ///
@@ -114,18 +195,62 @@ pub fn start(app: AppHandle) {
     let server_state: ServerState<tauri::Wry> = ServerState::new(app.clone());
     let router_state = server_state.clone();
 
+    // Load (or generate) the bearer token from `appDataDir`. Failure here is
+    // logged but non-fatal: we'd rather see the desktop UI run and the
+    // bridge disabled than abort startup. Without a token the server can't
+    // come up safely, so we just skip the spawn.
+    let app_data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("local HTTP server: app data dir unavailable, bridge disabled: {e}");
+            app.manage(server_state);
+            return;
+        }
+    };
+    let token = match load_or_create_bridge_token(&app_data_dir) {
+        Ok(t) => Arc::new(t),
+        Err(e) => {
+            tracing::warn!("local HTTP server: bridge token init failed, bridge disabled: {e}");
+            app.manage(server_state);
+            return;
+        }
+    };
+    app.manage(BrowserBridgeToken(token.clone()));
+
     // Park the server state where other parts of the codebase can grab it.
     app.manage(server_state);
 
     std::thread::Builder::new()
         .name("tracker-http".into())
-        .spawn(move || run_server(router_state))
+        .spawn(move || run_server(router_state, token))
         .expect("spawn local HTTP server thread");
+}
+
+/// Newtype wrapper so the bearer token can be `manage()`d into the Tauri
+/// state map without colliding with other `Arc<String>` consumers.
+pub struct BrowserBridgeToken(pub Arc<String>);
+
+impl BrowserBridgeToken {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Build the axum router. Exposed separately from [`run_server`] so
 /// integration tests can call handlers without binding to a port.
-pub fn build_router<R: Runtime>(state: ServerState<R>) -> Router {
+///
+/// `bearer_token` is the per-install secret callers must present as
+/// `Authorization: Bearer <token>`. Every route — including `/status`
+/// — is gated behind it: even probing for the server's existence
+/// requires the token, so a hostile web page can't enumerate
+/// background heartbeats.
+///
+/// The `CorsLayer::permissive()` of the pre-fix version is gone on
+/// purpose. Without an explicit CORS allow-list, browsers refuse the
+/// cross-origin preflight, so an arbitrary web tab cannot reach these
+/// endpoints (browser extensions with `host_permissions` bypass CORS
+/// and CAN — that's the intended consumer).
+pub fn build_router<R: Runtime>(state: ServerState<R>, bearer_token: Arc<String>) -> Router {
     Router::new()
         .route("/status", get(status_handler::<R>))
         .route("/jira-host", get(jira_host_handler::<R>))
@@ -135,11 +260,11 @@ pub fn build_router<R: Runtime>(state: ServerState<R>) -> Router {
         .route("/visible-ticket", post(post_visible_ticket_handler::<R>))
         .route("/start-timer", post(start_timer_handler::<R>))
         .route("/stop-timer", post(stop_timer_handler::<R>))
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .route_layer(middleware::from_fn_with_state(bearer_token, require_bearer))
         .with_state(state)
 }
 
-fn run_server(state: ServerState<tauri::Wry>) {
+fn run_server(state: ServerState<tauri::Wry>, bearer_token: Arc<String>) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -152,7 +277,7 @@ fn run_server(state: ServerState<tauri::Wry>) {
     };
 
     rt.block_on(async move {
-        let app = build_router(state);
+        let app = build_router(state, bearer_token);
         let addr: SocketAddr = ([127, 0, 0, 1], SERVER_PORT).into();
         match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => {

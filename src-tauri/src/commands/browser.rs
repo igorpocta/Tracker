@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::server::ServerState;
+use crate::server::{BrowserBridgeToken, ServerState};
 
 /// Description of a Jira ticket currently visible in the user's browser.
 /// Returned by [`get_current_visible_ticket`].
@@ -57,4 +57,19 @@ pub async fn get_extension_last_heartbeat(
         .last_heartbeat
         .read()
         .expect("WidgetState.last_heartbeat RwLock poisoned"))
+}
+
+/// Return the per-install bearer token the user must paste into their
+/// browser extension's settings so the extension can reach the local
+/// HTTP bridge. The token is generated once on first launch and persisted
+/// in `appDataDir/browser-bridge-token` (Unix `0600`).
+///
+/// Exposed deliberately as an opt-in command so the FE settings panel
+/// can show "Copy bridge token" — no other surface should leak this
+/// value (no event broadcast, no logs).
+#[tauri::command]
+pub async fn get_browser_bridge_token(
+    token: tauri::State<'_, BrowserBridgeToken>,
+) -> Result<String, String> {
+    Ok(token.as_str().to_string())
 }

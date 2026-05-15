@@ -11,8 +11,11 @@
 //! 2. Full-router tests that build a real `ServerState` (with a Tauri
 //!    `MockRuntime` AppHandle) and exercise each endpoint end-to-end.
 
+use std::sync::Arc;
+
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::Router;
 use serde_json::{json, Value};
 use tauri::Manager;
 use tempfile::TempDir;
@@ -23,6 +26,35 @@ use tracker_lib::commands::timer::start_timer_inner;
 use tracker_lib::config::JiraConfig;
 use tracker_lib::server::{build_router, status_body, ServerState};
 use tracker_lib::state::AppState;
+
+/// Shared token used by every authed request below. Real installs use a
+/// fresh UUID v4 generated on first launch; tests pin a deterministic
+/// value so the helper can stamp it into the `Authorization` header.
+const TEST_BEARER: &str = "test-bearer-token-aaaa-bbbb-cccc";
+
+fn build_test_router(state: ServerState<tauri::test::MockRuntime>) -> Router {
+    build_router(state, Arc::new(TEST_BEARER.to_string()))
+}
+
+/// Builds a `GET <uri>` request with the test bearer token attached.
+fn authed_get(uri: &str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .header("authorization", format!("Bearer {TEST_BEARER}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// Builds a `POST <uri>` request with bearer + JSON body.
+fn authed_post(uri: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("authorization", format!("Bearer {TEST_BEARER}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
 
 /// Construct a fresh `(AppHandle, ServerState, Db reference)` triple that
 /// tests can use. The `TempDir` is returned so the caller can keep it alive
@@ -71,19 +103,11 @@ fn status_body_reports_ok_and_version() {
 async fn status_endpoint_returns_ok_and_bumps_heartbeat() {
     let (app, _dir) = fresh_state();
     let state = fresh_server_state(&app);
-    let router = build_router(state.clone());
+    let router = build_test_router(state.clone());
 
     assert!(state.last_heartbeat.read().unwrap().is_none());
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/status")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/status")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
@@ -97,17 +121,9 @@ async fn status_endpoint_returns_ok_and_bumps_heartbeat() {
 async fn jira_host_returns_404_when_not_configured() {
     let (app, _dir) = fresh_state();
     let state = fresh_server_state(&app);
-    let router = build_router(state);
+    let router = build_test_router(state);
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/jira-host")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/jira-host")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
@@ -122,17 +138,9 @@ async fn jira_host_returns_config_when_present() {
     });
 
     let state = fresh_server_state(&app);
-    let router = build_router(state);
+    let router = build_test_router(state);
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/jira-host")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/jira-host")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
@@ -144,17 +152,9 @@ async fn jira_host_returns_config_when_present() {
 async fn timer_state_is_null_when_no_active_timer() {
     let (app, _dir) = fresh_state();
     let state = fresh_server_state(&app);
-    let router = build_router(state);
+    let router = build_test_router(state);
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/timer-state")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/timer-state")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
@@ -170,17 +170,9 @@ async fn timer_state_returns_running_timer() {
     }
 
     let state = fresh_server_state(&app);
-    let router = build_router(state);
+    let router = build_test_router(state);
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/timer-state")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/timer-state")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
@@ -196,17 +188,9 @@ async fn active_ticket_returns_issue_key() {
     }
 
     let state = fresh_server_state(&app);
-    let router = build_router(state);
+    let router = build_test_router(state);
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/active-ticket")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = router.oneshot(authed_get("/active-ticket")).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
@@ -217,24 +201,15 @@ async fn active_ticket_returns_issue_key() {
 async fn start_then_stop_timer_flow() {
     let (app, _dir) = fresh_state();
     let state = fresh_server_state(&app);
-    let router = build_router(state.clone());
+    let router = build_test_router(state.clone());
 
     // 1. POST /start-timer
-    let start_req = serde_json::to_vec(&json!({
-        "issue_key": "ACME-42",
-        "started_at_ms": 100_000,
-    }))
-    .unwrap();
     let response = router
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/start-timer")
-                .header("content-type", "application/json")
-                .body(Body::from(start_req))
-                .unwrap(),
-        )
+        .oneshot(authed_post(
+            "/start-timer",
+            json!({ "issue_key": "ACME-42", "started_at_ms": 100_000 }),
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -247,14 +222,7 @@ async fn start_then_stop_timer_flow() {
 
     // 2. POST /stop-timer
     let response = router
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/stop-timer")
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
+        .oneshot(authed_post("/stop-timer", json!({})))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -265,47 +233,15 @@ async fn start_then_stop_timer_flow() {
 }
 
 #[tokio::test]
-async fn cors_headers_are_permissive() {
-    let (app, _dir) = fresh_state();
-    let state = fresh_server_state(&app);
-    let router = build_router(state);
-
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/status")
-                .header("origin", "chrome-extension://abcdef")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let cors = response
-        .headers()
-        .get("access-control-allow-origin")
-        .expect("CORS header present");
-    // tower-http's permissive layer reflects the origin or returns "*".
-    assert!(cors == "*" || cors == "chrome-extension://abcdef");
-}
-
-#[tokio::test]
 async fn visible_ticket_round_trip() {
     let (app, _dir) = fresh_state();
     let state = fresh_server_state(&app);
-    let router = build_router(state.clone());
+    let router = build_test_router(state.clone());
 
     // Initially empty.
     let response = router
         .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/visible-ticket")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(authed_get("/visible-ticket"))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -313,38 +249,140 @@ async fn visible_ticket_round_trip() {
     assert!(body.is_null());
 
     // Now POST one.
-    let payload = serde_json::to_vec(&json!({
-        "issue_key": "ACME-1",
-        "summary": "Investigate widget",
-        "url": "https://acme.atlassian.net/browse/ACME-1",
-        "seen_at": null
-    }))
-    .unwrap();
     let response = router
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/visible-ticket")
-                .header("content-type", "application/json")
-                .body(Body::from(payload))
-                .unwrap(),
-        )
+        .oneshot(authed_post(
+            "/visible-ticket",
+            json!({
+                "issue_key": "ACME-1",
+                "summary": "Investigate widget",
+                "url": "https://acme.atlassian.net/browse/ACME-1",
+                "seen_at": null
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
     // And read it back.
+    let response = router.oneshot(authed_get("/visible-ticket")).await.unwrap();
+    let body = body_json(response).await;
+    assert_eq!(body["issue_key"], "ACME-1");
+    assert!(body["seen_at"].is_i64());
+}
+
+// -----------------------------------------------------------------------------
+// Bearer-token guard tests — these are the regression pins for the
+// "any web page can hit 127.0.0.1:27420" class of bug.
+// -----------------------------------------------------------------------------
+
+/// Every protected endpoint must reject requests without an Authorization
+/// header. Pre-fix, all of these were reachable from any browser tab.
+#[tokio::test]
+async fn endpoints_require_bearer_token() {
+    let (app, _dir) = fresh_state();
+    let state = fresh_server_state(&app);
+    let router = build_test_router(state.clone());
+
+    for uri in [
+        "/status",
+        "/jira-host",
+        "/active-ticket",
+        "/timer-state",
+        "/visible-ticket",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "GET {uri} without Authorization should be 401"
+        );
+    }
+
+    // And the POST mutators.
+    for (uri, body) in [
+        ("/start-timer", json!({ "issue_key": "ACME-1" })),
+        ("/stop-timer", json!({})),
+        (
+            "/visible-ticket",
+            json!({ "issue_key": "ACME-1", "summary": null, "url": null, "seen_at": null }),
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "POST {uri} without Authorization should be 401"
+        );
+    }
+}
+
+/// A bearer header with the wrong value must also fail — defends against
+/// a hostile script bruteforcing or guessing prefixes.
+#[tokio::test]
+async fn wrong_bearer_token_is_rejected() {
+    let (app, _dir) = fresh_state();
+    let state = fresh_server_state(&app);
+    let router = build_test_router(state);
+
     let response = router
         .oneshot(
             Request::builder()
-                .uri("/visible-ticket")
+                .uri("/status")
+                .header("authorization", "Bearer not-the-right-token")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    let body = body_json(response).await;
-    assert_eq!(body["issue_key"], "ACME-1");
-    assert!(body["seen_at"].is_i64());
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// Pre-fix this assertion checked for the permissive `Access-Control-
+/// Allow-Origin: *`. That layer is gone on purpose — without an
+/// allow-origin response header, the browser refuses the cross-origin
+/// fetch from a regular web tab. We assert ABSENCE of the header here
+/// so a future revert of the CorsLayer would fail loudly.
+#[tokio::test]
+async fn no_permissive_cors_header_on_responses() {
+    let (app, _dir) = fresh_state();
+    let state = fresh_server_state(&app);
+    let router = build_test_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/status")
+                .header("authorization", format!("Bearer {TEST_BEARER}"))
+                .header("origin", "https://attacker.example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none(),
+        "Access-Control-Allow-Origin must not leak; got: {:?}",
+        response.headers().get("access-control-allow-origin")
+    );
 }
