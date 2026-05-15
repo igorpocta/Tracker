@@ -345,7 +345,15 @@ export function AppShell() {
     <div
       className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
     >
-      {IS_MAC && <DragStrip />}
+      {/*
+       * macOS title bar drag is handled NATIVELY now — the window uses
+       * `titleBarStyle: "Transparent"` (see tauri.conf.json) which keeps the
+       * OS title bar present (but visually invisible — our `--bg-app`
+       * shows through) and continues to receive drag events. No custom
+       * drag region needed; clicking-and-dragging in the top 28px works
+       * because that area IS the OS title bar. The `pt-7` on the root
+       * pushes our content below the traffic lights.
+       */}
       <div className="flex-1 min-h-0 flex">
         <IconSidebar />
 
@@ -451,64 +459,3 @@ export function AppShell() {
   );
 }
 
-/**
- * macOS Overlay title-bar drag strip.
- *
- * Why not just `data-tauri-drag-region`? In Tauri 2 + React the attribute
- * mostly works, but in practice we saw flaky behaviour ("1 in 20 tries").
- * Tauri's bootstrap script scans the DOM for the attribute on document.load,
- * but if React re-renders the strip (new element identity), the handler can
- * miss. The robust fix is to call `Window.startDragging()` ourselves from a
- * React `onMouseDown` handler — that bypasses every detection path.
- *
- * Double-click toggles maximize/restore (macOS title-bar convention).
- *
- * Width-of-window strip, 32px tall, anchored to viewport. Traffic-light
- * clicks are intercepted by the OS *outside* the webview, so our strip
- * doesn't compete with them.
- */
-function DragStrip() {
-  const onMouseDown = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
-    // Only react to the primary (left) button — secondary/middle buttons can
-    // do their own thing.
-    if (e.button !== 0) return;
-    // Avoid hijacking if the user clicked an interactive descendant (defensive
-    // — the strip has none, but future-proofing).
-    if ((e.target as HTMLElement).closest("button, a, input, textarea, select"))
-      return;
-    e.preventDefault();
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().startDragging();
-    } catch {
-      /* outside Tauri (vitest, devtools standalone) — no-op */
-    }
-  }, []);
-
-  const onDoubleClick = useCallback(async () => {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().toggleMaximize();
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  return (
-    <div
-      aria-hidden
-      onMouseDown={onMouseDown}
-      onDoubleClick={onDoubleClick}
-      className="fixed top-0 left-0 right-0 h-8 z-[9999]"
-      // Belt-and-braces: also expose the canonical Tauri attribute + CSS
-      // property in case the imperative path ever regresses.
-      data-tauri-drag-region
-      style={
-        {
-          WebkitAppRegion: "drag",
-          appRegion: "drag",
-        } as React.CSSProperties
-      }
-    />
-  );
-}
