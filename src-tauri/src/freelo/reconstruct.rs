@@ -12,9 +12,10 @@ use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
 use super::ops::{ms_to_date, seconds_to_minutes};
+use crate::audit_helpers;
 use crate::cache::{
     self,
-    audit::{record as audit_record, AuditEntry, AuditEvent, AuditOp},
+    audit::{AuditEntry, AuditOp},
     worklogs::WorklogRow,
     Db, DbError,
 };
@@ -46,11 +47,11 @@ pub enum ReconstructError {
 }
 
 fn parse_row(json: &str) -> Result<WorklogRow, ReconstructError> {
-    serde_json::from_str::<WorklogRow>(json).map_err(Into::into)
+    audit_helpers::parse_row(json)
 }
 
 fn now_unix() -> i64 {
-    Utc::now().timestamp()
+    audit_helpers::now_unix()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,19 +66,16 @@ fn record_linked(
     error: Option<&str>,
     source_audit_id: i64,
 ) {
-    let _ = audit_record(
+    audit_helpers::record_linked(
         db,
-        AuditEvent {
-            occurred_at: now_unix(),
-            op,
-            issue_key,
-            worklog_id,
-            before,
-            after,
-            success,
-            error,
-            source_audit_id: Some(source_audit_id),
-        },
+        op,
+        issue_key,
+        worklog_id,
+        before,
+        after,
+        success,
+        error,
+        source_audit_id,
     );
 }
 

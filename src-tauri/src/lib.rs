@@ -1,4 +1,5 @@
 pub mod app_icon;
+pub mod audit_helpers;
 pub mod cache;
 pub mod commands;
 pub mod config;
