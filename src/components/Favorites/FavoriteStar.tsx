@@ -17,7 +17,16 @@ import {
 
 export interface FavoriteStarProps {
   issueKey: string;
-  /** Optional override — when the parent already knows the state. */
+  /**
+   * Source-of-truth override. When provided, the component renders in
+   * "controlled" mode: it trusts the parent and does NOT issue its own
+   * `isFavorite` IPC call. The parent is expected to keep this value in
+   * sync (e.g. by reading from a `favorites` cache that gets invalidated
+   * on toggle — the StartTrackingBar dropdown does exactly that).
+   *
+   * When `undefined`, the component falls back to "uncontrolled" mode and
+   * runs a per-issue query against the backend.
+   */
   initial?: boolean;
   /** Optional size override (in px). Defaults to 14. */
   size?: number;
@@ -32,14 +41,21 @@ export function FavoriteStar({
   className,
 }: FavoriteStarProps) {
   const queryClient = useQueryClient();
+  // Controlled iff `initial` was explicitly passed. We rely on
+  // `initial === undefined` as the discriminator rather than a separate
+  // `controlled` boolean prop — the existing API already uses the
+  // presence/absence of `initial` to signal "parent owns the state".
+  // The query stays mounted with `enabled: false` so any future
+  // imperative `queryClient.setQueryData(["favorite", key], v)` from
+  // somewhere else in the tree still updates this component's view.
+  const isControlled = initial !== undefined;
   const q = useQuery({
     queryKey: ["favorite", issueKey],
     queryFn: () => isFavoriteCmd(issueKey),
-    initialData: initial,
     staleTime: 60_000,
-    enabled: issueKey.length > 0,
+    enabled: !isControlled && issueKey.length > 0,
   });
-  const isFav = q.data ?? false;
+  const isFav = isControlled ? initial : (q.data ?? false);
 
   const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
