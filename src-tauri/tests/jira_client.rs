@@ -1,6 +1,7 @@
 use chrono::{TimeZone, Utc};
 use serde_json::{json, Value};
 use tempfile::TempDir;
+use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
 use tracker_lib::cache::Db;
 use tracker_lib::jira::{
     adf::{extract_adf_text, make_adf_comment},
@@ -19,6 +20,38 @@ async fn server_and_client() -> (MockServer, JiraClient) {
     let client =
         JiraClient::new(server.uri(), EMAIL.to_string(), TOKEN.to_string()).expect("client builds");
     (server, client)
+}
+
+/// Insert a Jira connection row matching the wiremock server. Returns its id.
+/// Every test that touches `issues_v2` or `worklogs` needs one (the FK
+/// constraint added in the v2 migration would otherwise reject the upsert).
+fn seed_jira_connection(db: &Db, base_url: &str) -> i64 {
+    let config = format!(r#"{{"base_url":"{}","email":"{}"}}"#, base_url, EMAIL);
+    insert_conn(
+        db,
+        NewConnection {
+            provider: "jira",
+            name: "test",
+            enabled: true,
+            config_json: &config,
+        },
+    )
+    .expect("seed connection")
+}
+
+/// Mount `GET /rest/api/3/myself` for the worklog-sync round-trip. The
+/// provider-neutral sync derives the user from `client.myself()` instead of
+/// taking an account id parameter.
+async fn mount_myself(server: &MockServer, account_id: &str) {
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "accountId": account_id,
+            "emailAddress": EMAIL,
+            "displayName": "Alice",
+        })))
+        .mount(server)
+        .await;
 }
 
 // ---------- myself ----------
@@ -420,24 +453,23 @@ fn map_issue_to_row_populates_core_fields() {
         }
     }"#;
     let issue: JiraIssue = serde_json::from_str(raw).unwrap();
-    let row = map_issue_to_row(&issue);
+    let row = map_issue_to_row(&issue, /*connection_id*/ 1, /*now*/ 0);
 
     assert_eq!(row.issue_key, "ABC-1");
-    assert_eq!(row.issue_id.as_deref(), Some("10001"));
-    assert_eq!(row.summary, "Fix login bug");
-    assert_eq!(row.status_category.as_deref(), Some("indeterminate"));
-    assert_eq!(row.priority_order, Some(2));
-    assert_eq!(row.assignee_email.as_deref(), Some("alice@example.com"));
-    assert_eq!(row.assignee_account_id.as_deref(), Some("abc123"));
+    assert_eq!(row.issue_id, "10001");
+    // The provider-neutral `IssueRow` keeps `name` (summary) and a few
+    // structural fields; status_category/assignee/priority/issue_type/
+    // epic_key/time_* are no longer cached server-side. They live on the
+    // raw Jira blob only.
+    assert_eq!(row.name, "Fix login bug");
     assert_eq!(row.parent_key.as_deref(), Some("EPIC-1"));
-    assert_eq!(row.parent_summary.as_deref(), Some("Auth Epic"));
-    assert_eq!(row.issue_type.as_deref(), Some("Bug"));
-    assert_eq!(row.time_spent, Some(3600));
-    assert_eq!(row.time_original_estimate, Some(7200));
-    assert_eq!(row.time_estimate, Some(1800));
-    assert_eq!(row.epic_key.as_deref(), Some("EPIC-1"));
+    assert_eq!(row.parent_name.as_deref(), Some("Auth Epic"));
+    // `status` now collapses to a single human-readable string.
+    assert_eq!(row.status.as_deref(), Some("In Progress"));
+    // Status category "indeterminate" is not "done", so not archived.
+    assert!(!row.is_archived);
     // 2026-05-14 09:30:00 UTC
-    assert_eq!(row.updated_at, 1778751000);
+    assert_eq!(row.remote_updated_at, Some(1778751000));
 }
 
 #[test]
@@ -451,40 +483,37 @@ fn map_issue_to_row_handles_missing_optional_fields() {
         }
     }"#;
     let issue: JiraIssue = serde_json::from_str(raw).unwrap();
-    let row = map_issue_to_row(&issue);
+    let row = map_issue_to_row(&issue, 1, 0);
 
     assert_eq!(row.issue_key, "MIN-1");
-    assert_eq!(row.summary, "Bare bones");
-    assert!(row.status_category.is_none());
-    assert!(row.priority_order.is_none());
-    assert!(row.assignee_email.is_none());
-    assert!(row.assignee_account_id.is_none());
+    assert_eq!(row.name, "Bare bones");
+    assert!(row.status.is_none());
     assert!(row.parent_key.is_none());
-    assert!(row.parent_summary.is_none());
-    assert!(row.issue_type.is_none());
-    assert!(row.time_spent.is_none());
-    assert!(row.time_original_estimate.is_none());
-    assert!(row.time_estimate.is_none());
-    assert!(row.epic_key.is_none());
-    assert_eq!(row.updated_at, 1767225600);
+    assert!(row.parent_name.is_none());
+    assert!(!row.is_archived);
+    assert_eq!(row.remote_updated_at, Some(1767225600));
 }
 
 #[test]
-fn map_issue_to_row_unparseable_updated_falls_back_to_zero() {
+fn map_issue_to_row_unparseable_updated_falls_back_to_none() {
+    // Previously the test asserted `updated_at == 0`; the new schema separates
+    // wall-clock `updated_at` (filled by the caller) from `remote_updated_at`
+    // (parsed from the payload). Unparseable timestamps now yield `None` on
+    // the remote-side field rather than collapsing to 0.
     let raw = r#"{ "id": "1", "key": "X-1", "fields": { "summary": "x", "updated": "garbage" } }"#;
     let issue: JiraIssue = serde_json::from_str(raw).unwrap();
-    let row = map_issue_to_row(&issue);
-    assert_eq!(row.updated_at, 0);
+    let row = map_issue_to_row(&issue, 1, 0);
+    assert_eq!(row.remote_updated_at, None);
 }
 
 // ---------- JQL constant + helpers ----------
 
 #[test]
 fn default_jql_matches_plan() {
-    // Phase 14: the sync no longer applies any restrictive WHERE clause; we
-    // pull "everything visible, most-recently-updated first" and let the
-    // pagination caps in `mod.rs` bound the total volume.
-    assert_eq!(DEFAULT_JQL, r#"ORDER BY updated DESC"#);
+    // The provider-neutral sync added a `project IS NOT EMPTY` guard so the
+    // search endpoint always evaluates a project predicate (otherwise some
+    // Jira Cloud instances reject the request as "ambiguous").
+    assert_eq!(DEFAULT_JQL, r#"project IS NOT EMPTY ORDER BY updated DESC"#);
 }
 
 #[test]
@@ -531,18 +560,21 @@ async fn sync_issues_from_jira_walks_two_pages_into_sqlite() {
 
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("sync.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, &server.uri());
 
-    let total = sync_issues_from_jira(&client, &db).await.expect("sync");
+    let total = sync_issues_from_jira(&client, &db, conn_id)
+        .await
+        .expect("sync");
     assert_eq!(total, 3);
 
     let got = tracker_lib::cache::issues::get_by_key(&db, "P-10")
         .unwrap()
         .unwrap();
-    assert_eq!(got.summary, "Page1 first");
+    assert_eq!(got.name, "Page1 first");
     let got = tracker_lib::cache::issues::get_by_key(&db, "P-20")
         .unwrap()
         .unwrap();
-    assert_eq!(got.summary, "Page2 first");
+    assert_eq!(got.name, "Page2 first");
 }
 
 // ---------- Phase 11A: ADF text extraction ----------
@@ -746,6 +778,7 @@ async fn sync_worklogs_for_range_filters_by_user_and_range() {
     use tracker_lib::jira::worklog_sync::sync_worklogs_for_range;
 
     let (server, client) = server_and_client().await;
+    mount_myself(&server, "me-acc").await;
 
     // JQL search returns one issue.
     Mock::given(method("POST"))
@@ -814,23 +847,28 @@ async fn sync_worklogs_for_range_filters_by_user_and_range() {
 
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("sync.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, &server.uri());
 
     let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
     let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    let count = sync_worklogs_for_range(&client, &db, "me-acc", from, to)
+    let count = sync_worklogs_for_range(&client, &db, conn_id, from, to)
         .await
         .expect("sync ok");
     assert_eq!(count, 1, "exactly one entry should match");
 
     // Verify the surviving worklog landed in the DB with the right shape.
-    let rows =
-        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc")).unwrap();
+    // The provider-neutral schema dropped the account-id filter from
+    // for_date_range — it's now implicit per-connection.
+    let rows = tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX).unwrap();
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
-    assert_eq!(row.jira_worklog_id.as_deref(), Some("5001"));
-    assert_eq!(row.duration_s, 1800);
-    assert_eq!(row.source, "jira");
-    assert_eq!(row.comment.as_deref(), Some("real work"));
+    assert_eq!(row.remote_id.as_deref(), Some("5001"));
+    assert_eq!(row.duration_s(), 1800);
+    // `source` no longer exists as a field — it's derived from `is_synced`
+    // during serialization. Asserting `is_synced` instead expresses the
+    // same intent (came from a successful Jira fetch).
+    assert!(row.is_synced);
+    assert_eq!(row.description.as_deref(), Some("real work"));
 }
 
 // ---------- Phase 15: mark-and-sweep ----------
@@ -838,56 +876,50 @@ async fn sync_worklogs_for_range_filters_by_user_and_range() {
 #[tokio::test]
 async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
     use chrono::NaiveDate;
-    use tracker_lib::cache::worklogs::{upsert_from_jira, WorklogRow};
+    use tracker_lib::cache::worklogs::{upsert_from_remote, WorklogRow};
     use tracker_lib::jira::worklog_sync::sync_worklogs_for_range;
 
     let (server, client) = server_and_client().await;
+    mount_myself(&server, "me-acc").await;
 
     // Pre-seed two existing rows for the same date range. Only "5001" comes
     // back from Jira this pass; "5002" should be tombstoned by the sweep.
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("sweep.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, &server.uri());
 
     let in_range_ts = 1778751000_i64; // 2026-05-14 09:30 UTC
-    upsert_from_jira(
+    upsert_from_remote(
         &db,
         &WorklogRow {
-            id: None,
-            issue_key: "ACME-1".into(),
-            issue_id: Some("10001".into()),
-            summary: Some("S".into()),
-            duration_s: 1800,
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-1".into()),
+            description: None,
             started_at: in_range_ts,
+            ended_at: in_range_ts + 1800,
             logged_at: in_range_ts,
-            comment: None,
-            jira_worklog_id: Some("5001".into()),
-            author_account_id: Some("me-acc".into()),
-            source: "jira".into(),
-            updated_at_jira: Some(in_range_ts),
-            pending_delete_at: None,
-            tombstoned_at: None,
-            pending_assignment: false,
+            updated_at: in_range_ts,
+            is_synced: true,
+            synced_at: Some(in_range_ts),
+            remote_id: Some("5001".into()),
+            ..Default::default()
         },
     )
     .unwrap();
-    upsert_from_jira(
+    upsert_from_remote(
         &db,
         &WorklogRow {
-            id: None,
-            issue_key: "ACME-1".into(),
-            issue_id: Some("10001".into()),
-            summary: Some("S".into()),
-            duration_s: 600,
+            connection_id: Some(conn_id),
+            issue_key: Some("ACME-1".into()),
+            description: None,
             started_at: in_range_ts + 60,
+            ended_at: in_range_ts + 60 + 600,
             logged_at: in_range_ts + 60,
-            comment: None,
-            jira_worklog_id: Some("5002".into()),
-            author_account_id: Some("me-acc".into()),
-            source: "jira".into(),
-            updated_at_jira: Some(in_range_ts + 60),
-            pending_delete_at: None,
-            tombstoned_at: None,
-            pending_assignment: false,
+            updated_at: in_range_ts + 60,
+            is_synced: true,
+            synced_at: Some(in_range_ts + 60),
+            remote_id: Some("5002".into()),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -926,31 +958,26 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
 
     let from = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
     let to = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
-    sync_worklogs_for_range(&client, &db, "me-acc", from, to)
+    sync_worklogs_for_range(&client, &db, conn_id, from, to)
         .await
         .expect("ok");
 
     // Default query should now show only 5001 (5002 is tombstoned).
-    let rows =
-        tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX, Some("me-acc")).unwrap();
+    let rows = tracker_lib::cache::worklogs::for_date_range(&db, 0, i64::MAX).unwrap();
     let ids: Vec<&str> = rows
         .iter()
-        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .map(|r| r.remote_id.as_deref().unwrap_or(""))
         .collect();
     assert_eq!(ids, vec!["5001"]);
 
     // …but the diagnostic query includes the tombstoned row.
-    let with_tomb = tracker_lib::cache::worklogs::for_date_range_including_tombstoned(
-        &db,
-        0,
-        i64::MAX,
-        Some("me-acc"),
-    )
-    .unwrap();
+    let with_tomb =
+        tracker_lib::cache::worklogs::for_date_range_including_tombstoned(&db, 0, i64::MAX)
+            .unwrap();
     assert_eq!(with_tomb.len(), 2);
     let tombstoned = with_tomb
         .iter()
-        .find(|r| r.jira_worklog_id.as_deref() == Some("5002"))
+        .find(|r| r.remote_id.as_deref() == Some("5002"))
         .expect("5002 row present");
     assert!(tombstoned.tombstoned_at.is_some());
 }
@@ -958,82 +985,94 @@ async fn sync_marks_deleted_remote_worklogs_as_tombstoned() {
 #[test]
 fn for_date_range_excludes_tombstoned() {
     use tracker_lib::cache::worklogs::{
-        for_date_range, for_date_range_including_tombstoned, mark_tombstoned_by_jira_id,
-        upsert_from_jira, WorklogRow,
+        for_date_range, for_date_range_including_tombstoned, mark_tombstoned_by_remote_id,
+        upsert_from_remote, WorklogRow,
     };
 
     let dir = TempDir::new().unwrap();
     let db = Db::open(&dir.path().join("excl.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, "http://example.invalid");
 
     let base = 1_700_000_000_i64;
-    for jid in ["a", "b", "c"] {
-        upsert_from_jira(
+    for rid in ["a", "b", "c"] {
+        upsert_from_remote(
             &db,
             &WorklogRow {
-                id: None,
-                issue_key: "K-1".into(),
-                duration_s: 600,
+                connection_id: Some(conn_id),
+                issue_key: Some("K-1".into()),
                 started_at: base,
+                ended_at: base + 600,
                 logged_at: base,
-                jira_worklog_id: Some(jid.into()),
-                author_account_id: Some("me".into()),
-                source: "jira".into(),
+                updated_at: base,
+                is_synced: true,
+                synced_at: Some(base),
+                remote_id: Some(rid.into()),
                 ..Default::default()
             },
         )
         .unwrap();
     }
-    mark_tombstoned_by_jira_id(&db, "b", base + 60).unwrap();
+    mark_tombstoned_by_remote_id(&db, conn_id, "b", base + 60).unwrap();
 
-    let default_rows = for_date_range(&db, 0, i64::MAX, Some("me")).unwrap();
+    let default_rows = for_date_range(&db, 0, i64::MAX).unwrap();
     let default_ids: Vec<&str> = default_rows
         .iter()
-        .map(|r| r.jira_worklog_id.as_deref().unwrap_or(""))
+        .map(|r| r.remote_id.as_deref().unwrap_or(""))
         .collect();
     assert_eq!(default_ids.len(), 2);
     assert!(!default_ids.contains(&"b"));
 
-    let all_rows = for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
+    let all_rows = for_date_range_including_tombstoned(&db, 0, i64::MAX).unwrap();
     assert_eq!(all_rows.len(), 3);
 }
 
 #[test]
-fn purge_old_tombstoned_hard_deletes_old_rows() {
+fn tombstoned_rows_are_kept_forever_for_audit() {
+    // The provider-neutral cache no longer offers `purge_old_tombstoned`:
+    // tombstones are intentionally retained as a forensic / audit trail
+    // (see `cache/worklogs.rs` module docs). This test pins that contract:
+    // marking a row tombstoned-long-ago must not cause it to disappear from
+    // either the row count or the diagnostic query.
     use tracker_lib::cache::worklogs::{
-        count, for_date_range_including_tombstoned, mark_tombstoned_by_jira_id,
-        purge_old_tombstoned, upsert_from_jira, WorklogRow,
+        count, for_date_range_including_tombstoned, mark_tombstoned_by_remote_id,
+        upsert_from_remote, WorklogRow,
     };
 
     let dir = TempDir::new().unwrap();
-    let db = Db::open(&dir.path().join("purge.db")).unwrap();
+    let db = Db::open(&dir.path().join("retain.db")).unwrap();
+    let conn_id = seed_jira_connection(&db, "http://example.invalid");
 
     let base = 1_700_000_000_i64;
-    for jid in ["old", "new"] {
-        upsert_from_jira(
+    for rid in ["old", "new"] {
+        upsert_from_remote(
             &db,
             &WorklogRow {
-                id: None,
-                issue_key: "K-1".into(),
-                duration_s: 600,
+                connection_id: Some(conn_id),
+                issue_key: Some("K-1".into()),
                 started_at: base,
+                ended_at: base + 600,
                 logged_at: base,
-                jira_worklog_id: Some(jid.into()),
-                author_account_id: Some("me".into()),
-                source: "jira".into(),
+                updated_at: base,
+                is_synced: true,
+                synced_at: Some(base),
+                remote_id: Some(rid.into()),
                 ..Default::default()
             },
         )
         .unwrap();
     }
-    mark_tombstoned_by_jira_id(&db, "old", 100).unwrap();
-    mark_tombstoned_by_jira_id(&db, "new", 10_000).unwrap();
+    // Tombstone one row "ages ago" and another "just now". Both rows must
+    // remain queryable via the diagnostic helper.
+    mark_tombstoned_by_remote_id(&db, conn_id, "old", 100).unwrap();
+    mark_tombstoned_by_remote_id(&db, conn_id, "new", 10_000).unwrap();
 
-    let removed = purge_old_tombstoned(&db, 1_000).unwrap();
-    assert_eq!(removed, 1);
-    assert_eq!(count(&db).unwrap(), 1);
-
-    // The remaining row should be "new" (still tombstoned but within window).
-    let rows = for_date_range_including_tombstoned(&db, 0, i64::MAX, Some("me")).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].jira_worklog_id.as_deref(), Some("new"));
+    assert_eq!(count(&db).unwrap(), 2, "no retention sweep happens");
+    let rows = for_date_range_including_tombstoned(&db, 0, i64::MAX).unwrap();
+    assert_eq!(rows.len(), 2);
+    let remotes: Vec<&str> = rows
+        .iter()
+        .map(|r| r.remote_id.as_deref().unwrap_or(""))
+        .collect();
+    assert!(remotes.contains(&"old"));
+    assert!(remotes.contains(&"new"));
 }
