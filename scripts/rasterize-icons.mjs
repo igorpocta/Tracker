@@ -40,6 +40,10 @@ async function main() {
   await rasterize("tray.svg", "tray.png", 44);
   await rasterize("tray-running.svg", "tray-running.png", 44);
 
+  // Pulse base — red recording dot at 100% opacity. `tray_pulse.rs` reads
+  // this once at startup and produces 7 alpha-modulated frames in memory.
+  await rasterize("tray-rec-base.svg", "tray-rec-base.png", 44);
+
   console.log("Done.");
 }
 

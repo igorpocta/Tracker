@@ -110,6 +110,24 @@ pub fn set_running_visual<R: Runtime>(app: &AppHandle<R>, running: bool) -> taur
     Ok(())
 }
 
+/// Apply a single frame of the recording pulse (a red dot at varying opacity)
+/// as the tray icon. Used by `tray_ticker` when a timer is running — the icon
+/// is the visual recording indicator while `set_title` carries the issue key
+/// and elapsed time.
+///
+/// Crucially we set `iconAsTemplate = false` here so macOS preserves our red
+/// color instead of tinting the glyph monochrome.
+pub fn set_pulse_frame<R: Runtime>(app: &AppHandle<R>, frame_idx: usize) -> tauri::Result<()> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let bytes = crate::tray_pulse::frame_png(frame_idx)
+        .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!("pulse frame: {e}")))?;
+    let img = Image::from_bytes(&bytes)?;
+    tray.set_icon_with_as_template(Some(img), false)?;
+    Ok(())
+}
+
 /// Update the tray tooltip. macOS-only (Linux/Windows behave differently but
 /// the call is safe to make — it's a no-op on Linux).
 pub fn set_tooltip<R: Runtime>(app: &AppHandle<R>, text: &str) -> tauri::Result<()> {

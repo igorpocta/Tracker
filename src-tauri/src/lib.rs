@@ -8,6 +8,7 @@ pub mod popover;
 pub mod server;
 pub mod state;
 pub mod tray;
+pub mod tray_pulse;
 pub mod tray_ticker;
 pub mod validation;
 

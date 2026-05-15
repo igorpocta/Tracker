@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+  <!--
+    Tray recording indicator — base frame at 100% opacity.
+
+    `tray_pulse.rs` decodes this PNG at startup and emits 7 frames with
+    sine-wave alpha modulation, producing a smooth pulse in the macOS menu
+    bar. Color is Apple's system red (#FF3B30); the dot is full-color
+    (NOT a template) so the red survives the OS render pass.
+  -->
+  <circle cx="11" cy="11" r="6" fill="#FF3B30"/>
+</svg>

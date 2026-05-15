@@ -60,6 +60,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1"
 anyhow = "1"
 
+# Image processing (used by tray_pulse to alpha-modulate the recording dot at runtime)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
