@@ -9,14 +9,19 @@ use crate::config::{self, JiraConfig};
 use crate::jira::{JiraClient, JiraError, JiraUser};
 use crate::state::AppState;
 
-/// Returns `true` if we have everything required to talk to Jira: an in-memory
-/// `JiraConfig`, an in-memory `JiraClient`, and (implicitly, since the client
-/// is only built when both exist) a Jira API token in the secret file.
+/// Returns `true` if at least one usable connection (Jira or Freelo) is
+/// configured. Phase 18F: previously only checked the legacy Jira shims;
+/// now also accepts any hydrated connection so a Freelo-only install
+/// reaches the main app instead of bouncing back to setup.
 #[tauri::command]
 pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    let has_cfg = state.jira_config.read().unwrap().is_some();
-    let has_client = state.jira_client.read().unwrap().is_some();
-    Ok(has_cfg && has_client)
+    let has_jira_legacy = state.jira_config.read().unwrap().is_some()
+        && state.jira_client.read().unwrap().is_some();
+    if has_jira_legacy {
+        return Ok(true);
+    }
+    let any_connection = !state.connections.read().unwrap().is_empty();
+    Ok(any_connection)
 }
 
 /// Payload accepted by `save_config`. Token is delivered together with the

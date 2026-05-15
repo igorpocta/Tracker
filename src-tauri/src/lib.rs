@@ -41,52 +41,65 @@ pub fn run() {
             // Phase 18A: migrate legacy single-Jira config into the
             // connections table on first run. If a config.toml + token exist
             // but no rows in `connections`, create the first connection.
+            //
+            // Phase 18F: once the connections table has any rows, we STOP
+            // reading the legacy `config.toml` entirely so the UI doesn't
+            // render the same Jira account twice. The old file is renamed to
+            // `config.toml.bak` for safety.
             let cfg_path = app_data_dir.join("config.toml");
             if cfg_path.exists() {
-                if let Ok(cfg) = config::load_from_path(&cfg_path) {
+                let has_connections = cache::connections::list(&state.db)
+                    .map(|rows| !rows.is_empty())
+                    .unwrap_or(false);
+                if has_connections {
+                    // Migration already done — retire the legacy file so the
+                    // duplicate card never resurfaces. Best-effort: ignore
+                    // rename errors so this doesn't block startup.
+                    let bak_path = app_data_dir.join("config.toml.bak");
+                    let _ = std::fs::rename(&cfg_path, &bak_path);
+                } else if let Ok(cfg) = config::load_from_path(&cfg_path) {
+                    // First-time migration path.
                     // Legacy shims (so old commands still work).
                     *state.jira_config.write().unwrap() = Some(cfg.clone());
                     let _ = state.try_build_client();
-                    // Migrate into the connections table if empty.
-                    if let Ok(rows) = cache::connections::list(&state.db) {
-                        if rows.is_empty() {
-                            let connection_cfg =
-                                crate::commands::connections::JiraConnectionConfig {
-                                    base_url: cfg.base_url.clone(),
-                                    email: cfg.email.clone(),
-                                    sync_jql: None,
-                                    my_issues_jql: None,
-                                };
-                            let cfg_json = serde_json::to_string(&connection_cfg)
-                                .unwrap_or_else(|_| "{}".into());
-                            let new_id = cache::connections::insert(
-                                &state.db,
-                                cache::connections::NewConnection {
-                                    provider: "jira",
-                                    name: "Jira",
-                                    enabled: true,
-                                    config_json: &cfg_json,
-                                },
-                            )
-                            .ok();
-                            // Copy the legacy token into the new
-                            // connection:N:token key so the multi-connection
-                            // hydration finds it.
-                            if let Some(id) = new_id {
-                                if let Ok(Some(tok)) =
-                                    crate::keychain::load_jira_token(&app_data_dir)
-                                {
-                                    let key = cache::connections::token_key(id);
-                                    let _ = crate::keychain::set(
-                                        &app_data_dir,
-                                        crate::keychain::KEYCHAIN_SERVICE,
-                                        &key,
-                                        &tok,
-                                    );
-                                }
-                            }
+                    let connection_cfg =
+                        crate::commands::connections::JiraConnectionConfig {
+                            base_url: cfg.base_url.clone(),
+                            email: cfg.email.clone(),
+                            sync_jql: None,
+                            my_issues_jql: None,
+                        };
+                    let cfg_json = serde_json::to_string(&connection_cfg)
+                        .unwrap_or_else(|_| "{}".into());
+                    let new_id = cache::connections::insert(
+                        &state.db,
+                        cache::connections::NewConnection {
+                            provider: "jira",
+                            name: "Jira",
+                            enabled: true,
+                            config_json: &cfg_json,
+                        },
+                    )
+                    .ok();
+                    // Copy the legacy token into the new
+                    // connection:N:token key so the multi-connection
+                    // hydration finds it.
+                    if let Some(id) = new_id {
+                        if let Ok(Some(tok)) =
+                            crate::keychain::load_jira_token(&app_data_dir)
+                        {
+                            let key = cache::connections::token_key(id);
+                            let _ = crate::keychain::set(
+                                &app_data_dir,
+                                crate::keychain::KEYCHAIN_SERVICE,
+                                &key,
+                                &tok,
+                            );
                         }
                     }
+                    // Retire the legacy file now that migration is done.
+                    let bak_path = app_data_dir.join("config.toml.bak");
+                    let _ = std::fs::rename(&cfg_path, &bak_path);
                 }
             }
 
