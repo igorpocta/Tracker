@@ -8,10 +8,10 @@ use tracker_lib::cache::issues::{get_by_key, search, upsert, IssueRow};
 use tracker_lib::cache::settings::{get as setting_get, set as setting_set};
 use tracker_lib::cache::timer::{get as timer_get, start as timer_start, stop as timer_stop};
 use tracker_lib::cache::worklogs::{
-    clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id, get_by_remote_id_any,
-    mark_pending_delete, mark_tombstoned, mark_tombstoned_by_remote_id, pending_deletes_older_than,
-    recent as worklog_recent, record as worklog_record, total_seconds_for_range, update_fields,
-    upsert_from_remote, WorklogRow,
+    clear_pending_delete, for_date_range as worklog_for_date_range, get_by_id,
+    get_by_remote_id_any, mark_pending_delete, mark_tombstoned, mark_tombstoned_by_remote_id,
+    pending_deletes_older_than, recent as worklog_recent, record as worklog_record,
+    total_seconds_for_range, update_fields, upsert_from_remote, WorklogRow,
 };
 use tracker_lib::cache::Db;
 
@@ -344,7 +344,10 @@ fn migration_runner_replays_idempotently_on_reopen() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    assert_eq!(
+        versions,
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    );
 }
 
 #[test]
