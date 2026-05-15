@@ -548,16 +548,18 @@ function WorklogRow({
                      hover:underline decoration-dotted underline-offset-4"
           title="Upravit komentář"
         >
-          <span className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center gap-2">
             {/* Phase 18A — Item 8: fall back to "(načítá se…)" when an
                 issue IS set but its summary hasn't been backfilled yet (the
                 next sync will). When no issue is assigned at all, show
                 "Nepřiřazen" so it's clear the row is waiting for a pick. */}
-            {row.summary ||
-              (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
+            <span className="truncate">
+              {row.summary ||
+                (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
+            </span>
             {row.comment && (
               <MessageSquare
-                className="w-3 h-3 text-[var(--text-tertiary)]"
+                className="w-3 h-3 text-[var(--text-tertiary)] shrink-0"
                 aria-hidden
               />
             )}
@@ -566,7 +568,7 @@ function WorklogRow({
             {!row.jira_worklog_id && !row.pending_assignment && (
               <span
                 title="Tento záznam se nepodařilo synchronizovat s Jirou"
-                className="font-mono text-[10px] text-orange-500 ml-1"
+                className="font-mono text-[10px] text-orange-500 shrink-0"
               >
                 ⚠ lokální
               </span>
@@ -574,7 +576,7 @@ function WorklogRow({
             {row.pending_assignment && (
               <span
                 title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol pomocí kontextového menu"
-                className="font-mono text-[10px] text-red-500 ml-1"
+                className="font-mono text-[10px] text-red-500 shrink-0"
               >
                 ⚠ bez úkolu
               </span>
