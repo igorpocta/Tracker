@@ -119,19 +119,20 @@ export function StopDialog({
           {onDiscard ? (
             <button
               type="button"
-              onClick={async () => {
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 if (busy) return;
-                if (
-                  !window.confirm(
-                    "Opravdu zahodit záznam? Časomíra bude zrušena a žádný worklog se neuloží.",
-                  )
-                ) {
-                  return;
+                try {
+                  await onDiscard();
+                } catch (err) {
+                  // Surface in dev console; the parent shows a toast.
+                  console.error("[StopDialog] onDiscard failed:", err);
                 }
-                await onDiscard();
               }}
               disabled={busy}
-              className="text-xs text-[var(--danger)] hover:underline underline-offset-2 disabled:opacity-50"
+              title="Zruší časomíru bez uložení worklogu"
+              className="text-xs text-[var(--danger)] hover:underline underline-offset-2 disabled:opacity-50 px-1 py-0.5"
             >
               Zahodit záznam
             </button>
