@@ -112,6 +112,26 @@ pub fn run() {
                 tracing::warn!("hydrate_connections failed: {e}");
             }
 
+            // Phase 19 — opt-in Sentry. We init BEFORE managing the rest of
+            // the setup hook so any later panic / `tracing::error!` is
+            // captured. The init is a no-op when:
+            //   * the user has not flipped `sentry_enabled` to `true`, OR
+            //   * no DSN is configured (build-time or runtime env var).
+            //
+            // The install id is generated lazily here so first-launch
+            // reports always carry a stable identifier.
+            {
+                let enabled =
+                    crate::commands::sentry::get_sentry_enabled_inner(&state.db)
+                        .unwrap_or(false);
+                let install_id =
+                    crate::commands::sentry::get_or_create_install_id_inner(&state.db)
+                        .unwrap_or_else(|_| String::new());
+                if !install_id.is_empty() {
+                    let _ = crate::sentry_init::init_if_enabled(&install_id, enabled);
+                }
+            }
+
             app.manage(state);
 
             let handle = app.handle().clone();
@@ -424,6 +444,10 @@ pub fn run() {
             commands::tray::toggle_tray_popover,
             commands::tray::set_tray_available,
             commands::misc::haptic_feedback,
+            // Phase 19 — Sentry opt-in
+            commands::sentry::get_sentry_enabled,
+            commands::sentry::set_sentry_enabled,
+            commands::sentry::get_install_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

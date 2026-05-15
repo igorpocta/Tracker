@@ -21,6 +21,7 @@ pub mod issues;
 pub mod misc;
 pub mod prefs;
 pub mod rounding;
+pub mod sentry;
 pub mod timer;
 pub mod tray;
 pub mod worklog;

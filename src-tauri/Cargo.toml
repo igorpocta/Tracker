@@ -70,6 +70,11 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 sentry = { version = "0.48", default-features = false, features = ["backtrace", "panic", "contexts", "reqwest", "rustls"] }
 sentry-tracing = "0.48"
 
+# Phase 19: stable anonymous install id (UUID v4). `v4` enables a random
+# generator; `serde` lets us round-trip through `app_settings` JSON if
+# anyone ever wants to.
+uuid = { version = "1", features = ["v4"] }
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
