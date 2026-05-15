@@ -136,6 +136,53 @@ async fn list_projects_handles_wrapped_response() {
     assert_eq!(projects[0].state, "active");
 }
 
+#[tokio::test]
+async fn list_projects_merges_owned_and_invited_collections() {
+    // Real Freelo v1 shape — `/all-projects` returns two arrays, one per
+    // collection. We must include BOTH so a user whose access is only via
+    // invited projects still sees them in the setup picker.
+    let (server, client) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/all-projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "owned_projects": [
+                { "id": 1, "name": "My own", "state": "active" }
+            ],
+            "invited_projects": [
+                { "id": 2, "name": "Klient X", "state": "active" },
+                { "id": 3, "name": "Klient Y", "state": "finished" }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let projects = client.list_projects().await.expect("ok");
+    let ids: Vec<i64> = projects.iter().map(|p| p.id).collect();
+    assert_eq!(ids, vec![1, 2, 3], "owned + invited merged in order");
+}
+
+#[tokio::test]
+async fn list_projects_only_invited_collection() {
+    // The user's actual case: no owned projects, only invited ones.
+    let (server, client) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/all-projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "owned_projects": [],
+            "invited_projects": [
+                { "id": 42, "name": "SAB · Klient", "state": "active" }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let projects = client.list_projects().await.expect("ok");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].id, 42);
+}
+
 // ---------- list_tasks_for_project ----------
 
 #[tokio::test]

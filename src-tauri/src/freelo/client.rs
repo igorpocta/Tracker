@@ -238,19 +238,39 @@ impl FreeloClient {
         })
         .await?;
 
-        let mut out = Vec::new();
-        // Two known shapes:
-        //   1) bare array of projects
-        //   2) { "projects": [...] } — observed on some Freelo endpoints
-        let arr = if let Some(a) = body.as_array() {
-            Some(a)
-        } else {
-            body.get("projects").and_then(|v| v.as_array())
-        };
-        if let Some(a) = arr {
-            for v in a {
-                if let Ok(p) = serde_json::from_value::<FreeloProject>(v.clone()) {
-                    out.push(p);
+        let mut out: Vec<FreeloProject> = Vec::new();
+        let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+        // Known response shapes:
+        //   1) `{ "owned_projects": [...], "invited_projects": [...] }` —
+        //      current Freelo v1 (the one this user has, where they only see
+        //      invited projects).
+        //   2) `{ "projects": [...] }` — older.
+        //   3) bare array — legacy.
+        let candidate_keys = ["owned_projects", "invited_projects", "projects"];
+        let mut pushed_anything_from_keys = false;
+        if let Some(obj) = body.as_object() {
+            for key in candidate_keys {
+                if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
+                    pushed_anything_from_keys = true;
+                    for v in arr {
+                        if let Ok(p) = serde_json::from_value::<FreeloProject>(v.clone()) {
+                            if seen_ids.insert(p.id) {
+                                out.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !pushed_anything_from_keys {
+            if let Some(arr) = body.as_array() {
+                for v in arr {
+                    if let Ok(p) = serde_json::from_value::<FreeloProject>(v.clone()) {
+                        if seen_ids.insert(p.id) {
+                            out.push(p);
+                        }
+                    }
                 }
             }
         }
