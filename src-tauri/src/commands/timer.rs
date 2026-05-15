@@ -13,7 +13,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::cache::{self, timer::ActiveTimer, worklogs::WorklogRow, Db};
 use crate::commands::{prefs, rounding};
 use crate::freelo;
-use crate::state::{AppState, ProviderClient};
+use crate::state::AppState;
 
 // -----------------------------------------------------------------------------
 // Phase A5 — pure stop-timer math, extracted for unit testability.
@@ -541,20 +541,16 @@ pub async fn stop_timer_inner(
     let remote_id = if is_unassigned {
         None
     } else if freelo::is_freelo_key(&timer.issue_key) {
-        // Find a live Freelo client + its connection id.
-        let freelo_pair = {
-            let conns = state
-                .connections
-                .read()
-                .expect("AppState.connections RwLock poisoned");
-            conns.iter().find_map(|c| match &c.client {
-                ProviderClient::Freelo(svc) => Some((c.id, svc.client.clone(), svc.config.clone())),
-                _ => None,
-            })
-        };
-        match freelo_pair {
-            Some((conn_id, client, cfg)) => {
-                let user_id = cfg.sync_user_id.unwrap_or(0);
+        // Route by `issues_v2.connection_id` for this specific Freelo task,
+        // not by "first Freelo connection in the list". The resolver also
+        // verifies `sync_user_id` is set — a None there used to fall through
+        // as `.unwrap_or(0)`, which makes Freelo reject the work-report POST
+        // with a generic 400 rather than a clear "finish setup first" error.
+        match crate::commands::worklog::crud::resolve_freelo_client_with_user_for_issue(
+            &state,
+            &timer.issue_key,
+        ) {
+            Ok((conn_id, client, user_id)) => {
                 match freelo::ops::add_work_report(
                     &client,
                     &state.db,
@@ -578,7 +574,10 @@ pub async fn stop_timer_inner(
                     }
                 }
             }
-            None => None,
+            Err(e) => {
+                let _ = app.emit("worklog-error", e);
+                None
+            }
         }
     } else if let Some(client) = {
         // Route to the Jira connection that owns this issue (per

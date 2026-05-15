@@ -100,16 +100,63 @@ fn audit_is_freelo(db: &cache::Db, audit_id: i64) -> bool {
     false
 }
 
-/// Vrátí first-active Freelo klient ze state pro audit reconstruct calls.
-fn first_freelo_client(
+/// Freelo counterpart to [`resolve_jira_client_for_audit`]. Same triple-
+/// fallback: snapshot's `connection_id` → `issues_v2.connection_id` via
+/// `issue_key` → first enabled Freelo (legacy single-tenant fallback).
+///
+/// Without this, restoring or reverting a Freelo audit entry with two
+/// Freelo connections configured would target whichever Freelo happens
+/// to come first in the connections list — i.e. it could create or
+/// modify a work-report on the WRONG tenant.
+fn resolve_freelo_client_for_audit(
     state: &tauri::State<'_, AppState>,
+    audit_id: i64,
 ) -> Result<crate::freelo::client::FreeloClient, String> {
+    let entry = cache::audit::get_by_id(&state.db, audit_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Audit záznam nenalezen".to_string())?;
+
     let conns = state
         .connections
         .read()
         .expect("AppState.connections RwLock poisoned");
+    let find_freelo_by_id = |cid: i64| -> Option<crate::freelo::client::FreeloClient> {
+        conns
+            .iter()
+            .find(|c| c.id == cid && c.enabled)
+            .and_then(|c| match &c.client {
+                ProviderClient::Freelo(svc) => Some(svc.client.clone()),
+                _ => None,
+            })
+    };
+
+    // (1) connection_id from a snapshot.
+    for src in [entry.before_json.as_deref(), entry.after_json.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(src) {
+            if let Some(cid) = v.get("connection_id").and_then(|x| x.as_i64()) {
+                if let Some(c) = find_freelo_by_id(cid) {
+                    return Ok(c);
+                }
+            }
+        }
+    }
+
+    // (2) connection_id derived from the row's issue_key via the cache.
+    if let Some(key) = entry.issue_key.as_deref() {
+        if let Ok(Some(cid)) = cache::issues::get_connection_id_by_key(&state.db, key) {
+            if let Some(c) = find_freelo_by_id(cid) {
+                return Ok(c);
+            }
+        }
+    }
+
+    // (3) Fallback: first enabled Freelo.
     conns
         .iter()
+        .filter(|c| c.enabled)
         .find_map(|c| match &c.client {
             ProviderClient::Freelo(svc) => Some(svc.client.clone()),
             _ => None,
@@ -214,7 +261,7 @@ pub async fn restore_deleted_worklog(
     audit_id: i64,
 ) -> Result<cache::worklogs::WorklogRow, String> {
     let saved = if audit_is_freelo(&state.db, audit_id) {
-        let client = first_freelo_client(&state)?;
+        let client = resolve_freelo_client_for_audit(&state, audit_id)?;
         freelo::reconstruct::restore_deleted_worklog(&client, &state.db, audit_id)
             .await
             .map_err(freelo_reconstruct_err_to_string)?
@@ -241,7 +288,7 @@ pub async fn revert_worklog_update(
     audit_id: i64,
 ) -> Result<cache::worklogs::WorklogRow, String> {
     let after = if audit_is_freelo(&state.db, audit_id) {
-        let client = first_freelo_client(&state)?;
+        let client = resolve_freelo_client_for_audit(&state, audit_id)?;
         freelo::reconstruct::revert_worklog_update(&client, &state.db, audit_id)
             .await
             .map_err(freelo_reconstruct_err_to_string)?
@@ -271,7 +318,7 @@ pub async fn retry_failed_audit_action(
     audit_id: i64,
 ) -> Result<serde_json::Value, String> {
     let result = if audit_is_freelo(&state.db, audit_id) {
-        let client = first_freelo_client(&state)?;
+        let client = resolve_freelo_client_for_audit(&state, audit_id)?;
         freelo::reconstruct::retry_failed_audit_action(&client, &state.db, audit_id)
             .await
             .map_err(freelo_reconstruct_err_to_string)?

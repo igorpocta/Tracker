@@ -243,6 +243,47 @@ fn resolve_client_for_issue(
     Err("Žádné aktivní připojení pro tento úkol".into())
 }
 
+/// Typed Freelo variant. Returns `(connection_id, FreeloService)` for the
+/// connection that owns `issue_key`. The `FreeloService` carries both the
+/// HTTP client AND the persisted config (selected_project_ids, sync_user_id),
+/// because every Freelo write API needs the user id and we want callers to
+/// see the typed error when it's missing, rather than the legacy
+/// `.unwrap_or(0)` that silently produced an invalid request.
+///
+/// Errors when (a) the issue resolves to a Jira connection, or (b) no Freelo
+/// connection at all is configured.
+pub fn resolve_freelo_service_for_issue(
+    state: &AppState,
+    issue_key: &str,
+) -> Result<(i64, crate::freelo::worklog_service_impl::FreeloService), String> {
+    let (conn_id, client) = resolve_client_for_issue(state, issue_key)?;
+    match client {
+        ProviderClient::Freelo(svc) => Ok((conn_id, svc)),
+        ProviderClient::Jira(_) => Err(format!("Úkol {issue_key} patří do Jira, ne Freelo")),
+    }
+}
+
+/// Like [`resolve_freelo_service_for_issue`] but additionally requires that
+/// the connection has finished its initial sync and cached a Freelo user
+/// id. Returns `(connection_id, FreeloClient, user_id)` — exactly the
+/// three things every Freelo write helper needs.
+///
+/// The pre-fix code pulled `cfg.sync_user_id.unwrap_or(0)` which generated
+/// a clearly-invalid POST body that Freelo rejected with a generic 400.
+/// Now we surface the missing-sync condition up front, so the UI can prompt
+/// the user to finish setup instead of getting a confusing API error.
+pub fn resolve_freelo_client_with_user_for_issue(
+    state: &AppState,
+    issue_key: &str,
+) -> Result<(i64, crate::freelo::client::FreeloClient, i64), String> {
+    let (conn_id, svc) = resolve_freelo_service_for_issue(state, issue_key)?;
+    let user_id = svc
+        .config
+        .sync_user_id
+        .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+    Ok((conn_id, svc.client, user_id))
+}
+
 /// Typed Jira variant of [`resolve_client_for_issue`] for callers that know
 /// they need a Jira mutation. Errors when the resolved connection is Freelo
 /// (caller should have routed through the Freelo helper instead) or when no
@@ -1191,18 +1232,32 @@ pub async fn commit_pending_delete(
                 return;
             }
         };
-        // Resolve the live freelo client.
-        let client = {
-            let conns = state
-                .connections
-                .read()
-                .expect("AppState.connections RwLock poisoned");
-            conns.iter().find_map(|c| match &c.client {
-                ProviderClient::Freelo(svc) => Some(svc.client.clone()),
-                _ => None,
+        // Route to the Freelo tenant that owns this worklog. Prefer the
+        // `row.connection_id` stamped on the WorklogRow (most direct
+        // signal — set when the row was created), with fallback to the
+        // issue-based resolver. The legacy "first Freelo via find_map"
+        // could delete a work-report on the WRONG tenant if the user
+        // has more than one Freelo configured.
+        let client = match row
+            .connection_id
+            .and_then(|cid| {
+                let conns = state
+                    .connections
+                    .read()
+                    .expect("AppState.connections RwLock poisoned");
+                conns
+                    .iter()
+                    .find(|c| c.id == cid && c.enabled)
+                    .and_then(|c| match &c.client {
+                        ProviderClient::Freelo(svc) => Some(svc.client.clone()),
+                        _ => None,
+                    })
             })
-        };
-        let client = match client {
+            .or_else(|| {
+                resolve_freelo_service_for_issue(state, issue_key)
+                    .ok()
+                    .map(|(_, svc)| svc.client)
+            }) {
             Some(c) => c,
             None => {
                 let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
@@ -1212,7 +1267,7 @@ pub async fn commit_pending_delete(
                     Some(issue_key),
                     Some(worklog_id),
                     Some(&row),
-                    "Freelo klient není nakonfigurován",
+                    "Freelo klient není nakonfigurován pro tento záznam",
                 );
                 return;
             }
