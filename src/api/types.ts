@@ -70,7 +70,7 @@ export interface SaveConfigArgs {
 }
 
 /** Payload emitted by the backend on `main-window:navigate`. */
-export type NavigateTarget = "setup" | "main";
+export type NavigateTarget = "setup" | "main" | "settings";
 
 /** Mirrors `src-tauri/src/cache/issues.rs::IssueRow`. */
 export interface IssueRow {

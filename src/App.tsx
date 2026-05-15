@@ -150,7 +150,12 @@ function NavigationBridge() {
     let cancelled = false;
 
     listen<NavigateTarget>("main-window:navigate", (event) => {
-      const target = event.payload === "setup" ? "/setup" : "/";
+      const target =
+        event.payload === "setup"
+          ? "/setup"
+          : event.payload === "settings"
+            ? "/settings"
+            : "/";
       navigate(target, { replace: true });
     })
       .then((u) => {
