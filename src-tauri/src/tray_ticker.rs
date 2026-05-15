@@ -24,6 +24,8 @@ use crate::state::AppState;
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let mut last_running: Option<bool> = None;
+        // Tick parity for the pulse animation (🔴 on even, hidden on odd).
+        let mut tick: u64 = 0;
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         // Don't fire on the first tick so the very first update reflects real
         // wall time, not the moment we spawned.
@@ -31,6 +33,7 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
 
         loop {
             interval.tick().await;
+            tick = tick.wrapping_add(1);
 
             // Snapshot the active timer; bail silently on transient DB errors.
             let timer = {
@@ -48,21 +51,32 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
                 Some(t) => {
                     let now_s = Utc::now().timestamp();
                     let elapsed = (now_s - t.started_at).max(0);
-                    // Phase 18A — Item 34: menu bar title = `{KEY} HH:MM`.
-                    // Unassigned timer (empty key) shows ⚠ instead of a code.
+                    // Phase 18A — Item 34 / follow-up: menu bar title pulses
+                    // a red recording dot every other second so the user can
+                    // tell at a glance that the timer is running. The 🔴 emoji
+                    // renders in real red on macOS; an invisible-width braille
+                    // blank (U+2800) keeps the layout from jittering on the
+                    // "off" tick.
                     let key_part = if t.issue_key.is_empty() {
                         "⚠".to_string()
                     } else {
                         t.issue_key.clone()
                     };
-                    let title = format!("{} {}", key_part, format_hm(elapsed));
+                    let pulse = if tick % 2 == 0 { "🔴" } else { "\u{2800}\u{2800}" };
+                    let title = format!("{pulse} {key_part} {}", format_hm(elapsed));
                     (
                         true,
                         format!("Tracker — {}", format_hms(elapsed)),
                         Some(title),
                     )
                 }
-                None => (false, "Tracker — nečinný".to_string(), None),
+                None => {
+                    // Idle: sleep emoji + em-dash placeholder so the menu bar
+                    // shows the user "nothing is being tracked" without going
+                    // completely silent.
+                    let title = "💤 —:—".to_string();
+                    (false, "Tracker — nečinný".to_string(), Some(title))
+                }
             };
 
             // Icon swap is relatively expensive; only do it when running state
