@@ -3,6 +3,7 @@ pub mod cache;
 pub mod commands;
 pub mod config;
 pub mod freelo;
+pub mod http_base;
 pub mod jira;
 pub mod keychain;
 pub mod popover;
