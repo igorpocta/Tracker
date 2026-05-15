@@ -439,6 +439,78 @@ async fn create_freelo_worklog(
     Ok(saved)
 }
 
+/// Update a local-only worklog row (no upstream remote id yet).
+///
+/// Used by the TimeLog inline edit when the row's `jira_worklog_id` is
+/// null — the worklog exists only in our SQLite cache, so we just patch the
+/// cache columns and emit `worklog-updated`. No Jira/Freelo HTTP call is
+/// attempted. Once the row eventually syncs upstream the regular
+/// [`update_worklog`] path takes over.
+///
+/// Args take **local rowid** (`id` from `recent_worklogs`), unlike
+/// [`update_worklog`] which takes the upstream id string.
+#[tauri::command]
+pub async fn update_local_worklog(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    local_id: i64,
+    new_issue_key: Option<String>,
+    new_started_at_ms: Option<i64>,
+    new_duration_seconds: Option<i64>,
+    new_comment: Option<String>,
+) -> Result<WorklogRow, String> {
+    validate_comment(new_comment.as_deref())?;
+    if let Some(ref k) = new_issue_key {
+        if !k.is_empty() {
+            crate::validation::validate_issue_key(k)?;
+        }
+    }
+    if let Some(d) = new_duration_seconds {
+        if d <= 0 {
+            return Err("Trvání musí být kladné".into());
+        }
+        if d > 24 * 3600 {
+            return Err("Trvání nesmí přesáhnout 24 hodin".into());
+        }
+    }
+
+    let before = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen".to_string())?;
+
+    let next_started_at = match new_started_at_ms {
+        Some(ms) => ms / 1000,
+        None => before.started_at,
+    };
+    let next_duration = new_duration_seconds.unwrap_or(before.duration_s);
+    let next_comment = match new_comment {
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(s),
+        None => before.comment.clone(),
+    };
+    let next_issue_key = new_issue_key.unwrap_or_else(|| before.issue_key.clone());
+
+    cache::worklogs::update_fields(
+        &state.db,
+        local_id,
+        &next_issue_key,
+        before.issue_id.as_deref(),
+        before.summary.as_deref(),
+        next_duration,
+        next_started_at,
+        next_comment.as_deref(),
+        before.updated_at_jira,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let after = cache::worklogs::get_by_id(&state.db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam zmizel po aktualizaci".to_string())?;
+
+    let _ = app.emit("worklog-updated", &after);
+    Ok(after)
+}
+
 /// Update an existing worklog. Updates the provider first, then the local
 /// DB so an upstream failure leaves the cache untouched. Dispatches by
 /// `issue_key` prefix (FRL- → Freelo, else Jira).

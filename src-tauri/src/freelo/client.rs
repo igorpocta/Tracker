@@ -595,23 +595,35 @@ impl FreeloClient {
             .cloned()
             .unwrap_or(value);
 
-        // Make sure `task_id` is present (Freelo sometimes omits it on the
-        // create response since it's in the URL).
+        // Use the same flattener as the GET /work-reports list response so
+        // nested task.id / author.id / worker.id / note get hoisted to the
+        // flat fields FreeloWorkReport deserializes.
+        flatten_work_report_fields(&mut v);
+
+        // Defaults for fields Freelo sometimes omits on the create response
+        // (they're either in the request URL or echoed back inconsistently).
         if v.get("task_id").is_none() {
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("task_id".into(), json!(task_id));
             }
         }
-        // Ensure date_reported is populated.
         if v.get("date_reported").is_none() {
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("date_reported".into(), json!(date_s));
             }
         }
-        // Same for minutes.
         if v.get("minutes").is_none() {
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("minutes".into(), json!(minutes));
+            }
+        }
+        // Freelo's create response sometimes omits author/worker entirely
+        // (the API knows the caller — no need to echo). Default user_id to 0
+        // so the local row gets saved; the next /work-reports sync will
+        // overwrite this with the authoritative value.
+        if v.get("user_id").is_none() {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("user_id".into(), json!(0));
             }
         }
 

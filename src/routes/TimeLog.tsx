@@ -29,6 +29,7 @@ import {
   deleteLocalOnlyWorklog,
   getWorklogsForRange,
   undoDeleteWorklog,
+  updateLocalWorklog,
   updateWorklog,
 } from "../api/commands";
 import type { WorklogRow as ApiWorklogRow } from "../api/types";
@@ -218,26 +219,34 @@ export default function TimeLog() {
     ) => {
       // `jira_worklog_id` is a misnomer left over from the single-provider
       // era — it holds the upstream ID for ALL providers: a Jira id for
-      // Jira worklogs, `freelo:<id>` for Freelo. Missing → the worklog is
-      // local-only and has never been synced upstream; we can't push the
-      // edit anywhere.
+      // Jira worklogs, `freelo:<id>` for Freelo. When it's null the row is
+      // local-only; we update the SQLite row directly via `updateLocalWorklog`
+      // and skip the upstream push. The next sync flushes everything.
       const remoteId = row.jira_worklog_id;
-      if (!remoteId) {
-        ctx.pushToast(
-          "error",
-          "Tento záznam je zatím jen lokální — nelze upravit, dokud se nesynchronizuje.",
-        );
-        return;
-      }
       try {
-        await updateWorklog({
-          worklogId: remoteId,
-          issueKey: row.issue_key,
-          newStartedAtMs: patch.startedAtMs ?? null,
-          newDurationSeconds: patch.durationSeconds ?? null,
-          newComment: patch.comment ?? null,
-        });
+        if (remoteId) {
+          await updateWorklog({
+            worklogId: remoteId,
+            issueKey: row.issue_key,
+            newStartedAtMs: patch.startedAtMs ?? null,
+            newDurationSeconds: patch.durationSeconds ?? null,
+            newComment: patch.comment ?? null,
+          });
+        } else if (row.id != null) {
+          await updateLocalWorklog({
+            localId: row.id,
+            newStartedAtMs: patch.startedAtMs ?? null,
+            newDurationSeconds: patch.durationSeconds ?? null,
+            newComment: patch.comment ?? null,
+          });
+        } else {
+          // No upstream id AND no local rowid — shouldn't happen but bail
+          // safely so we don't silently swallow the edit.
+          ctx.pushToast("error", "Záznam nemá ID, nelze upravit.");
+          return;
+        }
         queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+        queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
       } catch (e) {
         ctx.pushToast(
           "error",
@@ -552,44 +561,44 @@ function WorklogRow({
         <button
           type="button"
           onClick={() => setEditing("comment")}
-          className="flex-1 min-w-0 truncate text-xs text-left text-[var(--text-primary)]
+          className="flex-1 min-w-0 flex items-center gap-2 text-xs text-left text-[var(--text-primary)]
                      hover:underline decoration-dotted underline-offset-4"
           title="Upravit komentář"
         >
-          <span className="inline-flex items-center gap-2">
-            {/* Phase 18A — Item 8: fall back to "(načítá se…)" when an
-                issue IS set but its summary hasn't been backfilled yet (the
-                next sync will). When no issue is assigned at all, show
-                "Nepřiřazen" so it's clear the row is waiting for a pick. */}
-            <span className="truncate">
-              {row.summary ||
-                (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
-            </span>
-            {row.comment && (
-              <MessageSquare
-                className="w-3 h-3 text-[var(--text-tertiary)] shrink-0"
-                aria-hidden
-              />
-            )}
-            {/* Phase 18A — Item 7: visual marker for local-only / unsynced
-                worklogs (no Jira id). */}
-            {!row.jira_worklog_id && !row.pending_assignment && (
-              <span
-                title="Tento záznam se nepodařilo synchronizovat s Jirou"
-                className="font-mono text-[10px] text-orange-500 shrink-0"
-              >
-                ⚠ lokální
-              </span>
-            )}
-            {row.pending_assignment && (
-              <span
-                title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol pomocí kontextového menu"
-                className="font-mono text-[10px] text-red-500 shrink-0"
-              >
-                ⚠ bez úkolu
-              </span>
-            )}
+          {/* Phase 18A — Item 8: fall back to "(načítá se…)" when an
+              issue IS set but its summary hasn't been backfilled yet (the
+              next sync will). When no issue is assigned at all, show
+              "Nepřiřazen" so it's clear the row is waiting for a pick.
+              `min-w-0 flex-1 truncate` lets the summary shrink so the
+              icons + warning chips on the right stay visible. */}
+          <span className="flex-1 min-w-0 truncate">
+            {row.summary ||
+              (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
           </span>
+          {row.comment && (
+            <MessageSquare
+              className="w-3 h-3 text-[var(--text-tertiary)] shrink-0"
+              aria-hidden
+            />
+          )}
+          {/* Phase 18A — Item 7: visual marker for local-only / unsynced
+              worklogs (no Jira id). */}
+          {!row.jira_worklog_id && !row.pending_assignment && (
+            <span
+              title="Tento záznam se nepodařilo synchronizovat s Jirou"
+              className="font-mono text-[10px] text-orange-500 shrink-0"
+            >
+              ⚠ lokální
+            </span>
+          )}
+          {row.pending_assignment && (
+            <span
+              title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol pomocí kontextového menu"
+              className="font-mono text-[10px] text-red-500 shrink-0"
+            >
+              ⚠ bez úkolu
+            </span>
+          )}
         </button>
       )}
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0

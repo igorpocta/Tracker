@@ -381,6 +381,7 @@ pub fn run() {
             commands::worklog::refresh_all,
             commands::worklog::create_manual_worklog,
             commands::worklog::update_worklog,
+            commands::worklog::update_local_worklog,
             commands::worklog::delete_worklog,
             commands::worklog::undo_delete_worklog,
             commands::worklog::move_worklog,

@@ -43,6 +43,7 @@ pub use timer::{
 pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
 pub use worklog::{
     create_manual_worklog, delete_worklog, get_audit_log, get_worklog_issues,
-    get_worklogs_for_range, move_worklog, refresh_all, undo_delete_worklog, update_worklog,
+    get_worklogs_for_range, move_worklog, refresh_all, undo_delete_worklog, update_local_worklog,
+    update_worklog,
     MoveWorklogResultDto, RefreshAllResult,
 };

@@ -351,6 +351,30 @@ export function updateWorklog(args: {
 }
 
 /**
+ * `update_local_worklog(local_id, …): WorklogRow`
+ *
+ * Patches a worklog that exists only in the local SQLite cache — no Jira /
+ * Freelo HTTP call is made. Used when the row's upstream id hasn't been
+ * assigned yet (e.g. the timer was stopped while the provider was offline,
+ * or it's a brand-new manual entry).
+ */
+export function updateLocalWorklog(args: {
+  localId: number;
+  newIssueKey?: string | null;
+  newStartedAtMs?: number | null;
+  newDurationSeconds?: number | null;
+  newComment?: string | null;
+}): Promise<WorklogRow> {
+  return invoke<WorklogRow>("update_local_worklog", {
+    localId: args.localId,
+    newIssueKey: args.newIssueKey ?? null,
+    newStartedAtMs: args.newStartedAtMs ?? null,
+    newDurationSeconds: args.newDurationSeconds ?? null,
+    newComment: args.newComment ?? null,
+  });
+}
+
+/**
  * Soft-delete a worklog. Marks `pending_delete_at` locally; backend fires
  * the actual Jira DELETE after a 5s undo grace window. Frontend should
  * optimistically hide the row and show an undo toast.
