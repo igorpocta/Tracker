@@ -89,4 +89,61 @@ describe("NonWorkingDaysList", () => {
       /Žádné nepracovní dny v rozsahu posledních 30 a příštích 90 dnů/,
     );
   });
+
+  it("does not render pagination when the list fits on one page", async () => {
+    mockInvoke.mockResolvedValueOnce([
+      {
+        date: "2026-05-15",
+        reason: "vacation",
+        label: "Bali",
+        created_at: 0,
+      },
+    ]);
+
+    renderList();
+
+    await screen.findByText(/Bali/);
+    expect(
+      screen.queryByRole("navigation", { name: /Stránkování/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("paginates at 30 rows per page and advances to the next page", async () => {
+    // 45 entries with unique dates (Jan + Feb 2026) and labels starting from
+    // 100 to avoid prefix collisions (e.g. "Vac-1" matching "Vac-15").
+    const days = Array.from({ length: 45 }, (_, i) => {
+      const day = (i % 28) + 1;
+      const month = Math.floor(i / 28) + 1;
+      return {
+        date: `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+        reason: "personal",
+        label: `Vac-${i + 100}`,
+        created_at: i,
+      };
+    });
+    mockInvoke.mockResolvedValueOnce(days);
+
+    const user = userEvent.setup();
+    renderList();
+
+    // First page: 30 entries (Vac-100 … Vac-129) visible, Vac-130 not yet.
+    // Labels render as `— Vac-NNN` inside their span, so use regex matchers
+    // (substring) — exact-mode would need the surrounding "— " too.
+    await screen.findByText(/Vac-100/);
+    expect(screen.getByText(/Vac-129/)).toBeInTheDocument();
+    expect(screen.queryByText(/Vac-130/)).not.toBeInTheDocument();
+
+    // Pagination nav present, page indicator says "1 / 2".
+    expect(
+      screen.getByRole("navigation", { name: /Stránkování/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Další/ }));
+
+    // Second page: Vac-130 onward, Vac-100 gone.
+    await screen.findByText(/Vac-130/);
+    expect(screen.queryByText(/Vac-100/)).not.toBeInTheDocument();
+    expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument();
+  });
 });

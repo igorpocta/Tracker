@@ -53,6 +53,8 @@ function weekdayFor(iso: string): string {
   return WEEKDAYS_SHORT[dt.getDay()];
 }
 
+const PAGE_SIZE = 30;
+
 export function NonWorkingDaysList() {
   const queryClient = useQueryClient();
   // Recompute on day rollover — the -30 / +90 range slides forward each
@@ -71,6 +73,7 @@ export function NonWorkingDaysList() {
   });
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   const handleRemove = async (date: string) => {
     try {
@@ -87,6 +90,10 @@ export function NonWorkingDaysList() {
   };
 
   const days: NonWorkingDay[] = q.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(days.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageDays = days.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const showPagination = days.length > PAGE_SIZE;
 
   return (
     <section>
@@ -110,46 +117,78 @@ export function NonWorkingDaysList() {
           Žádné nepracovní dny v rozsahu posledních 30 a příštích 90 dnů.
         </p>
       ) : (
-        <ul className="flex flex-col gap-1">
-          {days.map((d) => {
-            const meta = reasonMeta(d.reason);
-            return (
-              <li
-                key={d.date}
-                className="grid grid-cols-[90px_36px_1fr_28px] items-center gap-2 px-2 h-8 rounded-[var(--radius-md)]
-                           hover:bg-[var(--bg-hover)] transition-colors duration-150"
-              >
-                <span className="text-xs tabular-nums text-[var(--text-primary)]">
-                  {formatDmy(d.date)}
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)]">
-                  {weekdayFor(d.date)}
-                </span>
-                <span className="text-xs text-[var(--text-secondary)] truncate">
-                  <span className="mr-2" aria-hidden>
-                    {meta.icon}
-                  </span>
-                  {meta.label}
-                  {d.label ? (
-                    <span className="ml-2 text-[var(--text-tertiary)]">
-                      — {d.label}
-                    </span>
-                  ) : null}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void handleRemove(d.date)}
-                  aria-label={`Odebrat ${formatDmy(d.date)}`}
-                  className="h-6 w-6 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
-                             rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]
-                             transition-colors duration-150"
+        <>
+          <ul className="flex flex-col gap-1">
+            {pageDays.map((d) => {
+              const meta = reasonMeta(d.reason);
+              return (
+                <li
+                  key={d.date}
+                  className="grid grid-cols-[90px_36px_1fr_28px] items-center gap-2 px-2 h-8 rounded-[var(--radius-md)]
+                             hover:bg-[var(--bg-hover)] transition-colors duration-150"
                 >
-                  ×
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  <span className="text-xs tabular-nums text-[var(--text-primary)]">
+                    {formatDmy(d.date)}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                    {weekdayFor(d.date)}
+                  </span>
+                  <span className="text-xs text-[var(--text-secondary)] truncate">
+                    <span className="mr-2" aria-hidden>
+                      {meta.icon}
+                    </span>
+                    {meta.label}
+                    {d.label ? (
+                      <span className="ml-2 text-[var(--text-tertiary)]">
+                        — {d.label}
+                      </span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemove(d.date)}
+                    aria-label={`Odebrat ${formatDmy(d.date)}`}
+                    className="h-6 w-6 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
+                               rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]
+                               transition-colors duration-150"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {showPagination && (
+            <nav
+              aria-label="Stránkování nepracovních dnů"
+              className="flex items-center justify-end gap-2 text-[11px] text-[var(--text-secondary)] mt-2"
+            >
+              <button
+                type="button"
+                onClick={() => setPage(safePage - 1)}
+                disabled={safePage <= 1}
+                className="px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
+                           hover:bg-[var(--bg-hover)] transition-colors duration-150
+                           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              >
+                ← Předchozí
+              </button>
+              <span className="tabular-nums">
+                {safePage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(safePage + 1)}
+                disabled={safePage >= totalPages}
+                className="px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
+                           hover:bg-[var(--bg-hover)] transition-colors duration-150
+                           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              >
+                Další →
+              </button>
+            </nav>
+          )}
+        </>
       )}
 
       <AddNonWorkingDayDialog
