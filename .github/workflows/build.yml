@@ -101,8 +101,58 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      - name: Install sentry-cli
+        if: env.SENTRY_AUTH_TOKEN != '' && startsWith(github.ref, 'refs/tags/v')
+        run: npm install -g @sentry/cli
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
       - name: Build Tauri bundle
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        env:
+          # When the repo has Sentry secrets configured the DSN gets baked
+          # into the bundle (via vite.config.ts → import.meta.env). Without
+          # secrets the var stays empty and Sentry init silently no-ops at
+          # runtime — opt-in stays off, no behaviour change for end users.
+          TRACKER_SENTRY_DSN_FRONTEND: ${{ secrets.TRACKER_SENTRY_DSN_FRONTEND }}
+          # vite.config.ts treats VITE_RELEASE as "this is the release
+          # build → emit hidden sourcemaps for upload". Empty = no sourcemaps.
+          VITE_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN != '' && format('tracker@{0}', github.ref_name) || '' }}
+
+      # Sentry sourcemap + Rust debug-files upload. Skipped (equivalent to
+      # SKIP_SENTRY=1) when any of the required secrets is missing — that
+      # way a fork or a private clone without Sentry credentials still
+      # builds happily.
+      - name: Sentry — upload sourcemaps + debug-files
+        if: env.SENTRY_AUTH_TOKEN != '' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT_FRONTEND: ${{ secrets.SENTRY_PROJECT_FRONTEND }}
+          SENTRY_PROJECT_BACKEND: ${{ secrets.SENTRY_PROJECT_BACKEND }}
+          RELEASE: tracker@${{ github.ref_name }}
+        run: |
+          set -eu
+          if [ -z "${SENTRY_ORG:-}" ] || [ -z "${SENTRY_PROJECT_FRONTEND:-}" ] || [ -z "${SENTRY_PROJECT_BACKEND:-}" ]; then
+            echo "↪ Sentry org/project secrets not all set — skipping upload."
+            exit 0
+          fi
+          sentry-cli releases new "$RELEASE" \
+            --project "$SENTRY_PROJECT_FRONTEND" \
+            --project "$SENTRY_PROJECT_BACKEND" || true
+          sentry-cli sourcemaps upload \
+            --project "$SENTRY_PROJECT_FRONTEND" \
+            --release "$RELEASE" \
+            ./dist || true
+          sentry-cli debug-files upload \
+            --project "$SENTRY_PROJECT_BACKEND" \
+            --include-sources \
+            "./src-tauri/target/${{ matrix.target }}/release" || true
+          sentry-cli releases set-commits "$RELEASE" --auto || true
+          sentry-cli releases finalize "$RELEASE" \
+            --project "$SENTRY_PROJECT_FRONTEND" \
+            --project "$SENTRY_PROJECT_BACKEND" || true
 
       - name: Upload artifacts (macOS)
         if: contains(matrix.platform, 'macos')
@@ -127,6 +177,8 @@ jobs:
     needs: bundle
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -135,10 +187,23 @@ jobs:
         with:
           path: artifacts
 
+      # Tag of the form `v1.2.3-rc.1` (anything with a dash after the
+      # version) is treated as a pre-release. Plain `v1.2.3` ships as a
+      # full release.
+      - name: Detect prerelease from tag
+        id: prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.app/**
