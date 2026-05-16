@@ -28,6 +28,10 @@ export function hasPrimaryModifier(event: KeyboardEvent): boolean {
 export interface KeyboardShortcutHandlers {
   /** Triggered by Cmd/Ctrl+R — typically "refresh cache". */
   onRefresh?: () => void;
+  /** Triggered by Cmd/Ctrl+I — typically "re-index issue cache". */
+  onReindex?: () => void;
+  /** Triggered by Cmd/Ctrl+N — typically "new manual worklog entry". */
+  onNewEntry?: () => void;
   /** Triggered by Cmd/Ctrl+, — typically "open settings". */
   onOpenSettings?: () => void;
 }
@@ -45,11 +49,31 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
     function onKeyDown(event: KeyboardEvent) {
       if (!hasPrimaryModifier(event)) return;
 
+      const key = event.key.toLowerCase();
+
       // Cmd/Ctrl+R — refresh.
-      if (event.key === "r" || event.key === "R") {
+      if (key === "r") {
         if (handlers.onRefresh) {
           event.preventDefault();
           handlers.onRefresh();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+I — re-index.
+      if (key === "i") {
+        if (handlers.onReindex) {
+          event.preventDefault();
+          handlers.onReindex();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+N — new entry.
+      if (key === "n") {
+        if (handlers.onNewEntry) {
+          event.preventDefault();
+          handlers.onNewEntry();
         }
         return;
       }
@@ -66,5 +90,10 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handlers.onRefresh, handlers.onOpenSettings]);
+  }, [
+    handlers.onRefresh,
+    handlers.onReindex,
+    handlers.onNewEntry,
+    handlers.onOpenSettings,
+  ]);
 }

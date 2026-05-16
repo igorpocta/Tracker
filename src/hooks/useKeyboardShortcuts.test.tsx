@@ -3,14 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 
-function Harness({
-  onRefresh,
-  onOpenSettings,
-}: {
+interface HarnessProps {
   onRefresh?: () => void;
+  onReindex?: () => void;
+  onNewEntry?: () => void;
   onOpenSettings?: () => void;
-}) {
-  useKeyboardShortcuts({ onRefresh, onOpenSettings });
+}
+
+function Harness(props: HarnessProps) {
+  useKeyboardShortcuts(props);
   return <div data-testid="harness" />;
 }
 
@@ -24,6 +25,28 @@ describe("useKeyboardShortcuts", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it("calls onReindex when Cmd/Ctrl+I is pressed", () => {
+    const onReindex = vi.fn();
+    render(<Harness onReindex={onReindex} />);
+
+    fireEvent.keyDown(window, { key: "i", metaKey: true });
+    fireEvent.keyDown(window, { key: "i", ctrlKey: true });
+    // `hasPrimaryModifier` accepts only one modifier per platform
+    // (Cmd on macOS, Ctrl elsewhere), so the matching modifier fires
+    // once. We assert "called" rather than a specific count so the
+    // test is platform-agnostic.
+    expect(onReindex).toHaveBeenCalled();
+  });
+
+  it("calls onNewEntry when Cmd/Ctrl+N is pressed", () => {
+    const onNewEntry = vi.fn();
+    render(<Harness onNewEntry={onNewEntry} />);
+
+    fireEvent.keyDown(window, { key: "n", metaKey: true });
+    fireEvent.keyDown(window, { key: "N", ctrlKey: true });
+    expect(onNewEntry).toHaveBeenCalled();
+  });
+
   it("calls onOpenSettings when Cmd/Ctrl+, is pressed", () => {
     const onOpenSettings = vi.fn();
     render(<Harness onOpenSettings={onOpenSettings} />);
@@ -35,13 +58,13 @@ describe("useKeyboardShortcuts", () => {
 
   it("ignores unmodified keys", () => {
     const onRefresh = vi.fn();
-    const onOpenSettings = vi.fn();
-    render(<Harness onRefresh={onRefresh} onOpenSettings={onOpenSettings} />);
+    const onNewEntry = vi.fn();
+    render(<Harness onRefresh={onRefresh} onNewEntry={onNewEntry} />);
 
     fireEvent.keyDown(window, { key: "r" });
-    fireEvent.keyDown(window, { key: "," });
+    fireEvent.keyDown(window, { key: "n" });
     expect(onRefresh).not.toHaveBeenCalled();
-    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(onNewEntry).not.toHaveBeenCalled();
   });
 
   it("removes the listener on unmount", () => {

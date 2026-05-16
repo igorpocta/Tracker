@@ -42,6 +42,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useIdleDetection } from "../../hooks/useIdleDetection";
+import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { usePomodoroTimer } from "../../hooks/usePomodoroTimer";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { usePrefsStore } from "../../stores/prefsStore";
@@ -391,32 +392,16 @@ export function AppShell() {
   }, []);
 
   // ---- Keyboard shortcuts --------------------------------------------------
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      const isMac =
-        typeof navigator !== "undefined" &&
-        /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!mod) return;
-      const k = e.key.toLowerCase();
-      if (k === ",") {
-        e.preventDefault();
-        navigate("/settings");
-      } else if (k === "r") {
-        e.preventDefault();
-        void refresh();
-      } else if (k === "i") {
-        e.preventDefault();
-        void reindex();
-      } else if (k === "n") {
-        e.preventDefault();
-        navigate("/");
-        setAddEntryOpen(true);
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigate, refresh, reindex]);
+  // Cmd/Ctrl+R refresh · +I reindex · +N new entry · +, settings.
+  useKeyboardShortcuts({
+    onRefresh: refresh,
+    onReindex: reindex,
+    onNewEntry: () => {
+      navigate("/");
+      setAddEntryOpen(true);
+    },
+    onOpenSettings: () => navigate("/settings"),
+  });
 
   const isSettings = location.pathname.startsWith("/settings");
 
