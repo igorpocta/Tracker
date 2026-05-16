@@ -18,7 +18,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { MessageSquare, Play, Square } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getSuggestedIssues,
@@ -28,6 +28,7 @@ import {
 import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState } from "../../api/types";
 import { FavoriteStar } from "../Favorites/FavoriteStar";
+import { useClickOutside } from "../../hooks/useClickOutside";
 import { useNow } from "../../hooks/useNow";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
@@ -138,17 +139,14 @@ function IdleBar({
     ...baseResults.filter((r) => !favoriteKeys.has(r.issue_key)),
   ];
 
-  // Close the dropdown on outside click.
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [open]);
+  // Close the dropdown on outside click. Escape closing lives on the
+  // input's own `onKeyDown` because it also `.blur()`s the input — a
+  // window-level listener can't reach the element to do that.
+  useClickOutside(
+    containerRef,
+    useCallback(() => setOpen(false), []),
+    open,
+  );
 
   const handlePick = (issueKey: string) => {
     setQuery("");

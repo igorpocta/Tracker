@@ -37,10 +37,11 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { searchIssuesCache } from "../../api/commands";
 import type { IssueRow } from "../../api/types";
+import { useClickOutside } from "../../hooks/useClickOutside";
 import { Button } from "../common/Button";
 
 export interface AddEntryPanelProps {
@@ -108,20 +109,11 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   });
   const issueResults = issuesQ.data ?? [];
 
-  // Close the issue picker on outside click.
-  useEffect(() => {
-    if (!issuePickerOpen) return;
-    function onClick(e: MouseEvent) {
-      if (
-        issueContainerRef.current &&
-        !issueContainerRef.current.contains(e.target as Node)
-      ) {
-        setIssuePickerOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [issuePickerOpen]);
+  useClickOutside(
+    issueContainerRef,
+    useCallback(() => setIssuePickerOpen(false), []),
+    issuePickerOpen,
+  );
 
   if (!open) return null;
 

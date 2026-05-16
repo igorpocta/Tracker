@@ -12,10 +12,12 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getSuggestedIssues, searchIssuesCache } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
+import { useClickOutside } from "../../hooks/useClickOutside";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 
 const LIMIT = 12;
 const DEBOUNCE_MS = 150;
@@ -53,30 +55,9 @@ export function IssuePicker({ onPick, disabled = false }: IssuePickerProps) {
   const results =
     debounced.length > 0 ? (searchQ.data ?? []) : (recentQ.data ?? []);
 
-  // Close on outside click.
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [open]);
-
-  // Close on Escape.
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  const closePopover = useCallback(() => setOpen(false), []);
+  useClickOutside(containerRef, closePopover, open);
+  useEscapeKey(closePopover, open);
 
   const handlePick = async (key: string) => {
     if (busy) return;
