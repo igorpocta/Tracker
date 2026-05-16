@@ -41,6 +41,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IssueRow } from "../../api/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useIssueSearch } from "../../hooks/useIssueSearch";
+import { formatHHMM, formatIsoDate, parseHHMM } from "../../lib/dates";
 import { Button } from "../common/Button";
 
 export interface AddEntryPanelProps {
@@ -77,9 +78,9 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   } = useIssueSearch({ enabled: open, limit: 12, debounceMs: 120 });
   const [issueKey, setIssueKey] = useState("");
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
-  const [dateIso, setDateIso] = useState(() => formatLocalDate(new Date()));
-  const [start, setStart] = useState(() => formatLocalTime(new Date()));
-  const [end, setEnd] = useState(() => formatLocalTime(new Date()));
+  const [dateIso, setDateIso] = useState(() => formatIsoDate(new Date()));
+  const [start, setStart] = useState(() => formatHHMM(new Date()));
+  const [end, setEnd] = useState(() => formatHHMM(new Date()));
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,8 +94,8 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   useEffect(() => {
     if (!open) return;
     const now = new Date();
-    const today = formatLocalDate(now);
-    const nowHHMM = formatLocalTime(now);
+    const today = formatIsoDate(now);
+    const nowHHMM = formatHHMM(now);
     setIssueQuery("");
     setIssueKey("");
     setDateIso(today);
@@ -371,17 +372,6 @@ const inputCls =
   "focus:outline-none focus:border-[var(--border-default)] " +
   "transition-colors duration-150";
 
-function formatLocalDate(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = `${d.getMonth() + 1}`.padStart(2, "0");
-  const dd = `${d.getDate()}`.padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function formatLocalTime(d: Date): string {
-  return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
-}
-
 /**
  * Returns total minutes between two `HH:MM` strings.
  *
@@ -409,15 +399,6 @@ export function crossesMidnight(start: string, end: string): boolean {
   const b = parseHHMM(end);
   if (a === null || b === null) return false;
   return b < a;
-}
-
-function parseHHMM(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{1,2})$/.exec(s);
-  if (!m) return null;
-  const h = parseInt(m[1], 10);
-  const mm = parseInt(m[2], 10);
-  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
-  return h * 60 + mm;
 }
 
 function addMinutes(start: string, mins: number): string {

@@ -44,8 +44,10 @@ import { DayTimeline } from "../components/Timer/DayTimeline";
 import { SuggestionBanner } from "../components/Timer/SuggestionBanner";
 import {
   addDays,
+  combineDateAndTime,
   dayEndUnixS,
   dayStartUnixS,
+  formatHHMM,
   startOfDay,
   startOfWeek,
 } from "../lib/dates";
@@ -830,31 +832,6 @@ const editCellCls =
   "px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-default)] " +
   "bg-transparent focus:outline-none";
 
-
-function formatHHMM(d: Date): string {
-  return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
-}
-
-/**
- * Combine the date part of `baseDate` with a `HH:MM` time string into a fresh
- * `Date`. Returns `null` if the time string is invalid.
- */
-function combineDateAndTime(baseDate: Date, hhmm: string): Date | null {
-  const m = /^(\d{1,2}):(\d{1,2})$/.exec(hhmm);
-  if (!m) return null;
-  const h = parseInt(m[1], 10);
-  const mm = parseInt(m[2], 10);
-  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
-  return new Date(
-    baseDate.getFullYear(),
-    baseDate.getMonth(),
-    baseDate.getDate(),
-    h,
-    mm,
-    0,
-    0,
-  );
-}
 
 /**
  * Parse a free-form duration string (`"1h 30m"`, `"90m"`, `"2h"`, `"45"`) into

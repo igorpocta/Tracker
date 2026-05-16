@@ -128,6 +128,56 @@ export function formatIsoDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/**
+ * Wall-clock time label in `HH:MM` 24-hour format. The clock comes from
+ * the local `getHours` / `getMinutes` getters, not from `toISOString()`,
+ * so it matches the user's local timezone. Used by every form-level
+ * input that needs to display the time portion of a `Date`.
+ */
+export function formatHHMM(d: Date): string {
+  return `${`${d.getHours()}`.padStart(2, "0")}:${`${d.getMinutes()}`.padStart(2, "0")}`;
+}
+
+/**
+ * Parse an `HH:MM` (or `H:M`) string into total minutes past midnight.
+ * Returns `null` for malformed input or values outside `0-23 : 0-59`.
+ * Shared by AddEntryPanel's duration math and TimeLog's inline cells.
+ */
+export function parseHHMM(s: string): number | null {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(s);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+  return h * 60 + mm;
+}
+
+/**
+ * Combine the date part of `baseDate` with an `HH:MM` time string into
+ * a fresh `Date`. The returned `Date` keeps `baseDate`'s year/month/day
+ * and replaces hour/minute (seconds zeroed); time is interpreted as
+ * wall-clock in the local timezone.
+ *
+ * Returns `null` if the time string fails to parse — callers should
+ * surface that as a form-validation error rather than fall back to a
+ * fabricated value.
+ */
+export function combineDateAndTime(baseDate: Date, hhmm: string): Date | null {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(hhmm);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+  return new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate(),
+    h,
+    mm,
+    0,
+  );
+}
+
 /** Long-form display label, e.g. "Tuesday, 13 May 2026". */
 export function formatLongDayLabel(date: Date): string {
   return new Intl.DateTimeFormat(undefined, {
