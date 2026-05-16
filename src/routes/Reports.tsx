@@ -265,12 +265,13 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
         </div>
       ) : (
         <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs">
-          {aggregated.map((a) => {
+          {aggregated.map((a, idx) => {
             const isHovered = hoverKey === a.issueKey;
-            // Každý řádek je vlastní 4-sloupcový subgrid roztažený přes
-            // všechny columns parent gridu (`col-span-4`). Background sedí
-            // na řádku jako celku — hover už nevytváří díry v `gap-x-4`
-            // mezerách mezi buňkami.
+            // První řádek (po DESC sortu podle totalSeconds) = největší
+            // konzument času za období. Vizuálně ho odlišujeme přes
+            // sekundární accent na IssuePillu — v mono paletě nezpůsobí
+            // změnu (accent-2 == accent), v dual paletě je to "vrchol".
+            const isTopContributor = idx === 0;
             return (
               <div
                 key={a.issueKey}
@@ -283,7 +284,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
                 onMouseLeave={() => setHoverKey(null)}
               >
                 <div className="flex items-center">
-                  <IssuePill issueKey={a.issueKey} />
+                  <IssuePill issueKey={a.issueKey} secondary={isTopContributor} />
                 </div>
                 <div className="truncate text-[var(--text-secondary)]">
                   {a.summary || "(načítá se…)"}
