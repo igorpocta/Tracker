@@ -130,6 +130,21 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
   // Legenda = sjednocení všech bucketů, které mají alespoň jednu vteřinu.
   const legend = useMemo(() => buildLegend(bucketsByDay), [bucketsByDay]);
 
+  // Pro delší období řídneme x-axis popisky, ať se nepřekrývají:
+  //   ≤ 14 dní  → každý den
+  //   ≤ 31 dní  → každý druhý den (původní chování)
+  //   ≤ 90 dní  → po týdnu, zarovnáno na pondělky
+  //   > 90 dní  → po dvou týdnech, zarovnáno na pondělky
+  // Když stepneme po týdnech, posuneme anchor na první pondělí v rozsahu,
+  // aby labely vizuálně padaly na začátky týdnů (uživatel snáz čte).
+  const { labelStep, labelAnchor } = useMemo(() => {
+    const n = days.length;
+    const step = n <= 14 ? 1 : n <= 31 ? 2 : n <= 90 ? 7 : 14;
+    if (step < 7) return { labelStep: step, labelAnchor: 0 };
+    const firstMonday = days.findIndex((d) => d.getDay() === 1);
+    return { labelStep: step, labelAnchor: firstMonday >= 0 ? firstMonday : 0 };
+  }, [days]);
+
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
@@ -278,16 +293,23 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
             </div>
           </div>
 
-          {/* X-axis labels */}
-          <div className="absolute left-0 right-0 bottom-0 flex gap-[2px]">
-            {days.map((d, idx) => (
-              <div
-                key={`label-${d.toISOString()}`}
-                className="flex-1 text-[9px] text-[var(--text-tertiary)] text-center tabular-nums"
-              >
-                {idx % 2 === 0 ? formatDateCsShort(d) : ""}
-              </div>
-            ))}
+          {/* X-axis labels.
+              `whitespace-nowrap` + `overflow-visible` umožní vykreslit `D. M.`
+              v jednom řádku, i když flex-1 buňka je užší než text — sousední
+              prázdné buňky pojmou přesah, takže se popisky nezalamují.   */}
+          <div className="absolute left-0 right-0 bottom-0 flex gap-[2px] overflow-visible">
+            {days.map((d, idx) => {
+              const showLabel =
+                idx >= labelAnchor && (idx - labelAnchor) % labelStep === 0;
+              return (
+                <div
+                  key={`label-${d.toISOString()}`}
+                  className="flex-1 text-[9px] text-[var(--text-tertiary)] text-center tabular-nums whitespace-nowrap"
+                >
+                  {showLabel ? formatDateCsShort(d) : ""}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

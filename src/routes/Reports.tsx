@@ -234,7 +234,10 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
         Rozpad úkolů
       </h3>
-      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs items-stretch">
+      {/* Hlavička je samostatný grid se stejnou template column definicí
+          jako řádky níž — díky `grid-cols-subgrid` na řádcích zůstanou
+          sloupce zarovnané přes celou tabulku.                       */}
+      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs px-2 -mx-2">
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
           Úkol
         </div>
@@ -247,64 +250,47 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1 text-right">
           Naposledy zaznamenáno
         </div>
-        {aggregated.length === 0 && (
-          <div className="col-span-4 py-4 text-center text-[var(--text-tertiary)]">
-            Zatím prázdné.
-          </div>
-        )}
-        {aggregated.map((a) => {
-          const isHovered = hoverKey === a.issueKey;
-          // `display:contents` rozloží wrapper na 4 buňky gridu, takže si
-          // udržíme zarovnání sloupců. Buňky pak musí být `flex` + mít
-          // shared `min-h-[32px]` aby hover background pokryl stejnou
-          // výšku ve všech sloupcích — bez toho byla buňka ÚKOL vyšší
-          // (kvůli pillu) než ostatní textové buňky a hover overlay
-          // visel nesymetricky.
-          const cellStyle = {
-            background: isHovered ? "var(--accent-soft)" : "transparent",
-            transition: "background-color 120ms ease-out",
-          };
-          const cellBase = "flex items-center min-h-[32px]";
-          const onEnter = () => setHoverKey(a.issueKey);
-          const onLeave = () => setHoverKey(null);
-          return (
-            <div className="contents" key={a.issueKey}>
-              <div
-                className={`${cellBase} px-2 -mx-2 rounded-l-[6px]`}
-                style={cellStyle}
-                onMouseEnter={onEnter}
-                onMouseLeave={onLeave}
-              >
-                <IssuePill issueKey={a.issueKey} />
-              </div>
-              <div
-                className={`${cellBase} truncate text-[var(--text-secondary)]`}
-                style={cellStyle}
-                onMouseEnter={onEnter}
-                onMouseLeave={onLeave}
-              >
-                {a.summary || "(načítá se…)"}
-              </div>
-              <div
-                className={`${cellBase} justify-end font-mono tabular-nums text-[var(--text-primary)]`}
-                style={cellStyle}
-                onMouseEnter={onEnter}
-                onMouseLeave={onLeave}
-              >
-                {formatDurationShort(a.totalSeconds)}
-              </div>
-              <div
-                className={`${cellBase} justify-end px-2 -mx-2 font-mono tabular-nums text-[var(--text-tertiary)] rounded-r-[6px]`}
-                style={cellStyle}
-                onMouseEnter={onEnter}
-                onMouseLeave={onLeave}
-              >
-                {formatDateCs(new Date(a.lastLoggedUnixS * 1000))}
-              </div>
-            </div>
-          );
-        })}
       </div>
+      {aggregated.length === 0 ? (
+        <div className="py-4 text-center text-[var(--text-tertiary)] text-xs">
+          Zatím prázdné.
+        </div>
+      ) : (
+        <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs">
+          {aggregated.map((a) => {
+            const isHovered = hoverKey === a.issueKey;
+            // Každý řádek je vlastní 4-sloupcový subgrid roztažený přes
+            // všechny columns parent gridu (`col-span-4`). Background sedí
+            // na řádku jako celku — hover už nevytváří díry v `gap-x-4`
+            // mezerách mezi buňkami.
+            return (
+              <div
+                key={a.issueKey}
+                className="col-span-4 grid grid-cols-subgrid gap-x-4 items-center min-h-[32px] px-2 -mx-2 rounded-[6px]"
+                style={{
+                  background: isHovered ? "var(--accent-soft)" : "transparent",
+                  transition: "background-color 120ms ease-out",
+                }}
+                onMouseEnter={() => setHoverKey(a.issueKey)}
+                onMouseLeave={() => setHoverKey(null)}
+              >
+                <div className="flex items-center">
+                  <IssuePill issueKey={a.issueKey} />
+                </div>
+                <div className="truncate text-[var(--text-secondary)]">
+                  {a.summary || "(načítá se…)"}
+                </div>
+                <div className="text-right font-mono tabular-nums text-[var(--text-primary)]">
+                  {formatDurationShort(a.totalSeconds)}
+                </div>
+                <div className="text-right font-mono tabular-nums text-[var(--text-tertiary)]">
+                  {formatDateCs(new Date(a.lastLoggedUnixS * 1000))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
