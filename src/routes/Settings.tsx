@@ -16,6 +16,7 @@
 import { clsx } from "clsx";
 import { useSearchParams } from "react-router-dom";
 
+import About from "../components/Settings/About";
 import Appearance from "../components/Settings/Appearance";
 import Connection from "../components/Settings/Connection";
 import General from "../components/Settings/General";
@@ -27,7 +28,8 @@ type TabId =
   | "general"
   | "reporting"
   | "goals"
-  | "appearance";
+  | "appearance"
+  | "about";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "connection", label: "Připojení" },
@@ -35,6 +37,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "reporting", label: "Reporting" },
   { id: "goals", label: "Cíle" },
   { id: "appearance", label: "Vzhled" },
+  { id: "about", label: "O aplikaci" },
 ];
 
 const TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
@@ -86,6 +89,7 @@ export default function Settings() {
         {active === "reporting" && <Reporting />}
         {active === "goals" && <SettingsGoals />}
         {active === "appearance" && <Appearance />}
+        {active === "about" && <About />}
       </main>
     </div>
   );
