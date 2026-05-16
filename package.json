@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "icons:rasterize": "node scripts/rasterize-icons.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "release": "bash scripts/build-release.sh"
   },
   "dependencies": {
