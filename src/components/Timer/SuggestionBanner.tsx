@@ -10,7 +10,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Play, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { getSuggestions, startTimer, type Suggestion } from "../../api/commands";
+import {
+  getSmartSuggestionsEnabled,
+  getSuggestions,
+  startTimer,
+  type Suggestion,
+} from "../../api/commands";
 import { formatIsoDate } from "../../lib/dates";
 import { useTimerStore } from "../../stores/timerStore";
 
@@ -18,12 +23,20 @@ const DISMISS_KEY_PREFIX = "tracker.suggestion.dismissed:";
 
 export function SuggestionBanner() {
   const active = useTimerStore((s) => s.active);
+  // Backend pref: when the user toggles smart suggestions off in Settings,
+  // the banner stays out of the DOM entirely (no fetch, no skeleton).
+  const prefQ = useQuery({
+    queryKey: ["prefs", "smart-suggestions-enabled"],
+    queryFn: getSmartSuggestionsEnabled,
+    staleTime: Infinity,
+  });
+  const featureEnabled = prefQ.data ?? true;
   const q = useQuery({
     queryKey: ["smart-suggestions"],
     queryFn: getSuggestions,
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
-    enabled: !active,
+    enabled: !active && featureEnabled,
   });
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(() => {
     const out = new Set<string>();
@@ -50,6 +63,7 @@ export function SuggestionBanner() {
   }, [active]);
 
   if (active) return null;
+  if (!featureEnabled) return null;
   const visible = (q.data ?? []).filter((s) => !dismissedKeys.has(s.issue_key));
   if (visible.length === 0) return null;
   const top = visible[0];

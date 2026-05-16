@@ -235,6 +235,19 @@ export function setAutoSyncIntervalSeconds(seconds: number): Promise<void> {
   return invoke<void>("set_auto_sync_interval_seconds", { seconds });
 }
 
+/**
+ * Whether the "Jako včera?" banner on Time Log is allowed to surface
+ * smart suggestions. Defaults to `true`. Backend-backed so the choice
+ * survives window/restart cycles.
+ */
+export function getSmartSuggestionsEnabled(): Promise<boolean> {
+  return invoke<boolean>("get_smart_suggestions_enabled");
+}
+
+export function setSmartSuggestionsEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_smart_suggestions_enabled", { enabled });
+}
+
 export function getHourlyRate(): Promise<number> {
   return invoke<number>("get_hourly_rate");
 }

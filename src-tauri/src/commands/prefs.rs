@@ -82,6 +82,10 @@ pub const DEFAULT_DAY_TIMELINE_VISIBLE: bool = true;
 /// `true` means the value is visible by default; `false` keeps it masked
 /// with the eye-toggle to reveal.
 pub const DEFAULT_EARNINGS_VISIBLE: bool = true;
+/// Default visibility of the "Jako včera?" smart-suggestion banner on the
+/// Time Log route. Defaults to `true` per product spec; the user opts out
+/// in Settings → Obecné.
+pub const DEFAULT_SMART_SUGGESTIONS_ENABLED: bool = true;
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -95,6 +99,7 @@ const KEY_CURRENCY: &str = "currency";
 const KEY_PALETTE_MODE: &str = "palette_mode";
 const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
 const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
+const KEY_SMART_SUGGESTIONS_ENABLED: &str = "smart_suggestions_enabled";
 /// Auto-sync interval, in seconds. `0` means "manual only" (the background
 /// loop skips fetching). The DB stores the integer as a string.
 pub const KEY_AUTO_SYNC_INTERVAL: &str = "auto_sync_interval_seconds";
@@ -422,6 +427,24 @@ pub fn set_earnings_visible_inner(db: &Db, visible: bool) -> Result<(), String> 
     cache::settings::set(db, KEY_EARNINGS_VISIBLE, v).map_err(|e| e.to_string())
 }
 
+// ----- Smart suggestion banner toggle -----
+
+pub fn get_smart_suggestions_enabled_inner(db: &Db) -> Result<bool, String> {
+    match cache::settings::get(db, KEY_SMART_SUGGESTIONS_ENABLED).map_err(|e| e.to_string())? {
+        Some(v) => match v.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Ok(DEFAULT_SMART_SUGGESTIONS_ENABLED),
+        },
+        None => Ok(DEFAULT_SMART_SUGGESTIONS_ENABLED),
+    }
+}
+
+pub fn set_smart_suggestions_enabled_inner(db: &Db, enabled: bool) -> Result<(), String> {
+    let v = if enabled { "true" } else { "false" };
+    cache::settings::set(db, KEY_SMART_SUGGESTIONS_ENABLED, v).map_err(|e| e.to_string())
+}
+
 // -----------------------------------------------------------------------------
 // Tauri commands.
 // -----------------------------------------------------------------------------
@@ -457,6 +480,24 @@ pub async fn set_auto_sync_interval_seconds(
 ) -> Result<(), String> {
     set_auto_sync_interval_inner(&state.db, seconds)?;
     let _ = app.emit("prefs-changed", KEY_AUTO_SYNC_INTERVAL);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_smart_suggestions_enabled(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    get_smart_suggestions_enabled_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_smart_suggestions_enabled(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    set_smart_suggestions_enabled_inner(&state.db, enabled)?;
+    let _ = app.emit("prefs-changed", KEY_SMART_SUGGESTIONS_ENABLED);
     Ok(())
 }
 
@@ -813,6 +854,16 @@ mod tests {
         assert!(set_auto_sync_interval_inner(&db, 30).is_err());
         assert!(set_auto_sync_interval_inner(&db, 7200).is_err());
         assert!(set_auto_sync_interval_inner(&db, -1).is_err());
+    }
+
+    #[test]
+    fn smart_suggestions_default_enabled_and_round_trips() {
+        let db = open_db();
+        assert!(get_smart_suggestions_enabled_inner(&db).unwrap());
+        set_smart_suggestions_enabled_inner(&db, false).unwrap();
+        assert!(!get_smart_suggestions_enabled_inner(&db).unwrap());
+        set_smart_suggestions_enabled_inner(&db, true).unwrap();
+        assert!(get_smart_suggestions_enabled_inner(&db).unwrap());
     }
 
     #[test]

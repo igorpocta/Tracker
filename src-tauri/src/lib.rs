@@ -426,6 +426,8 @@ pub fn run() {
             commands::prefs::set_daily_goal,
             commands::prefs::get_auto_sync_interval_seconds,
             commands::prefs::set_auto_sync_interval_seconds,
+            commands::prefs::get_smart_suggestions_enabled,
+            commands::prefs::set_smart_suggestions_enabled,
             commands::prefs::get_pomodoro,
             commands::prefs::set_pomodoro,
             commands::prefs::list_project_colors,

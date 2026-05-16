@@ -22,6 +22,7 @@ import {
   getRoundingIntervalMinutes,
   getRoundingMode,
   getSentryEnabled,
+  getSmartSuggestionsEnabled,
   importBackup,
   purgeAuditLog,
   setActivityThresholdMin,
@@ -30,6 +31,7 @@ import {
   setRoundingIntervalMinutes,
   setRoundingMode,
   setSentryEnabled,
+  setSmartSuggestionsEnabled,
   type RoundingMode,
 } from "../../api/commands";
 import {
@@ -98,6 +100,8 @@ export default function General() {
   const [actThreshold, setActThreshold] = useState<number>(5);
   // Phase 19: anonymous error reporting.
   const [sentryOn, setSentryOn] = useState<boolean | null>(null);
+  // Smart suggestion banner on Time Log ("Jako včera?"). Default true.
+  const [smartSuggestionsOn, setSmartSuggestionsOn] = useState<boolean | null>(null);
 
   useEffect(() => {
     try {
@@ -118,6 +122,9 @@ export default function General() {
     void getAutoSyncIntervalSeconds()
       .then((s) => setReindex(secondsToReindex(s)))
       .catch(() => {});
+    void getSmartSuggestionsEnabled()
+      .then(setSmartSuggestionsOn)
+      .catch(() => setSmartSuggestionsOn(true));
   }, []);
 
   const updateAutostart = async (enabled: boolean) => {
@@ -182,6 +189,14 @@ export default function General() {
     setAutoSyncIntervalSeconds(REINDEX_TO_SECONDS[v]).catch(() => {
       // Revert on backend failure so the UI doesn't lie about what's persisted.
       setReindex(previous);
+    });
+  };
+
+  const updateSmartSuggestions = (enabled: boolean) => {
+    const previous = smartSuggestionsOn;
+    setSmartSuggestionsOn(enabled);
+    setSmartSuggestionsEnabled(enabled).catch(() => {
+      setSmartSuggestionsOn(previous);
     });
   };
 
@@ -289,6 +304,23 @@ export default function General() {
           />
           <span className="text-[var(--text-primary)]">
             Spouštět Tracker automaticky
+          </span>
+        </label>
+      </Section>
+
+      <Section
+        title="Chytré návrhy úkolů"
+        description='Banner "Jako včera?" navrhuje úkol, na kterém jste v podobný čas trackovali v posledních 14 dnech. Když ho vypnete, žádné návrhy se nezobrazují a backend se na ně ani neptá.'
+      >
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={smartSuggestionsOn === true}
+            onChange={(e) => updateSmartSuggestions(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-[var(--text-primary)]">
+            Zobrazovat chytré návrhy
           </span>
         </label>
       </Section>
