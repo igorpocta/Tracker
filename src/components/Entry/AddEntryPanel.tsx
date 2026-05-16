@@ -35,14 +35,12 @@
  * a backend command to create a manual worklog row; that command is out
  * of scope for this redesign pass (the UI surface is the deliverable).
  */
-import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { searchIssuesCache } from "../../api/commands";
-import { queryKeys } from "../../api/queryKeys";
 import type { IssueRow } from "../../api/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { useIssueSearch } from "../../hooks/useIssueSearch";
 import { Button } from "../common/Button";
 
 export interface AddEntryPanelProps {
@@ -72,7 +70,11 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
   // values inside the open-effect below so a panel left mounted past
   // midnight (or just for an hour) still opens with the *current* time
   // and date, not the moment the parent first rendered.
-  const [issueQuery, setIssueQuery] = useState("");
+  const {
+    query: issueQuery,
+    setQuery: setIssueQuery,
+    results: issueResults,
+  } = useIssueSearch({ enabled: open, limit: 12, debounceMs: 120 });
   const [issueKey, setIssueKey] = useState("");
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const [dateIso, setDateIso] = useState(() => formatLocalDate(new Date()));
@@ -101,14 +103,6 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
     setComment("");
     setError(null);
   }, [open]);
-
-  const debounced = useDebounced(issueQuery, 120);
-  const issuesQ = useQuery({
-    queryKey: queryKeys.searchIssues.for(debounced, 12),
-    queryFn: () => searchIssuesCache(debounced, 12),
-    enabled: open && debounced.length > 0,
-  });
-  const issueResults = issuesQ.data ?? [];
 
   useClickOutside(
     issueContainerRef,
@@ -376,15 +370,6 @@ const inputCls =
   "placeholder:text-[var(--text-tertiary)] " +
   "focus:outline-none focus:border-[var(--border-default)] " +
   "transition-colors duration-150";
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), ms);
-    return () => window.clearTimeout(t);
-  }, [value, ms]);
-  return debounced;
-}
 
 function formatLocalDate(d: Date): string {
   const yyyy = d.getFullYear();

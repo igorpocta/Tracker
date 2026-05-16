@@ -10,17 +10,14 @@
  * The popover uses the same `search_issues_cache` backend as the global
  * StartTrackingBar, so behaviour is consistent.
  */
-import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import { getSuggestedIssues, searchIssuesCache } from "../../api/commands";
-import { queryKeys } from "../../api/queryKeys";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
+import { useIssueSearch } from "../../hooks/useIssueSearch";
 
 const LIMIT = 12;
-const DEBOUNCE_MS = 150;
 
 export interface IssuePickerProps {
   onPick: (issueKey: string) => Promise<void> | void;
@@ -29,31 +26,13 @@ export interface IssuePickerProps {
 
 export function IssuePicker({ onPick, disabled = false }: IssuePickerProps) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
   const [busy, setBusy] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(query.trim()), DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [query]);
-
-  // Empty input → recently-tracked-on issues. Non-empty → full search.
-  const searchQ = useQuery({
-    queryKey: ["picker-search", debounced, LIMIT],
-    queryFn: () => searchIssuesCache(debounced, LIMIT),
-    enabled: open && debounced.length > 0,
+  const { query, setQuery, debounced, results } = useIssueSearch({
+    enabled: open,
+    limit: LIMIT,
   });
-  const recentQ = useQuery({
-    queryKey: queryKeys.suggestedIssues.list(LIMIT),
-    queryFn: () => getSuggestedIssues(LIMIT),
-    enabled: open && debounced.length === 0,
-    staleTime: 30_000,
-  });
-
-  const results =
-    debounced.length > 0 ? (searchQ.data ?? []) : (recentQ.data ?? []);
 
   const closePopover = useCallback(() => setOpen(false), []);
   useClickOutside(containerRef, closePopover, open);

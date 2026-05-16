@@ -20,15 +20,12 @@ import { clsx } from "clsx";
 import { MessageSquare, Play, Square } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  getSuggestedIssues,
-  listFavorites,
-  searchIssuesCache,
-} from "../../api/commands";
+import { listFavorites } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState } from "../../api/types";
 import { FavoriteStar } from "../Favorites/FavoriteStar";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { useIssueSearch } from "../../hooks/useIssueSearch";
 import { useNow } from "../../hooks/useNow";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
@@ -77,8 +74,6 @@ function IdleBar({
   onPickIssue: (issueKey: string, comment: string) => void;
   onStartUnassigned?: (comment: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
   const [comment, setComment] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -89,42 +84,30 @@ function IdleBar({
   // visible time and the timer's actual start.
   const now = useNow(1000);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(query.trim()), DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [query]);
-
-  // When the user has typed something, hit `search_issues_cache` which
-  // matches issue_key/summary and orders by the issue's own updated_at.
-  const searchQ = useQuery({
-    queryKey: ["search-issues", debounced, LIMIT],
-    queryFn: () => searchIssuesCache(debounced, LIMIT),
-    enabled: debounced.length > 0,
-  });
-
-  // Empty query → show the issues the user has actually tracked time on,
-  // ordered by their most recent worklog (most recently tracked first).
-  // This matches the request: "click into the field → see the last tasks
-  // I tracked on; start typing → searchable list ordered by issue update".
-  const recentTrackedQ = useQuery({
-    queryKey: queryKeys.suggestedIssues.list(LIMIT),
-    queryFn: () => getSuggestedIssues(LIMIT),
-    enabled: debounced.length === 0,
-    staleTime: 30_000,
-  });
+  // Shared issue-search machinery: empty query → "recently tracked"
+  // feed; typed query → cache-wide search. The hook owns the debounce
+  // and the React Query wiring; we only consume `results` here and mix
+  // in the local favourites list below.
+  const {
+    query,
+    setQuery,
+    debounced,
+    results: baseResults,
+    isFetching: searchFetching,
+  } = useIssueSearch({ debounceMs: DEBOUNCE_MS, limit: LIMIT });
 
   // Phase 18B — Item 26: favorites are surfaced at the top of the dropdown.
   const favoritesQ = useQuery({
-    queryKey: ["favorites"],
+    queryKey: queryKeys.favorites.all(),
     queryFn: listFavorites,
     staleTime: 30_000,
   });
   const favorites = favoritesQ.data ?? [];
   const favoriteKeys = new Set(favorites.map((f) => f.issue_key));
 
-  // Build the result list. Favorites always go first; the rest comes from
-  // either the recently-tracked feed (no query) or the search feed (with
-  // query), de-duplicated against favorites.
+  // Build the result list. Favorites always go first; the rest comes
+  // from `baseResults` (search or recent feed via the hook),
+  // de-duplicated against favorites.
   const filteredFavorites = debounced
     ? favorites.filter(
         (f) =>
@@ -132,8 +115,6 @@ function IdleBar({
           (f.summary ?? "").toLowerCase().includes(debounced.toLowerCase()),
       )
     : favorites;
-  const baseResults =
-    debounced.length > 0 ? (searchQ.data ?? []) : (recentTrackedQ.data ?? []);
   const results = [
     ...filteredFavorites,
     ...baseResults.filter((r) => !favoriteKeys.has(r.issue_key)),
@@ -150,7 +131,6 @@ function IdleBar({
 
   const handlePick = (issueKey: string) => {
     setQuery("");
-    setDebounced("");
     setOpen(false);
     const c = comment.trim();
     setComment("");
@@ -247,10 +227,7 @@ function IdleBar({
             highlight={highlight}
             onPick={handlePick}
             onHover={setHighlight}
-            loading={
-              (debounced.length > 0 && searchQ.isFetching && results.length === 0) ||
-              (debounced.length === 0 && recentTrackedQ.isFetching && results.length === 0)
-            }
+            loading={searchFetching && results.length === 0}
             // Without a query, the list shows favorites + the issues the
             // user most recently tracked time on. With a query, the rest of
             // the list comes from the cache-wide search.
