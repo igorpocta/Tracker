@@ -7,7 +7,14 @@
  * avatary u osob.
  */
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Loader2,
+  Play,
+  RefreshCw,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -17,6 +24,7 @@ import {
   type JiraDashboardRow,
 } from "../api/commands";
 import { PageContainer } from "../components/Layout/PageContainer";
+import { useTimerStore } from "../stores/timerStore";
 
 type SortKey =
   | "issue_key"
@@ -33,7 +41,7 @@ interface SortState {
   dir: SortDir;
 }
 
-const COLUMNS: { key: SortKey; label: string; align?: "left" | "right" }[] = [
+const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "issue_key", label: "Úkol" },
   { key: "assignee", label: "Pověřená osoba" },
   { key: "reporter", label: "Zadavatel" },
@@ -42,6 +50,9 @@ const COLUMNS: { key: SortKey; label: string; align?: "left" | "right" }[] = [
   { key: "created", label: "Vytvořeno" },
   { key: "due_date", label: "Termín dokončení" },
 ];
+
+const ACTION_COLUMN_COUNT = 1;
+const TOTAL_COLUMN_COUNT = COLUMNS.length + ACTION_COLUMN_COUNT;
 
 export default function JiraDashboard() {
   const [sort, setSort] = useState<SortState>({ key: "issue_key", dir: "asc" });
@@ -138,13 +149,16 @@ export default function JiraDashboard() {
                   onClick={() => toggle(col.key)}
                 />
               ))}
+              <th className="px-3 py-2 text-right font-medium select-none w-12">
+                <span className="sr-only">Akce</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {sortedRows.length === 0 && !q.isLoading && (
               <tr>
                 <td
-                  colSpan={COLUMNS.length}
+                  colSpan={TOTAL_COLUMN_COUNT}
                   className="py-8 text-center text-[var(--text-tertiary)]"
                 >
                   Žádné úkoly nevyhovují JQL filtru.
@@ -231,7 +245,7 @@ function DashboardRowView({ row }: { row: JiraDashboardRow }) {
         <PriorityCell priority={row.priority} />
       </td>
       <td className="px-3 py-2 align-middle">
-        <StatusCell status={row.status} category={row.status_category} />
+        <StatusCell status={row.status} />
       </td>
       <td className="px-3 py-2 align-middle font-mono tabular-nums text-[var(--text-tertiary)]">
         {formatDate(row.created)}
@@ -239,7 +253,67 @@ function DashboardRowView({ row }: { row: JiraDashboardRow }) {
       <td className="px-3 py-2 align-middle tabular-nums">
         <DueDate value={row.due_date} />
       </td>
+      <td className="px-3 py-2 align-middle text-right">
+        <StartTimerButton issueKey={row.issue_key} />
+      </td>
     </tr>
+  );
+}
+
+function StartTimerButton({ issueKey }: { issueKey: string }) {
+  const active = useTimerStore((s) => s.active);
+  const busy = useTimerStore((s) => s.busy);
+  const start = useTimerStore((s) => s.start);
+
+  const isRunningHere = !!active && active.issue_key === issueKey;
+  const isRunningElsewhere = !!active && !isRunningHere;
+
+  if (isRunningHere) {
+    return (
+      <span
+        title="Časomíra pro tento úkol právě běží"
+        className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[var(--accent)]"
+        style={{ background: "var(--accent-soft)" }}
+        aria-label="Časomíra běží"
+      >
+        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
+      </span>
+    );
+  }
+
+  // Backend timer slot je single-row UPSERT — start dalšího timeru by tiše
+  // zahodil rozpracovaný čas jiného úkolu (žádný worklog by nevznikl).
+  // Disablujeme tlačítko a v tooltipu odkážeme uživatele, ať nejdřív
+  // existující časomíru zastaví.
+  const disabled = busy || isRunningElsewhere;
+  const title = isRunningElsewhere
+    ? `Nejdřív zastav běžící časomíru (${active!.issue_key || "bez úkolu"})`
+    : `Spustit časomíru pro ${issueKey}`;
+
+  const handleClick = async () => {
+    if (disabled) return;
+    try {
+      await start(issueKey);
+    } catch (e) {
+      console.error("[JiraDashboard] start timer failed:", e);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      disabled={disabled}
+      title={title}
+      aria-label={`Spustit časomíru pro ${issueKey}`}
+      className="inline-flex items-center justify-center w-7 h-7 rounded-full
+                 text-[var(--accent)] border border-[var(--accent-soft)]
+                 bg-transparent hover:bg-[var(--accent-soft)]
+                 transition-colors duration-150
+                 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+    >
+      <Play className="w-3.5 h-3.5" aria-hidden />
+    </button>
   );
 }
 
@@ -292,26 +366,9 @@ function PriorityCell({ priority }: { priority?: string | null }) {
   return <span className="text-[var(--text-primary)]">{priority}</span>;
 }
 
-function StatusCell({
-  status,
-  category,
-}: {
-  status?: string | null;
-  category?: string | null;
-}) {
+function StatusCell({ status }: { status?: string | null }) {
   if (!status) return <span className="text-[var(--text-tertiary)]">—</span>;
-  const color = statusCategoryColor(category);
-  return (
-    <span
-      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide"
-      style={{
-        background: color.bg,
-        color: color.fg,
-      }}
-    >
-      {status}
-    </span>
-  );
+  return <span className="text-[var(--text-primary)]">{status}</span>;
 }
 
 function DueDate({ value }: { value?: string | null }) {
@@ -331,25 +388,6 @@ function DueDate({ value }: { value?: string | null }) {
       {formatDate(value)}
     </span>
   );
-}
-
-function statusCategoryColor(category?: string | null): {
-  bg: string;
-  fg: string;
-} {
-  switch (category) {
-    case "new":
-      return { bg: "rgba(100, 116, 139, 0.15)", fg: "#475569" };
-    case "indeterminate":
-      return { bg: "rgba(59, 130, 246, 0.15)", fg: "#1d4ed8" };
-    case "done":
-      return { bg: "rgba(34, 197, 94, 0.15)", fg: "#15803d" };
-    default:
-      return {
-        bg: "var(--bg-elevated)",
-        fg: "var(--text-secondary)",
-      };
-  }
 }
 
 function formatDate(iso?: string | null): string {
