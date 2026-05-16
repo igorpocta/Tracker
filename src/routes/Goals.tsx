@@ -31,6 +31,7 @@ import { useMemo } from "react";
 
 import { getWorklogsForRange } from "../api/commands";
 import { GoalsPrediction } from "../components/Goals/GoalsPrediction";
+import { PageContainer } from "../components/Layout/PageContainer";
 import { useCalendarMask, isWorkingDayLocal } from "../hooks/useCalendarMask";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
@@ -127,7 +128,7 @@ export default function Goals() {
   const monthPct = clampPct(monthSeconds / Math.max(1, monthGoalSeconds));
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-4 w-full max-w-[1100px] mx-auto">
+    <PageContainer gap="gap-4">
       <div className="flex items-start justify-between gap-4 flex-wrap pt-2">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
@@ -194,7 +195,7 @@ export default function Goals() {
           value={`${Math.max(0, remainingWorkingDays)}`}
         />
       </div>
-    </div>
+    </PageContainer>
   );
 }
 

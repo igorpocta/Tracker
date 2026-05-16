@@ -33,6 +33,7 @@ import { useMemo, useState } from "react";
 import { getStreaks, getWorklogsForRange } from "../api/commands";
 import type { WorklogRow } from "../api/types";
 import { IssuePill } from "../components/common/IssuePill";
+import { PageContainer } from "../components/Layout/PageContainer";
 import { DailyBarChart } from "../components/Reports/DailyBarChart";
 import { ExportButton } from "../components/Reports/ExportButton";
 import { SummaryCards } from "../components/Reports/SummaryCards";
@@ -92,7 +93,7 @@ export default function Reports() {
   const earnings = hourlyRate > 0 ? (totalSeconds / 3600) * hourlyRate : 0;
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
+    <PageContainer>
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
@@ -135,7 +136,7 @@ export default function Reports() {
       />
 
       <IssuesBreakdown rows={rows} />
-    </div>
+    </PageContainer>
   );
 }
 

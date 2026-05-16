@@ -16,6 +16,7 @@ import {
   type JiraDashboardPerson,
   type JiraDashboardRow,
 } from "../api/commands";
+import { PageContainer } from "../components/Layout/PageContainer";
 
 type SortKey =
   | "issue_key"
@@ -65,7 +66,7 @@ export default function JiraDashboard() {
   };
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1400px] mx-auto">
+    <PageContainer maxWidth="max-w-[1400px]">
       <header className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
@@ -163,7 +164,7 @@ export default function JiraDashboard() {
           Nastavení → Připojení → Upravit.
         </p>
       )}
-    </div>
+    </PageContainer>
   );
 }
 

@@ -36,6 +36,7 @@ import type { AuditEntry } from "../api/types";
 import { AuditRow } from "../components/Audit/AuditRow";
 import { FilterPills, type FilterKey } from "../components/Audit/FilterPills";
 import type { ShellOutletContext } from "../components/Layout/AppShell";
+import { PageContainer } from "../components/Layout/PageContainer";
 import { Button } from "../components/common/Button";
 import { formatDateCs } from "../lib/format";
 
@@ -181,7 +182,7 @@ export default function Audit() {
   );
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-4 w-full max-w-[920px] mx-auto">
+    <PageContainer maxWidth="max-w-[920px]" gap="gap-4">
       <header className="flex items-baseline justify-between gap-3 flex-wrap pt-2">
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           Historie změn
@@ -244,7 +245,7 @@ export default function Audit() {
           </Button>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
 

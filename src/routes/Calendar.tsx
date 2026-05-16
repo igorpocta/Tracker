@@ -33,6 +33,7 @@ import {
   CellContextMenu,
   type NonWorkingReason,
 } from "../components/Calendar/CellContextMenu";
+import { PageContainer } from "../components/Layout/PageContainer";
 import { isWorkingDayLocal, useCalendarMask } from "../hooks/useCalendarMask";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
@@ -81,7 +82,7 @@ export default function Calendar() {
   const [view, setView] = useState<"monthly" | "yearly">("monthly");
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
+    <PageContainer>
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
@@ -120,7 +121,7 @@ export default function Calendar() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }
 

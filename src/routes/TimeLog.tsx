@@ -37,6 +37,7 @@ import {
 } from "../api/commands";
 import type { WorklogRow as ApiWorklogRow } from "../api/types";
 import type { ShellOutletContext } from "../components/Layout/AppShell";
+import { PageContainer } from "../components/Layout/PageContainer";
 import { IssuePill } from "../components/common/IssuePill";
 import { IssuePicker } from "../components/Worklog/IssuePicker";
 import { DayTimeline } from "../components/Timer/DayTimeline";
@@ -295,7 +296,7 @@ export default function TimeLog() {
   );
 
   return (
-    <div className="px-6 pb-6 pt-2 flex flex-col gap-5 w-full max-w-[1100px] mx-auto">
+    <PageContainer>
       <SuggestionBanner />
       {/* Header row ----------------------------------------------------- */}
       <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
@@ -489,7 +490,7 @@ export default function TimeLog() {
           Nový záznam
         </button>
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
