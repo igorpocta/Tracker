@@ -4,8 +4,7 @@
  * Read-only panel s informacemi o aplikaci. Verze se taháme přímo z Tauri
  * runtime API (`getVersion`), takže nemusíme nikam manuálně psát konstantu —
  * `npm run version:bump` upraví `tauri.conf.json` a tahle obrazovka se
- * automaticky aktualizuje dalším buildem. Commit hash se zapéká přes
- * `vite.config.ts` (`__COMMIT_HASH__`).
+ * automaticky aktualizuje dalším buildem.
  */
 import { getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
@@ -39,8 +38,6 @@ interface AppInfo {
 export default function About() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const commitHash =
-    typeof __COMMIT_HASH__ !== "undefined" ? __COMMIT_HASH__ : "unknown";
 
   useEffect(() => {
     Promise.all([getName(), getVersion(), getTauriVersion()])
@@ -88,11 +85,6 @@ export default function About() {
           <dt className="text-[var(--text-tertiary)]">Verze</dt>
           <dd className="text-[var(--text-primary)] font-mono tabular-nums">
             {info.version}
-          </dd>
-
-          <dt className="text-[var(--text-tertiary)]">Commit</dt>
-          <dd className="text-[var(--text-secondary)] font-mono tabular-nums">
-            {commitHash}
           </dd>
 
           <dt className="text-[var(--text-tertiary)]">Tauri</dt>
