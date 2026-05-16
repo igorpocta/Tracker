@@ -200,13 +200,13 @@ function StreakBadge({
   const days = streaks.current;
   // "Pracovní dny" pluralizace pro češtinu.
   const label = days === 1 ? "den" : days >= 2 && days <= 4 ? "dny" : "dní";
-  const subtitle =
-    streaks.current === streaks.longest
-      ? "osobní rekord!"
-      : `nejdelší ${streaks.longest}`;
+  const isRecord = streaks.current === streaks.longest;
+  const tooltip = isRecord
+    ? "Po sobě jdoucí pracovní dny se splněným denním cílem · osobní rekord!"
+    : `Po sobě jdoucí pracovní dny se splněným denním cílem · nejdelší ${streaks.longest}`;
   return (
     <div
-      title={`Po sobě jdoucí pracovní dny se splněným denním cílem · ${subtitle}`}
+      title={tooltip}
       className="inline-flex items-center gap-1.5 px-2.5 h-8 rounded-full text-xs font-medium"
       style={{
         background: "var(--accent-soft)",
@@ -217,6 +217,14 @@ function StreakBadge({
       <span>
         {days} {label}
       </span>
+      {!isRecord && (
+        // Secondary tint marks the all-time peak so the current count stays
+        // the visual primary in the chip. In mono palettes accent-2 == accent,
+        // so this renders identically there; only dual palettes show the pair.
+        <span className="text-[10px]" style={{ color: "var(--accent-2)" }}>
+          · rekord {streaks.longest}
+        </span>
+      )}
       {!streaks.today_met && (
         <span className="text-[10px] opacity-60">· dnes ještě</span>
       )}
