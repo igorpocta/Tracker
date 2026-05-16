@@ -5,9 +5,14 @@
  * stops invalidating `.list(...)` queries and stale-list bugs come
  * back. So we pin the prefix relationship explicitly here.
  */
-import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 
-import { queryKeys } from "./queryKeys";
+import {
+  invalidateAfterCacheRefresh,
+  invalidateWorklogQueries,
+  queryKeys,
+} from "./queryKeys";
 
 describe("queryKeys.suggestedIssues", () => {
   it("list() starts with the all() prefix", () => {
@@ -29,5 +34,74 @@ describe("queryKeys.suggestedIssues", () => {
     expect(queryKeys.suggestedIssues.list(15)).toEqual(
       queryKeys.suggestedIssues.list(15),
     );
+  });
+});
+
+describe("invalidateWorklogQueries", () => {
+  it("invalidates worklog list keys + suggested + recent issues", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateWorklogQueries(qc);
+
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.worklogs.all() });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.suggestedIssues.all(),
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.recentIssues.all(),
+    });
+  });
+
+  it("does NOT invalidate searchIssues / cacheStats — those are for cache refresh", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateWorklogQueries(qc);
+
+    for (const call of spy.mock.calls) {
+      const [{ queryKey }] = call as [{ queryKey: readonly unknown[] }];
+      expect(queryKey[0]).not.toBe("search-issues");
+      expect(queryKey[0]).not.toBe("cache-stats");
+    }
+  });
+});
+
+describe("invalidateAfterCacheRefresh", () => {
+  it("invalidates worklog set + search + cache stats", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateAfterCacheRefresh(qc);
+
+    // Superset of invalidateWorklogQueries + searchIssues + cacheStats.
+    expect(spy).toHaveBeenCalledTimes(5);
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.searchIssues.all(),
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.cacheStats.all(),
+    });
+  });
+});
+
+describe("queryKeys hierarchy invariants", () => {
+  it("every list/range/for/history key starts with its all() prefix", () => {
+    const pairs: Array<[readonly unknown[], readonly unknown[]]> = [
+      [queryKeys.suggestedIssues.all(), queryKeys.suggestedIssues.list(10)],
+      [queryKeys.worklogs.all(), queryKeys.worklogs.history()],
+      [queryKeys.worklogs.all(), queryKeys.worklogs.range(1, 2)],
+      [queryKeys.searchIssues.all(), queryKeys.searchIssues.for("foo", 5)],
+      [queryKeys.connectionStats.all(), queryKeys.connectionStats.for(7)],
+      [queryKeys.syncRuns.all(), queryKeys.syncRuns.list(50)],
+      [
+        queryKeys.nonWorkingDays.all(),
+        queryKeys.nonWorkingDays.range("2026-01-01", "2026-04-01"),
+      ],
+    ];
+    for (const [prefix, full] of pairs) {
+      expect(full.slice(0, prefix.length)).toEqual(prefix);
+    }
   });
 });

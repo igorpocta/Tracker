@@ -18,6 +18,7 @@ import {
   removeNonWorkingDay,
 } from "../../api/commands";
 import type { NonWorkingDay } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import { useTodayBoundary } from "../../hooks/useTodayBoundary";
 import { addDays, formatIsoDate } from "../../lib/dates";
 
@@ -64,7 +65,7 @@ export function NonWorkingDaysList() {
   const toIso = formatIsoDate(addDays(today, 90));
 
   const q = useQuery({
-    queryKey: ["non-working-days", fromIso, toIso],
+    queryKey: queryKeys.nonWorkingDays.range(fromIso, toIso),
     queryFn: () => listNonWorkingDays(fromIso, toIso),
     staleTime: 60_000,
   });
@@ -74,7 +75,7 @@ export function NonWorkingDaysList() {
   const handleRemove = async (date: string) => {
     try {
       await removeNonWorkingDay(date);
-      queryClient.invalidateQueries({ queryKey: ["non-working-days"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.nonWorkingDays.all() });
     } catch {
       /* swallow */
     }
@@ -82,7 +83,7 @@ export function NonWorkingDaysList() {
 
   const handleAdd = async (date: string, reason: string, label?: string) => {
     await addNonWorkingDay(date, reason, label);
-    queryClient.invalidateQueries({ queryKey: ["non-working-days"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.nonWorkingDays.all() });
   };
 
   const days: NonWorkingDay[] = q.data ?? [];

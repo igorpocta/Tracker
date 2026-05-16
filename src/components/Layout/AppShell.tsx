@@ -38,7 +38,11 @@ import {
   refreshCache,
   startTimer,
 } from "../../api/commands";
-import { queryKeys } from "../../api/queryKeys";
+import {
+  invalidateAfterCacheRefresh,
+  invalidateWorklogQueries,
+  queryKeys,
+} from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useIdleDetection } from "../../hooks/useIdleDetection";
@@ -128,11 +132,7 @@ export function AppShell() {
         // Když cache_stats selže, zůstaneme u bezpečného incremental.
       }
       await refreshAll(mode);
-      queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-      queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
-      queryClient.invalidateQueries({ queryKey: ["search-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
-      queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+      invalidateAfterCacheRefresh(queryClient);
     } catch {
       /* swallow — toast lives elsewhere */
     }
@@ -141,8 +141,8 @@ export function AppShell() {
   const reindex = useCallback(async () => {
     try {
       await refreshCache();
-      queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["search-issues"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
     } catch {
       /* swallow */
     }
@@ -180,10 +180,7 @@ export function AppShell() {
             ? `${minutes / 60}h`
             : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
       pushToast("success", `Uloženo ${dur} na ${row.issue_key}.`);
-      queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
-      queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-      queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-      queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
+      invalidateWorklogQueries(queryClient);
       setStopOpen(false);
     },
     [pushToast, queryClient],
@@ -199,18 +196,20 @@ export function AppShell() {
   }, [setActive]);
   useTauriEvent<boolean>("timer-discarded", onTimerDiscarded);
 
-  // Phase 15 — mutation events. All four invalidate the same query keys so the
-  // visible Tímové Log refreshes immediately.
-  const invalidateWorklogQueries = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
-    queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+  // Phase 15 — mutation events. All four invalidate the same query set so
+  // the visible Time Log refreshes immediately. The shared helper covers
+  // both the list keys AND the derived "recently tracked" dropdowns —
+  // the pre-refactor inline version only invalidated the two list keys
+  // and left the dropdowns stale.
+  const handleWorklogMutation = useCallback(() => {
+    invalidateWorklogQueries(queryClient);
   }, [queryClient]);
-  useTauriEvent<WorklogRow>("worklog-created", invalidateWorklogQueries);
-  useTauriEvent<WorklogRow>("worklog-updated", invalidateWorklogQueries);
-  useTauriEvent<WorklogRow>("worklog-deleted", invalidateWorklogQueries);
-  useTauriEvent<WorklogRow>("worklog-undo-deleted", invalidateWorklogQueries);
-  useTauriEvent<string>("worklog-delete-committed", invalidateWorklogQueries);
-  useTauriEvent<WorklogRow>("worklog-moved", invalidateWorklogQueries);
+  useTauriEvent<WorklogRow>("worklog-created", handleWorklogMutation);
+  useTauriEvent<WorklogRow>("worklog-updated", handleWorklogMutation);
+  useTauriEvent<WorklogRow>("worklog-deleted", handleWorklogMutation);
+  useTauriEvent<WorklogRow>("worklog-undo-deleted", handleWorklogMutation);
+  useTauriEvent<string>("worklog-delete-committed", handleWorklogMutation);
+  useTauriEvent<WorklogRow>("worklog-moved", handleWorklogMutation);
 
   const onWorklogError = useCallback(
     (err: unknown) => {
@@ -222,17 +221,13 @@ export function AppShell() {
   useTauriEvent<unknown>("worklog-error", onWorklogError);
 
   const onCacheRefreshed = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-    queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
+    invalidateWorklogQueries(queryClient);
   }, [queryClient]);
   useTauriEvent<number>("cache-refreshed", onCacheRefreshed);
 
   // Auto-sync event fired by backend ~3s after startup.
   const onAutoSyncComplete = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["recent-issues"] });
-    queryClient.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
-    queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
-    queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+    invalidateWorklogQueries(queryClient);
   }, [queryClient]);
   useTauriEvent<unknown>("auto-sync-complete", onAutoSyncComplete);
 
@@ -498,8 +493,7 @@ export function AppShell() {
                 "success",
                 `Záznam přidán na ${entry.issueKey}.`,
               );
-              queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-              queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+              invalidateWorklogQueries(queryClient);
             } catch (e) {
               const msg = typeof e === "string" ? e : "Záznam se nepodařilo uložit";
               pushToast("error", msg);

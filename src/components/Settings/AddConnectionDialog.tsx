@@ -18,7 +18,7 @@
  *   step 2  Freelo only — project picker.
  *
  * After Done the dialog closes and the parent invalidates the
- * `["connections"]` query so the new card shows up immediately.
+ * `queryKeys.connections.all()` query so the new card shows up immediately.
  */
 import { CircleCheck, LoaderCircle } from "lucide-react";
 import { useState } from "react";

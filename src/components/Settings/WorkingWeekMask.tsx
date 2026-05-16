@@ -18,6 +18,7 @@ import {
   getWorkingWeekMask,
   setWorkingWeekMask,
 } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 
 const DAYS: { bit: number; short: string; label: string }[] = [
   { bit: 1, short: "Po", label: "Pondělí" },
@@ -44,7 +45,7 @@ export function toggleBit(mask: number, bit: number): number {
 export function WorkingWeekMask() {
   const queryClient = useQueryClient();
   const q = useQuery({
-    queryKey: ["working-week-mask"],
+    queryKey: queryKeys.workingWeekMask.all(),
     queryFn: getWorkingWeekMask,
     staleTime: 60_000,
   });
@@ -66,10 +67,10 @@ export function WorkingWeekMask() {
     setLocalMask(next);
     try {
       await setWorkingWeekMask(next);
-      queryClient.invalidateQueries({ queryKey: ["working-week-mask"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.workingWeekMask.all() });
       // Mask change affects every cached non-working derivation so the
       // calendar grid re-paints.
-      queryClient.invalidateQueries({ queryKey: ["non-working-days"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.nonWorkingDays.all() });
     } catch {
       // Roll back on failure — the user shouldn't see a "stuck" checkbox.
       setLocalMask(mask);

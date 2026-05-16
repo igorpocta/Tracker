@@ -14,6 +14,7 @@ import {
   isFavorite as isFavoriteCmd,
   removeFavorite,
 } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 
 export interface FavoriteStarProps {
   issueKey: string;
@@ -50,7 +51,7 @@ export function FavoriteStar({
   // somewhere else in the tree still updates this component's view.
   const isControlled = initial !== undefined;
   const q = useQuery({
-    queryKey: ["favorite", issueKey],
+    queryKey: queryKeys.favorites.one(issueKey),
     queryFn: () => isFavoriteCmd(issueKey),
     staleTime: 60_000,
     enabled: !isControlled && issueKey.length > 0,
@@ -67,8 +68,8 @@ export function FavoriteStar({
         await addFavorite(issueKey);
       }
     } finally {
-      queryClient.invalidateQueries({ queryKey: ["favorite", issueKey] });
-      queryClient.invalidateQueries({ queryKey: ["favorites"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.favorites.one(issueKey) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.favorites.all() });
     }
   };
 

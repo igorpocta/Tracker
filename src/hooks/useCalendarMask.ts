@@ -13,6 +13,7 @@ import {
   listNonWorkingDays,
 } from "../api/commands";
 import type { NonWorkingDay } from "../api/commands";
+import { queryKeys } from "../api/queryKeys";
 
 const DEFAULT_MASK = 0b0011111; // Mon..Fri (Monday = bit 0).
 
@@ -36,13 +37,13 @@ export function useCalendarMask(from: Date, to: Date): CalendarMaskData {
   const toIso = toIsoDate(to);
 
   const maskQ = useQuery({
-    queryKey: ["working-week-mask"],
+    queryKey: queryKeys.workingWeekMask.all(),
     queryFn: getWorkingWeekMask,
     staleTime: 60_000,
   });
 
   const daysQ = useQuery({
-    queryKey: ["non-working-days", fromIso, toIso],
+    queryKey: queryKeys.nonWorkingDays.range(fromIso, toIso),
     queryFn: () => listNonWorkingDays(fromIso, toIso),
     staleTime: 60_000,
   });

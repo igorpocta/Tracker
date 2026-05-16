@@ -41,6 +41,7 @@ import {
 } from "../../api/commands";
 import { useNow } from "../../hooks/useNow";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { queryKeys } from "../../api/queryKeys";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
 export interface IconSidebarItem {
@@ -76,7 +77,7 @@ export function IconSidebar() {
   const [syncing, setSyncing] = useState(false);
 
   const statsQ = useQuery({
-    queryKey: ["cache-stats"],
+    queryKey: queryKeys.cacheStats.all(),
     queryFn: getCacheStats,
     staleTime: 30_000,
   });
@@ -85,7 +86,7 @@ export function IconSidebar() {
   // Jira connection s `dashboard_enabled = true`. Bez toho by tlačítko
   // vedlo na prázdnou stránku.
   const connectionsQ = useQuery({
-    queryKey: ["connections"],
+    queryKey: queryKeys.connections.all(),
     queryFn: listConnections,
     staleTime: 60_000,
   });
@@ -107,7 +108,7 @@ export function IconSidebar() {
   // (např. úspěšným auto-syncem na pozadí) UI rychle dohoní stav, i kdyby
   // se invalidace přes `auto-sync-complete` event minula s React Query cache.
   const syncErrorsQ = useQuery({
-    queryKey: ["sync-errors"],
+    queryKey: queryKeys.syncErrors.all(),
     queryFn: getSyncErrors,
     staleTime: 0,
     refetchInterval: 30_000,
@@ -115,17 +116,17 @@ export function IconSidebar() {
   });
 
   useTauriEvent<unknown>("cache-refreshed", () => {
-    queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.cacheStats.all() });
   });
   useTauriEvent<unknown>("auto-sync-progress", () => {
     setSyncing(true);
   });
   useTauriEvent<unknown>("auto-sync-complete", () => {
     setSyncing(false);
-    queryClient.invalidateQueries({ queryKey: ["cache-stats"] });
-    queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-    queryClient.invalidateQueries({ queryKey: ["sync-errors"] });
-    queryClient.invalidateQueries({ queryKey: ["connections"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.cacheStats.all() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.worklogs.all() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.syncErrors.all() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.connections.all() });
   });
   useEffect(() => {
     /* hook deps satisfied; statsQ kept implicit */

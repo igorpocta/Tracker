@@ -25,6 +25,8 @@
  * into `useQuery({ queryKey: queryKeys.foo.list(x) })` and TypeScript
  * keeps the tuple shape.
  */
+import type { QueryClient } from "@tanstack/react-query";
+
 export const queryKeys = {
   /**
    * Result of `getSuggestedIssues(limit)` — recently-tracked issue
@@ -38,9 +40,103 @@ export const queryKeys = {
    * shell invalidates `.all()`.
    */
   suggestedIssues: {
-    /** Prefix used for invalidations — matches every `.list(...)` variant. */
     all: () => ["suggested-issues"] as const,
-    /** Concrete key for `getSuggestedIssues(limit)`. */
     list: (limit: number) => ["suggested-issues", "list", limit] as const,
   },
+
+  /** Worklog list queries — `worklog-history` and `worklogs-range`. */
+  worklogs: {
+    all: () => ["worklogs"] as const,
+    history: () => ["worklogs", "history"] as const,
+    range: (fromUnix: number, toUnix: number) =>
+      ["worklogs", "range", fromUnix, toUnix] as const,
+  },
+
+  /** "Recently changed" issues (provider-side) shown in the sidebar. */
+  recentIssues: {
+    all: () => ["recent-issues"] as const,
+  },
+
+  /** Cache-wide issue search (text filter). */
+  searchIssues: {
+    all: () => ["search-issues"] as const,
+    for: (term: string, limit: number) =>
+      ["search-issues", term, limit] as const,
+  },
+
+  /** `cache::*` snapshot for the sidebar badges. */
+  cacheStats: {
+    all: () => ["cache-stats"] as const,
+  },
+
+  /** Configured `connections` table rows + their per-connection extras. */
+  connections: {
+    all: () => ["connections"] as const,
+  },
+  connectionStats: {
+    all: () => ["connection-stats"] as const,
+    for: (connectionId: number) => ["connection-stats", connectionId] as const,
+  },
+  syncRuns: {
+    all: () => ["sync-runs"] as const,
+    list: (limit: number) => ["sync-runs", limit] as const,
+  },
+  syncErrors: {
+    all: () => ["sync-errors"] as const,
+  },
+
+  /** Settings → working week / non-working day overrides. */
+  workingWeekMask: {
+    all: () => ["working-week-mask"] as const,
+  },
+  nonWorkingDays: {
+    all: () => ["non-working-days"] as const,
+    range: (fromIso: string, toIso: string) =>
+      ["non-working-days", fromIso, toIso] as const,
+  },
+
+  /** Pomodoro config row read by Settings → Goals. */
+  pomodoroConfig: {
+    all: () => ["pomodoro-config"] as const,
+  },
+
+  /** Favourite-issues set + per-issue toggle state. */
+  favorites: {
+    all: () => ["favorites"] as const,
+    one: (issueKey: string) => ["favorite", issueKey] as const,
+  },
 } as const;
+
+/**
+ * Convenience: invalidate every query whose data depends on the
+ * current set of worklogs.
+ *
+ * Used after worklog mutations (create / update / delete / push /
+ * assign) and after every sync — anywhere a single line saying
+ * "the worklog list might have changed" used to fan out into a
+ * stack of `queryClient.invalidateQueries({ queryKey: ... })`
+ * calls that drift out of sync.
+ *
+ *   worklogs.all          — both `worklog-history` and `worklogs-range`
+ *   suggestedIssues.all   — empty-state "recently tracked" dropdowns
+ *   recentIssues.all      — sidebar "Recent" list
+ *
+ * Search results don't depend on worklogs (they read `issues_v2`),
+ * so they're NOT invalidated here — that's `invalidateAfterCacheRefresh`.
+ */
+export function invalidateWorklogQueries(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: queryKeys.worklogs.all() });
+  qc.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
+  qc.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
+}
+
+/**
+ * Invalidate everything that a "cache rebuild" (full sync, reindex,
+ * backup restore) potentially changed: worklog lists, the issue
+ * cache the search reads from, the sidebar stats badge.
+ */
+export function invalidateAfterCacheRefresh(qc: QueryClient): void {
+  invalidateWorklogQueries(qc);
+  qc.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
+  qc.invalidateQueries({ queryKey: queryKeys.cacheStats.all() });
+}

@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { getPomodoroConfig, setPomodoroConfig } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import { firstError, goalSliderHoursSchema } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
@@ -91,7 +92,7 @@ export default function SettingsGoals() {
 
 function PomodoroSection() {
   const q = useQuery({
-    queryKey: ["pomodoro-config"],
+    queryKey: queryKeys.pomodoroConfig.all(),
     queryFn: getPomodoroConfig,
     staleTime: 60_000,
   });
@@ -112,7 +113,7 @@ function PomodoroSection() {
     };
     try {
       await setPomodoroConfig(payload);
-      queryClient.invalidateQueries({ queryKey: ["pomodoro-config"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.pomodoroConfig.all() });
     } catch {
       /* swallow — UI validation pokrývá rozsah */
     }

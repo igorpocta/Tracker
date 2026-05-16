@@ -40,6 +40,7 @@ import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { searchIssuesCache } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import type { IssueRow } from "../../api/types";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { Button } from "../common/Button";
@@ -103,7 +104,7 @@ export function AddEntryPanel({ open, onClose, onSave }: AddEntryPanelProps) {
 
   const debounced = useDebounced(issueQuery, 120);
   const issuesQ = useQuery({
-    queryKey: ["search-issues", debounced, 12],
+    queryKey: queryKeys.searchIssues.for(debounced, 12),
     queryFn: () => searchIssuesCache(debounced, 12),
     enabled: open && debounced.length > 0,
   });

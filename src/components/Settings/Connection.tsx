@@ -40,6 +40,7 @@ import {
   syncFreeloNow,
   updateConnectionApi,
 } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import type { ConnectionDto, FreeloProjectDto } from "../../api/types";
 
 import { AddConnectionDialog } from "./AddConnectionDialog";
@@ -48,11 +49,11 @@ import { EditConnectionDialog } from "./EditConnectionDialog";
 export default function Connection() {
   const queryClient = useQueryClient();
   const connsQ = useQuery({
-    queryKey: ["connections"],
+    queryKey: queryKeys.connections.all(),
     queryFn: listConnections,
   });
   const syncErrorsQ = useQuery({
-    queryKey: ["sync-errors"],
+    queryKey: queryKeys.syncErrors.all(),
     queryFn: getSyncErrors,
     staleTime: 5_000,
   });
@@ -65,8 +66,8 @@ export default function Connection() {
   );
 
   function refresh() {
-    queryClient.invalidateQueries({ queryKey: ["connections"] });
-    queryClient.invalidateQueries({ queryKey: ["sync-errors"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.connections.all() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.syncErrors.all() });
   }
 
   return (
@@ -152,7 +153,7 @@ function ConnectionCard({
   onEdit: () => void;
 }) {
   const statsQ = useQuery({
-    queryKey: ["connection-stats", conn.id],
+    queryKey: queryKeys.connectionStats.for(conn.id),
     queryFn: () => getConnectionStats(conn.id),
     // Refetch po sync — invalidace skrz auto-sync-complete v Sidebar dotahuje sem.
     staleTime: 30_000,
@@ -592,7 +593,7 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
 function SyncRunsHistory() {
   const [expanded, setExpanded] = useState(false);
   const q = useQuery({
-    queryKey: ["sync-runs", 50],
+    queryKey: queryKeys.syncRuns.list(50),
     queryFn: () => listSyncRuns(50),
     enabled: expanded,
     staleTime: 30_000,

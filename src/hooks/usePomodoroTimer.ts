@@ -13,12 +13,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { getPomodoroConfig } from "../api/commands";
+import { queryKeys } from "../api/queryKeys";
 import { useTimerStore } from "../stores/timerStore";
 
 export function usePomodoroTimer() {
   const active = useTimerStore((s) => s.active);
   const cfgQ = useQuery({
-    queryKey: ["pomodoro-config"],
+    queryKey: queryKeys.pomodoroConfig.all(),
     queryFn: getPomodoroConfig,
     staleTime: 60_000,
   });

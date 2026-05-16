@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { listConnections, listProjectColors } from "../../api/commands";
+import { queryKeys } from "../../api/queryKeys";
 import type { WorklogRow } from "../../api/types";
 import { isWorkingDayLocal, useCalendarMask } from "../../hooks/useCalendarMask";
 import { addDays, startOfDay } from "../../lib/dates";
@@ -65,7 +66,7 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
   // Připojení potřebujeme pro pojmenování / barvy segmentů. Selže-li
   // (např. během startup), padá fallback na "lokální" pro vše.
   const connectionsQ = useQuery({
-    queryKey: ["connections"],
+    queryKey: queryKeys.connections.all(),
     queryFn: listConnections,
     staleTime: 60_000,
   });
