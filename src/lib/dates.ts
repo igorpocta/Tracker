@@ -100,6 +100,13 @@ export function endOfMonth(date: Date): Date {
   return d;
 }
 
+/** January 1st of the year containing `date`, at local midnight. */
+export function startOfYear(date: Date): Date {
+  const d = new Date(date.getFullYear(), 0, 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 /** First day of the previous month relative to `date`. */
 export function startOfPreviousMonth(date: Date): Date {
   return startOfMonth(addDays(startOfMonth(date), -1));

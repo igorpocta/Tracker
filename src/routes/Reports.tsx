@@ -47,11 +47,18 @@ import {
   startOfMonth,
   startOfPreviousMonth,
   startOfWeek,
+  startOfYear,
 } from "../lib/dates";
 import { formatDateCs, formatDurationShort } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
-type Period = "this-week" | "last-week" | "this-month" | "last-month" | "last-30";
+type Period =
+  | "this-week"
+  | "last-week"
+  | "this-month"
+  | "last-month"
+  | "last-30"
+  | "this-year";
 
 const PERIOD_LABEL: Record<Period, string> = {
   "this-week": "Tento týden",
@@ -59,6 +66,7 @@ const PERIOD_LABEL: Record<Period, string> = {
   "this-month": "Tento měsíc",
   "last-month": "Minulý měsíc",
   "last-30": "Posledních 30 dní",
+  "this-year": "Od začátku roku",
 };
 
 export default function Reports() {
@@ -160,7 +168,16 @@ function PeriodSelector({
                    cursor-pointer focus:outline-none pr-4"
         aria-label="Období"
       >
-        {(["this-week", "last-week", "this-month", "last-month", "last-30"] as Period[]).map((p) => (
+        {(
+          [
+            "this-week",
+            "last-week",
+            "this-month",
+            "last-month",
+            "last-30",
+            "this-year",
+          ] as Period[]
+        ).map((p) => (
           <option key={p} value={p}>
             {PERIOD_LABEL[p]}
           </option>
@@ -217,7 +234,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
         Rozpad úkolů
       </h3>
-      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs items-center">
+      <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs items-stretch">
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
           Úkol
         </div>
@@ -238,18 +255,22 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
         {aggregated.map((a) => {
           const isHovered = hoverKey === a.issueKey;
           // `display:contents` rozloží wrapper na 4 buňky gridu, takže si
-          // udržíme zarovnání sloupců. Hover styl aplikujeme na každou
-          // buňku zvlášť, aby barva pokryla celou „řádkovou" plochu.
+          // udržíme zarovnání sloupců. Buňky pak musí být `flex` + mít
+          // shared `min-h-[32px]` aby hover background pokryl stejnou
+          // výšku ve všech sloupcích — bez toho byla buňka ÚKOL vyšší
+          // (kvůli pillu) než ostatní textové buňky a hover overlay
+          // visel nesymetricky.
           const cellStyle = {
             background: isHovered ? "var(--accent-soft)" : "transparent",
             transition: "background-color 120ms ease-out",
           };
+          const cellBase = "flex items-center min-h-[32px]";
           const onEnter = () => setHoverKey(a.issueKey);
           const onLeave = () => setHoverKey(null);
           return (
             <div className="contents" key={a.issueKey}>
               <div
-                className="py-1 px-2 -mx-2 rounded-l-[6px]"
+                className={`${cellBase} px-2 -mx-2 rounded-l-[6px]`}
                 style={cellStyle}
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
@@ -257,7 +278,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
                 <IssuePill issueKey={a.issueKey} />
               </div>
               <div
-                className="py-1 truncate text-[var(--text-secondary)]"
+                className={`${cellBase} truncate text-[var(--text-secondary)]`}
                 style={cellStyle}
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
@@ -265,7 +286,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
                 {a.summary || "(načítá se…)"}
               </div>
               <div
-                className="py-1 text-right font-mono tabular-nums text-[var(--text-primary)]"
+                className={`${cellBase} justify-end font-mono tabular-nums text-[var(--text-primary)]`}
                 style={cellStyle}
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
@@ -273,7 +294,7 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
                 {formatDurationShort(a.totalSeconds)}
               </div>
               <div
-                className="py-1 px-2 -mx-2 text-right font-mono tabular-nums text-[var(--text-tertiary)] rounded-r-[6px]"
+                className={`${cellBase} justify-end px-2 -mx-2 font-mono tabular-nums text-[var(--text-tertiary)] rounded-r-[6px]`}
                 style={cellStyle}
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
@@ -347,6 +368,9 @@ function periodRange(p: Period): [Date, Date] {
   }
   if (p === "last-month") {
     return [startOfPreviousMonth(today), endOfPreviousMonth(today)];
+  }
+  if (p === "this-year") {
+    return [startOfYear(today), today];
   }
   // last-30
   return [addDays(today, -29), today];

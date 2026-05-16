@@ -113,13 +113,21 @@ export function DayTimeline({
     const border = readCssVar("--border-subtle") || "rgba(0,0,0,0.1)";
     const bgApp = readCssVar("--bg-app") || "#ffffff";
 
-    // Hour labels (osa).
+    // Hour labels (osa). Render at the START of each hour bucket
+    // (`6 7 8 …`) PLUS one trailing label at the right edge (`22`) so
+    // segments ending late in the day don't look like they overflow
+    // the last labelled hour. The trailing label is right-aligned so
+    // it sits inside the canvas regardless of width.
     ctx.fillStyle = muted;
     ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textBaseline = "top";
+    ctx.textAlign = "left";
     for (let i = 0; i < totalHours; i++) {
       ctx.fillText(String(START_HOUR + i), i * hourW + 2, 0);
     }
+    ctx.textAlign = "right";
+    ctx.fillText(String(END_HOUR), cssWidth - 2, 0);
+    ctx.textAlign = "left";
 
     // Track background.
     const trackY = AXIS_HEIGHT;
