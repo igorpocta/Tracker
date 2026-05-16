@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "path";
+import { execSync } from "child_process";
 import { readFileSync } from "fs";
 
 // @ts-expect-error process is a nodejs global
@@ -10,6 +11,23 @@ const host = process.env.TAURI_DEV_HOST;
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "package.json"), "utf8"),
 ) as { version: string };
+
+// Short git SHA of the build. Falls back to "unknown" when the source
+// tree isn't a git checkout (e.g. tarball install in CI). Computed at
+// config-evaluation time so it ends up baked into the bundle.
+function readCommitHash(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      cwd: __dirname,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return "unknown";
+  }
+}
+const commitHash = readCommitHash();
 
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => {
@@ -49,6 +67,7 @@ export default defineConfig(async ({ mode }) => {
       // matching `release` tag and our frontend can show the same
       // string we ship.
       __APP_VERSION__: JSON.stringify(pkg.version),
+      __COMMIT_HASH__: JSON.stringify(commitHash),
       // Phase 19: surface the optional build-time DSN under the
       // canonical `import.meta.env.VITE_*` key. Empty string ≡ no DSN.
       "import.meta.env.VITE_TRACKER_SENTRY_DSN_FRONTEND": JSON.stringify(sentryDsn),

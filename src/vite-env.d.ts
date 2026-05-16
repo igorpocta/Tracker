@@ -6,3 +6,9 @@
  * the surrounding Rust crate / Tauri config (kept in sync manually).
  */
 declare const __APP_VERSION__: string;
+
+/**
+ * Short git SHA at build time, also injected by `vite.config.ts`. Equals
+ * the string `"unknown"` outside a git checkout.
+ */
+declare const __COMMIT_HASH__: string;
