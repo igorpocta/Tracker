@@ -590,15 +590,27 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const SYNC_RUNS_PAGE_SIZE = 30;
+const SYNC_RUNS_FETCH_LIMIT = 500;
+
 function SyncRunsHistory() {
   const [expanded, setExpanded] = useState(false);
+  const [page, setPage] = useState(1);
   const q = useQuery({
-    queryKey: queryKeys.syncRuns.list(50),
-    queryFn: () => listSyncRuns(50),
+    queryKey: queryKeys.syncRuns.list(SYNC_RUNS_FETCH_LIMIT),
+    queryFn: () => listSyncRuns(SYNC_RUNS_FETCH_LIMIT),
     enabled: expanded,
     staleTime: 30_000,
   });
   const runs = q.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(runs.length / SYNC_RUNS_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = runs.slice(
+    (safePage - 1) * SYNC_RUNS_PAGE_SIZE,
+    safePage * SYNC_RUNS_PAGE_SIZE,
+  );
+  const showPagination = runs.length > SYNC_RUNS_PAGE_SIZE;
+
   return (
     <section className="flex flex-col gap-2 pt-3 border-t border-[var(--border-subtle)]">
       <button
@@ -610,76 +622,126 @@ function SyncRunsHistory() {
         {expanded ? "Skrýt historii synchronizací" : "Historie synchronizací"}
       </button>
       {expanded && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px] border-collapse">
-            <thead>
-              <tr
-                className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
-                style={{ borderBottom: "1px solid var(--border-subtle)" }}
-              >
-                <th className="text-left px-2 py-1.5">Kdy</th>
-                <th className="text-left px-2 py-1.5">Připojení</th>
-                <th className="text-left px-2 py-1.5">Režim</th>
-                <th className="text-right px-2 py-1.5">Úkoly</th>
-                <th className="text-right px-2 py-1.5">Worklogy</th>
-                <th className="text-right px-2 py-1.5">Trvání</th>
-                <th className="text-left px-2 py-1.5">Stav</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.length === 0 && !q.isLoading && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-2 py-3 text-center text-[var(--text-tertiary)]"
-                  >
-                    Žádné záznamy.
-                  </td>
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr
+                  className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
+                  style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                >
+                  <th className="text-left px-2 py-1.5">Kdy</th>
+                  <th className="text-left px-2 py-1.5">Připojení</th>
+                  <th className="text-left px-2 py-1.5">Režim</th>
+                  <th className="text-right px-2 py-1.5">Úkoly</th>
+                  <th className="text-right px-2 py-1.5">Worklogy</th>
+                  <th className="text-right px-2 py-1.5">Trvání</th>
+                  <th className="text-left px-2 py-1.5">Stav</th>
                 </tr>
-              )}
-              {runs.map((r) => {
-                const durSec = r.finished_at - r.started_at;
-                return (
-                  <tr
-                    key={r.id}
-                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                  >
-                    <td className="px-2 py-1 text-[var(--text-tertiary)] font-mono">
-                      {formatSyncTime(r.finished_at)}
-                    </td>
-                    <td className="px-2 py-1">{r.connection_name ?? "—"}</td>
-                    <td className="px-2 py-1 text-[var(--text-tertiary)]">
-                      {r.mode === "full" ? "celá historie" : "přírůstky"}
-                    </td>
-                    <td className="px-2 py-1 text-right font-mono tabular-nums">
-                      {r.issues_count}
-                    </td>
-                    <td className="px-2 py-1 text-right font-mono tabular-nums">
-                      {r.worklogs_count}
-                    </td>
-                    <td className="px-2 py-1 text-right font-mono tabular-nums text-[var(--text-tertiary)]">
-                      {durSec}s
-                    </td>
-                    <td className="px-2 py-1">
-                      {r.error_phase ? (
-                        <span
-                          className="text-[var(--danger)]"
-                          title={r.error_message ?? undefined}
-                        >
-                          ⚠ {r.error_phase}
-                        </span>
-                      ) : (
-                        <span className="text-[var(--success)]">✓</span>
-                      )}
+              </thead>
+              <tbody>
+                {runs.length === 0 && !q.isLoading && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-2 py-3 text-center text-[var(--text-tertiary)]"
+                    >
+                      Žádné záznamy.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                )}
+                {pageRows.map((r) => {
+                  const durSec = r.finished_at - r.started_at;
+                  return (
+                    <tr
+                      key={r.id}
+                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                    >
+                      <td className="px-2 py-1 text-[var(--text-tertiary)] font-mono">
+                        {formatSyncTime(r.finished_at)}
+                      </td>
+                      <td className="px-2 py-1">{r.connection_name ?? "—"}</td>
+                      <td className="px-2 py-1 text-[var(--text-tertiary)]">
+                        {r.mode === "full" ? "celá historie" : "přírůstky"}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">
+                        {r.issues_count}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">
+                        {r.worklogs_count}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums text-[var(--text-tertiary)]">
+                        {durSec}s
+                      </td>
+                      <td className="px-2 py-1">
+                        {r.error_phase ? (
+                          <span
+                            className="text-[var(--danger)]"
+                            title={r.error_message ?? undefined}
+                          >
+                            ⚠ {r.error_phase}
+                          </span>
+                        ) : (
+                          <span className="text-[var(--success)]">✓</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {showPagination && (
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              onChange={setPage}
+            />
+          )}
+        </>
       )}
     </section>
+  );
+}
+
+interface PaginationProps {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}
+
+function Pagination({ page, totalPages, onChange }: PaginationProps) {
+  const prevDisabled = page <= 1;
+  const nextDisabled = page >= totalPages;
+  return (
+    <nav
+      aria-label="Stránkování"
+      className="flex items-center justify-end gap-2 text-[11px] text-[var(--text-secondary)]"
+    >
+      <button
+        type="button"
+        onClick={() => onChange(page - 1)}
+        disabled={prevDisabled}
+        className="px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
+                   hover:bg-[var(--bg-hover)] transition-colors duration-150
+                   disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
+        ← Předchozí
+      </button>
+      <span className="tabular-nums">
+        {page} / {totalPages}
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(page + 1)}
+        disabled={nextDisabled}
+        className="px-2 h-7 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]
+                   hover:bg-[var(--bg-hover)] transition-colors duration-150
+                   disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
+        Další →
+      </button>
+    </nav>
   );
 }
 
