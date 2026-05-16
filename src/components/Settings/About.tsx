@@ -59,7 +59,7 @@ export default function About() {
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-xl">
+    <div className="flex flex-col gap-6 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           O aplikaci
