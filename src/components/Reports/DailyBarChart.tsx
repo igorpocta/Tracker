@@ -23,6 +23,7 @@ import {
   formatDurationShort,
   formatWeekdayCs,
 } from "../../lib/format";
+import { usePrefsStore } from "../../stores/prefsStore";
 
 export interface DailyBarChartProps {
   rows: WorklogRow[];
@@ -62,6 +63,12 @@ function accentWithOpacity(percent: number): string {
 
 export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartProps) {
   const days = useMemo(() => buildDayList(from, to), [from, to]);
+  // V mono paletě je --accent-2 == --accent → goal line by se ztratila
+  // ve sloupcích. Tehdy zůstáváme u zlaté `--warning`. Dual paleta dovolí
+  // line dotáhnout na sekundární accent (zlatá kolize zmizí).
+  const paletteMode = usePrefsStore((s) => s.paletteMode);
+  const goalLineColor =
+    paletteMode === "dual" ? "var(--accent-2)" : "var(--warning, #ff9f0a)";
 
   // Připojení potřebujeme pro pojmenování / barvy segmentů. Selže-li
   // (např. během startup), padá fallback na "lokální" pro vše.
@@ -273,7 +280,7 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                   <div
                     className="w-full"
                     style={{
-                      borderTop: "1px dashed var(--warning, #ff9f0a)",
+                      borderTop: `1px dashed ${goalLineColor}`,
                       opacity: 0.8,
                     }}
                   />
@@ -281,8 +288,8 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                     className="absolute -top-2 right-0 px-1 py-[1px] rounded-[3px] text-[9px] font-medium tabular-nums leading-none"
                     style={{
                       background: "var(--bg-surface)",
-                      color: "var(--warning, #ff9f0a)",
-                      border: "1px solid var(--warning, #ff9f0a)",
+                      color: goalLineColor,
+                      border: `1px solid ${goalLineColor}`,
                       opacity: 0.85,
                     }}
                   >
