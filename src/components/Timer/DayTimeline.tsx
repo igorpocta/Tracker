@@ -81,7 +81,11 @@ export function DayTimeline({
   onCreateRequest,
 }: DayTimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  // Reference NA BEZPADDINGOVÝ container kolem canvasu. Měřit přímo vnější
+  // kartu (`p-3`) by vracelo `clientWidth` včetně paddingu, takže by canvas
+  // narostl o 24 px a popisek `22` na pravé straně by visel mimo bezpečnou
+  // zónu (porovnatelnou s levou stranou).
+  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const segmentsRef = useRef<Segment[]>([]);
   const [hover, setHover] = useState<Hover | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -91,10 +95,10 @@ export function DayTimeline({
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    const wrapper = wrapperRef.current;
-    if (!canvas || !wrapper) return;
+    const host = canvasHostRef.current;
+    if (!canvas || !host) return;
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = wrapper.clientWidth;
+    const cssWidth = host.clientWidth;
     const cssHeight = AXIS_HEIGHT + ROW_HEIGHT;
     canvas.width = Math.round(cssWidth * dpr);
     canvas.height = Math.round(cssHeight * dpr);
@@ -202,10 +206,10 @@ export function DayTimeline({
     draw();
   }, [draw, rows, day]);
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+    const host = canvasHostRef.current;
+    if (!host) return;
     const obs = new ResizeObserver(() => draw());
-    obs.observe(wrapper);
+    obs.observe(host);
     return () => obs.disconnect();
   }, [draw]);
 
@@ -226,7 +230,6 @@ export function DayTimeline({
 
   return (
     <div
-      ref={wrapperRef}
       className="rounded-[var(--radius-md)] border border-[var(--border-subtle)]
                  bg-[var(--bg-surface)] p-3"
       aria-label="Časová osa dne"
@@ -234,7 +237,7 @@ export function DayTimeline({
       <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-2">
         Časová osa dne
       </h3>
-      <div className="relative">
+      <div ref={canvasHostRef} className="relative">
         <canvas
           ref={canvasRef}
           className="w-full block cursor-pointer"
