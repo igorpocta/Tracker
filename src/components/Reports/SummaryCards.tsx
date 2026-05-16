@@ -23,7 +23,10 @@ export interface SummaryCardsProps {
 export function SummaryCards(props: SummaryCardsProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      <BigStatCard label="Celkový čas" value={props.durationLabel} />
+      {/* Celkový čas + Výdělek tvoří pár (primary/secondary accent) —
+          čas vs peníze. Zbylé dvě karty zůstávají neutrální, aby
+          hierarchii nezatáhly. */}
+      <BigStatCard label="Celkový čas" value={props.durationLabel} accented />
       <BigStatCard label="Odpracovaných dní" value={`${props.daysWorked}`} />
       <BigStatCard label="Dotčených úkolů" value={`${props.issuesTouched}`} />
       <EarningsCard
@@ -38,15 +41,22 @@ export function SummaryCards(props: SummaryCardsProps) {
 function BigStatCard({
   label,
   value,
+  accented = false,
 }: {
   label: string;
   value: React.ReactNode;
+  accented?: boolean;
 }) {
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-4">
       <div className="text-[11px] text-[var(--text-tertiary)]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
+      <div
+        className="mt-2 text-2xl font-semibold tabular-nums"
+        style={accented ? { color: "var(--accent)" } : undefined}
+      >
+        {value}
+      </div>
     </div>
   );
 }
