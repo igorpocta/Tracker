@@ -60,7 +60,19 @@ jobs:
 
       - name: Rust tests
         working-directory: src-tauri
-        run: cargo test --no-fail-fast
+        env:
+          # Full backtrace so a panic we can't repro locally (a non-zero
+          # exit from the lib target without any visible `test ... FAILED`
+          # line) finally shows where it came from.
+          RUST_BACKTRACE: full
+          # Cargo's per-process log target is normally /dev/null; cranking
+          # it to `debug` here is harmless and surfaces signal-kill details
+          # if the test binary is taken down by the OS.
+          CARGO_TERM_VERBOSE: "true"
+        # `--nocapture` flushes stdout/stderr live (so a panic on shutdown
+        # doesn't get swallowed by libtest's per-thread buffer). Without it
+        # truncated logs hide the actual failure site.
+        run: cargo test --no-fail-fast -- --nocapture
 
   bundle:
     name: Bundle (${{ matrix.platform }})
