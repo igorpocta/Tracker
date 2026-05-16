@@ -222,6 +222,19 @@ export function setDailyGoal(seconds: number): Promise<void> {
   return invoke<void>("set_daily_goal", { seconds });
 }
 
+/**
+ * Auto-sync interval (seconds). `0` means manual-only — the backend loop
+ * idles until the user picks a non-zero interval again. Allowed values:
+ * 0, 900, 3600, 14400, 86400 (manual / 15 min / 1 h / 4 h / daily).
+ */
+export function getAutoSyncIntervalSeconds(): Promise<number> {
+  return invoke<number>("get_auto_sync_interval_seconds");
+}
+
+export function setAutoSyncIntervalSeconds(seconds: number): Promise<void> {
+  return invoke<void>("set_auto_sync_interval_seconds", { seconds });
+}
+
 export function getHourlyRate(): Promise<number> {
   return invoke<number>("get_hourly_rate");
 }

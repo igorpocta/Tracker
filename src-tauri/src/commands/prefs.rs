@@ -95,6 +95,14 @@ const KEY_CURRENCY: &str = "currency";
 const KEY_PALETTE_MODE: &str = "palette_mode";
 const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
 const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
+/// Auto-sync interval, in seconds. `0` means "manual only" (the background
+/// loop skips fetching). The DB stores the integer as a string.
+pub const KEY_AUTO_SYNC_INTERVAL: &str = "auto_sync_interval_seconds";
+/// Default auto-sync interval: 1 hour.
+pub const DEFAULT_AUTO_SYNC_INTERVAL_SECONDS: i64 = 3_600;
+/// Allowed auto-sync intervals: manual, 15m, 1h, 4h, daily.
+pub const ALLOWED_AUTO_SYNC_INTERVALS: &[i64] =
+    &[0, 15 * 60, 60 * 60, 4 * 60 * 60, 24 * 60 * 60];
 /// Phase 18B — Item 12: ISO date (YYYY-MM-DD) of the last time we fired the
 /// "daily goal reached" notification. Used to dedupe.
 pub const KEY_TODAY_GOAL_NOTIFIED_AT: &str = "today_goal_notified_at";
@@ -136,6 +144,25 @@ pub fn set_daily_goal_inner(db: &Db, seconds: i64) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_DAILY_GOAL, &seconds.to_string()).map_err(|e| e.to_string())
+}
+
+pub fn get_auto_sync_interval_inner(db: &Db) -> Result<i64, String> {
+    match cache::settings::get(db, KEY_AUTO_SYNC_INTERVAL).map_err(|e| e.to_string())? {
+        Some(v) => v
+            .parse::<i64>()
+            .map_err(|_| format!("invalid {KEY_AUTO_SYNC_INTERVAL}: {v}")),
+        None => Ok(DEFAULT_AUTO_SYNC_INTERVAL_SECONDS),
+    }
+}
+
+pub fn set_auto_sync_interval_inner(db: &Db, seconds: i64) -> Result<(), String> {
+    if !ALLOWED_AUTO_SYNC_INTERVALS.contains(&seconds) {
+        return Err(format!(
+            "Neplatný auto-sync interval {seconds}; očekáváno {ALLOWED_AUTO_SYNC_INTERVALS:?}"
+        ));
+    }
+    cache::settings::set(db, KEY_AUTO_SYNC_INTERVAL, &seconds.to_string())
+        .map_err(|e| e.to_string())
 }
 
 pub const ALLOWED_WIDGET_FORMATS: &[&str] = &["HH:MM:SS", "Hh Mm", "0.0h"];
@@ -413,6 +440,24 @@ pub async fn set_daily_goal(
 ) -> Result<(), String> {
     set_daily_goal_inner(&state.db, seconds)?;
     let _ = app.emit("prefs-changed", "daily_goal_seconds");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_auto_sync_interval_seconds(
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, String> {
+    get_auto_sync_interval_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_auto_sync_interval_seconds(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    seconds: i64,
+) -> Result<(), String> {
+    set_auto_sync_interval_inner(&state.db, seconds)?;
+    let _ = app.emit("prefs-changed", KEY_AUTO_SYNC_INTERVAL);
     Ok(())
 }
 
@@ -740,6 +785,35 @@ mod tests {
         assert!(set_widget_format_inner(&db, "").is_err());
         assert!(set_widget_format_inner(&db, "<script>").is_err());
         assert!(set_widget_format_inner(&db, "hh:mm").is_err()); // case-sensitive
+    }
+
+    #[test]
+    fn auto_sync_interval_defaults_to_one_hour() {
+        let db = open_db();
+        assert_eq!(
+            get_auto_sync_interval_inner(&db).unwrap(),
+            DEFAULT_AUTO_SYNC_INTERVAL_SECONDS,
+        );
+    }
+
+    #[test]
+    fn set_auto_sync_interval_accepts_whitelist() {
+        let db = open_db();
+        for &s in ALLOWED_AUTO_SYNC_INTERVALS {
+            assert!(set_auto_sync_interval_inner(&db, s).is_ok(), "{s}");
+            assert_eq!(get_auto_sync_interval_inner(&db).unwrap(), s);
+        }
+    }
+
+    #[test]
+    fn set_auto_sync_interval_rejects_arbitrary_seconds() {
+        let db = open_db();
+        // Off-whitelist values must be rejected so the UI dropdown stays the
+        // sole source of truth for allowed cadences.
+        assert!(set_auto_sync_interval_inner(&db, 1).is_err());
+        assert!(set_auto_sync_interval_inner(&db, 30).is_err());
+        assert!(set_auto_sync_interval_inner(&db, 7200).is_err());
+        assert!(set_auto_sync_interval_inner(&db, -1).is_err());
     }
 
     #[test]

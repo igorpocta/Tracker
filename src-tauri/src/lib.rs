@@ -223,76 +223,106 @@ pub fn run() {
             });
 
             // Auto-sync issues + worklogs across all enabled connections.
+            //
+            // Phase 22 — proper periodic loop (was a one-shot at startup). The
+            // interval is user-configurable via `set_auto_sync_interval_seconds`
+            // (Settings → Obecné → Reindex). Setting `0` disables the periodic
+            // sync entirely; the loop then idles, re-checking the pref every
+            // five minutes so a flip back to a non-zero interval kicks in
+            // without an app restart.
+            //
+            // Sliding interval semantics: each iteration sleeps `interval_secs`
+            // AFTER the previous sync finishes, so a 1h interval means roughly
+            // "1h between syncs", not "fire on every wall-clock hour".
             let auto_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 let state = auto_handle.state::<AppState>();
-                let active = state.connections.read().expect("AppState.connections RwLock poisoned").clone();
-                let total = active.len();
 
-                // Dev-time throttle: skip the per-connection auto-sync if we
-                // already synced within the last N minutes. Massively reduces
-                // API hammering during the `tauri dev` reload loop.
+                // Dev-time throttle for the FIRST iteration only: skip if the
+                // last sync happened within N minutes. Prevents a `tauri dev`
+                // rebuild loop from hammering the API. Subsequent iterations
+                // are gated by the proper sleep interval instead.
                 //
-                // Rules:
-                //   - Disabled by default in release builds.
-                //   - Default 60 minutes in debug builds (`cargo run`,
-                //     `tauri dev`).
-                //   - Override either with the env var
-                //     `TRACKER_SYNC_THROTTLE_MIN=<n>` (works in any build) or
-                //     `TRACKER_SYNC_THROTTLE_MIN=0` to force every restart to
-                //     sync (handy when you actually want fresh data in dev).
+                //   - Default 60 minutes in debug builds.
+                //   - Disabled in release builds.
+                //   - Override via `TRACKER_SYNC_THROTTLE_MIN=<n>`
+                //     (`0` forces every restart to sync).
                 let throttle_min: i64 = std::env::var("TRACKER_SYNC_THROTTLE_MIN")
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .unwrap_or(if cfg!(debug_assertions) { 60 } else { 0 });
                 let throttle_secs = throttle_min.max(0) * 60;
-                let now_unix = chrono::Utc::now().timestamp();
+                let mut first_iteration = true;
 
-                // Delegate per-connection work to `sync_one_connection` so the
-                // store/clear logic for `last_sync_error` is identical to the
-                // manual `refresh_all` path. (Auto-sync původně měl vlastní
-                // inline loop, který neuměl persistovaný error vyčistit po
-                // úspěšném resyncu — proto sidebar ring zůstal červený.)
-                for (idx, active_conn) in active.into_iter().enumerate() {
-                    let throttle_key = format!("last_auto_sync_at:{}", active_conn.id);
-                    if throttle_secs > 0 {
-                        let last = cache::settings::get(&state.db, &throttle_key)
-                            .ok()
-                            .flatten()
-                            .and_then(|s| s.parse::<i64>().ok())
-                            .unwrap_or(0);
-                        if now_unix - last < throttle_secs {
-                            tracing::info!(
-                                target: "auto_sync",
-                                "throttle: skipping connection id={} (last sync {}s ago, threshold {}s)",
-                                active_conn.id,
-                                now_unix - last,
-                                throttle_secs,
-                            );
-                            continue;
-                        }
+                loop {
+                    // Pref is re-read each iteration so changes from the UI
+                    // take effect on the next cycle (no restart needed).
+                    let interval_secs = commands::prefs::get_auto_sync_interval_inner(&state.db)
+                        .map(|s| s.max(0) as u64)
+                        .unwrap_or(
+                            commands::prefs::DEFAULT_AUTO_SYNC_INTERVAL_SECONDS as u64,
+                        );
+
+                    if interval_secs == 0 {
+                        // Manual mode — skip the sync, recheck pref in 5 min so
+                        // toggling back on isn't gated on a long sleep.
+                        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                        first_iteration = false;
+                        continue;
                     }
 
-                    let _ = commands::worklog::sync_one_connection(
-                        &auto_handle,
-                        &state.db,
-                        active_conn,
-                        idx,
-                        total,
-                        commands::worklog::SyncMode::Incremental,
-                    )
-                    .await;
+                    // Snapshot active connections per-iteration so new/removed
+                    // connections are picked up without an app restart.
+                    let active = state
+                        .connections
+                        .read()
+                        .expect("AppState.connections RwLock poisoned")
+                        .clone();
+                    let total = active.len();
+                    let now_unix = chrono::Utc::now().timestamp();
 
-                    // Stamp throttle key so next boot in dev can short-circuit.
-                    let _ = cache::settings::set(
-                        &state.db,
-                        &throttle_key,
-                        &now_unix.to_string(),
-                    );
+                    for (idx, active_conn) in active.into_iter().enumerate() {
+                        let throttle_key = format!("last_auto_sync_at:{}", active_conn.id);
+                        if first_iteration && throttle_secs > 0 {
+                            let last = cache::settings::get(&state.db, &throttle_key)
+                                .ok()
+                                .flatten()
+                                .and_then(|s| s.parse::<i64>().ok())
+                                .unwrap_or(0);
+                            if now_unix - last < throttle_secs {
+                                tracing::info!(
+                                    target: "auto_sync",
+                                    "throttle: skipping connection id={} (last sync {}s ago, threshold {}s)",
+                                    active_conn.id,
+                                    now_unix - last,
+                                    throttle_secs,
+                                );
+                                continue;
+                            }
+                        }
+
+                        let _ = commands::worklog::sync_one_connection(
+                            &auto_handle,
+                            &state.db,
+                            active_conn,
+                            idx,
+                            total,
+                            commands::worklog::SyncMode::Incremental,
+                        )
+                        .await;
+
+                        let _ = cache::settings::set(
+                            &state.db,
+                            &throttle_key,
+                            &now_unix.to_string(),
+                        );
+                    }
+
+                    let _ = auto_handle.emit("auto-sync-complete", ());
+                    first_iteration = false;
+                    tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
                 }
-
-                let _ = auto_handle.emit("auto-sync-complete", ());
             });
 
             // Phase 18A — Item 9: emit a `day-rollover` event at local midnight.
@@ -394,6 +424,8 @@ pub fn run() {
             // Prefs
             commands::prefs::get_daily_goal,
             commands::prefs::set_daily_goal,
+            commands::prefs::get_auto_sync_interval_seconds,
+            commands::prefs::set_auto_sync_interval_seconds,
             commands::prefs::get_pomodoro,
             commands::prefs::set_pomodoro,
             commands::prefs::list_project_colors,

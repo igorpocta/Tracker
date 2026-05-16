@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import {
   exportBackup,
   getActivityThresholdMin,
+  getAutoSyncIntervalSeconds,
   getAutostart,
   getInstallId,
   getRoundingIntervalMinutes,
@@ -24,6 +25,7 @@ import {
   importBackup,
   purgeAuditLog,
   setActivityThresholdMin,
+  setAutoSyncIntervalSeconds,
   setAutostart,
   setRoundingIntervalMinutes,
   setRoundingMode,
@@ -41,7 +43,6 @@ import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
 
 const LS_TIME_INPUT_KEY = "tracker.timeInput";
-const LS_REINDEX_KEY = "tracker.reindexInterval";
 
 export type TimeInputStyle = "end" | "duration";
 export type ReindexInterval = "manual" | "15m" | "1h" | "4h" | "daily";
@@ -53,6 +54,30 @@ const REINDEX_LABEL: Record<ReindexInterval, string> = {
   "4h": "Každé 4 hodiny",
   daily: "Jednou denně",
 };
+
+const REINDEX_TO_SECONDS: Record<ReindexInterval, number> = {
+  manual: 0,
+  "15m": 15 * 60,
+  "1h": 60 * 60,
+  "4h": 4 * 60 * 60,
+  daily: 24 * 60 * 60,
+};
+
+function secondsToReindex(seconds: number): ReindexInterval {
+  switch (seconds) {
+    case 0:
+      return "manual";
+    case 15 * 60:
+      return "15m";
+    case 4 * 60 * 60:
+      return "4h";
+    case 24 * 60 * 60:
+      return "daily";
+    case 60 * 60:
+    default:
+      return "1h";
+  }
+}
 
 export default function General() {
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
@@ -78,10 +103,6 @@ export default function General() {
     try {
       const ti = window.localStorage.getItem(LS_TIME_INPUT_KEY);
       if (ti === "end" || ti === "duration") setTimeInput(ti);
-      const r = window.localStorage.getItem(LS_REINDEX_KEY);
-      if (r === "manual" || r === "15m" || r === "1h" || r === "4h" || r === "daily") {
-        setReindex(r as ReindexInterval);
-      }
     } catch {
       /* ignore */
     }
@@ -94,6 +115,9 @@ export default function General() {
     void getRoundingIntervalMinutes().then(setRndInterval).catch(() => {});
     void getActivityThresholdMin().then(setActThreshold).catch(() => {});
     void getSentryEnabled().then(setSentryOn).catch(() => setSentryOn(false));
+    void getAutoSyncIntervalSeconds()
+      .then((s) => setReindex(secondsToReindex(s)))
+      .catch(() => {});
   }, []);
 
   const updateAutostart = async (enabled: boolean) => {
@@ -153,12 +177,12 @@ export default function General() {
     }
   };
   const updateReindex = (v: ReindexInterval) => {
+    const previous = reindex;
     setReindex(v);
-    try {
-      window.localStorage.setItem(LS_REINDEX_KEY, v);
-    } catch {
-      /* ignore */
-    }
+    setAutoSyncIntervalSeconds(REINDEX_TO_SECONDS[v]).catch(() => {
+      // Revert on backend failure so the UI doesn't lie about what's persisted.
+      setReindex(previous);
+    });
   };
 
   return (
@@ -316,7 +340,7 @@ export default function General() {
 
       <Section
         title="Interval automatické re-indexace"
-        description="Jak často se na pozadí automaticky reindexují úkoly z Jiry."
+        description="Jak často se na pozadí automaticky reindexují úkoly z Jiry. Interval se počítá od konce předchozí synchronizace — ne od fixní hodinové značky. Při startu aplikace proběhne první sync ihned (pokud nebyl proveden v posledních 60 minutách v debug buildu)."
       >
         <select
           value={reindex}
