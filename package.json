@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "icons:rasterize": "node scripts/rasterize-icons.mjs",
     "version:bump": "node scripts/bump-version.mjs",
-    "release": "bash scripts/build-release.sh"
+    "release": "bash scripts/release.sh",
+    "build:local": "bash scripts/build-release.sh"
   },
   "dependencies": {
     "@sentry/react": "^10.53.1",
