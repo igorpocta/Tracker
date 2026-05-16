@@ -101,8 +101,7 @@ pub const KEY_AUTO_SYNC_INTERVAL: &str = "auto_sync_interval_seconds";
 /// Default auto-sync interval: 1 hour.
 pub const DEFAULT_AUTO_SYNC_INTERVAL_SECONDS: i64 = 3_600;
 /// Allowed auto-sync intervals: manual, 15m, 1h, 4h, daily.
-pub const ALLOWED_AUTO_SYNC_INTERVALS: &[i64] =
-    &[0, 15 * 60, 60 * 60, 4 * 60 * 60, 24 * 60 * 60];
+pub const ALLOWED_AUTO_SYNC_INTERVALS: &[i64] = &[0, 15 * 60, 60 * 60, 4 * 60 * 60, 24 * 60 * 60];
 /// Phase 18B — Item 12: ISO date (YYYY-MM-DD) of the last time we fired the
 /// "daily goal reached" notification. Used to dedupe.
 pub const KEY_TODAY_GOAL_NOTIFIED_AT: &str = "today_goal_notified_at";
