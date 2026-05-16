@@ -265,26 +265,24 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
         </div>
       ) : (
         <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs">
-          {aggregated.map((a, idx) => {
+          {aggregated.map((a) => {
             const isHovered = hoverKey === a.issueKey;
-            // První řádek (po DESC sortu podle totalSeconds) = největší
-            // konzument času za období. Vizuálně ho odlišujeme přes
-            // sekundární accent na IssuePillu — v mono paletě nezpůsobí
-            // změnu (accent-2 == accent), v dual paletě je to "vrchol".
-            const isTopContributor = idx === 0;
             return (
               <div
                 key={a.issueKey}
                 className="col-span-4 grid grid-cols-subgrid gap-x-4 items-center min-h-[32px] px-2 -mx-2 rounded-[6px]"
                 style={{
-                  background: isHovered ? "var(--accent-soft)" : "transparent",
+                  // Sekundární accent na hoveru: v mono paletě splývá s
+                  // primárním (accent-2 == accent), v dual paletě jasně
+                  // odlišuje hover od stavu "klik otevírá ten samý úkol".
+                  background: isHovered ? "var(--accent-2-soft)" : "transparent",
                   transition: "background-color 120ms ease-out",
                 }}
                 onMouseEnter={() => setHoverKey(a.issueKey)}
                 onMouseLeave={() => setHoverKey(null)}
               >
                 <div className="flex items-center">
-                  <IssuePill issueKey={a.issueKey} secondary={isTopContributor} />
+                  <IssuePill issueKey={a.issueKey} />
                 </div>
                 <div className="truncate text-[var(--text-secondary)]">
                   {a.summary || "(načítá se…)"}
