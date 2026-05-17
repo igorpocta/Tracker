@@ -75,8 +75,22 @@ pub fn parse_project_key(key: &str) -> Option<i64> {
 }
 
 /// Parse a Freelo work-report id back out of the `jira_worklog_id` column.
+///
+/// Historicky byly v plánu dva formáty:
+///   - prefixovaný `freelo:NNN` (pro odlišení od Jira id v té samé koloně)
+///   - holý `NNN` (jak fakticky `sync.rs::work_report_to_row` ukládá)
+///
+/// Prefixovaná varianta nikdy nebyla skutečně zapisována, takže parser
+/// holý `NNN` původně odmítal a `update_freelo_worklog` selhával s
+/// "Neplatné Freelo id záznamu: NNN". Přijímáme proto oba tvary — sloupec
+/// se dispatch-uje podle `issue_key` (FREELO- prefix), takže záměna
+/// s Jira id už ve worklog crud cestě nehrozí.
 pub fn parse_worklog_id(s: &str) -> Option<i64> {
-    s.strip_prefix(FREELO_WORKLOG_PREFIX)?.parse::<i64>().ok()
+    if let Some(rest) = s.strip_prefix(FREELO_WORKLOG_PREFIX) {
+        rest.parse::<i64>().ok()
+    } else {
+        s.parse::<i64>().ok()
+    }
 }
 
 /// Returns true if `issue_key` is a Freelo-shaped synthetic key (task or
@@ -119,6 +133,8 @@ mod tests {
     fn worklog_id_roundtrips() {
         assert_eq!(worklog_id_key(123), "freelo:123");
         assert_eq!(parse_worklog_id("freelo:123"), Some(123));
-        assert_eq!(parse_worklog_id("12345"), None);
+        // Holý numerický tvar musí projít — viz komentář nad funkcí.
+        assert_eq!(parse_worklog_id("12345"), Some(12345));
+        assert_eq!(parse_worklog_id("nope"), None);
     }
 }
