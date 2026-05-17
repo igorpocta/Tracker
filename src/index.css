@@ -199,6 +199,27 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Tracker je desktop appka, ne dokument — defaultně blokujeme označování
+ * textu, ať dvojklik / drag mezi prvky nedělá vizuální highlight a uživatel
+ * nemá pocit "rozbitého" UI. Editační prvky (input / textarea / contenteditable)
+ * a explicitně označené regiony zůstávají selectable. */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+[data-allow-select],
+[data-allow-select] * {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
 ::selection {
   background: var(--accent-soft);
   color: var(--text-primary);
