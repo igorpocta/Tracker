@@ -31,6 +31,7 @@ import { ChevronDown, Flame } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { getStreaks, getWorklogsForRange } from "../api/commands";
+import { queryKeys } from "../api/queryKeys";
 import type { WorklogRow } from "../api/types";
 import { IssuePill } from "../components/common/IssuePill";
 import { PageContainer } from "../components/Layout/PageContainer";
@@ -81,7 +82,7 @@ export default function Reports() {
   const toUnix = dayEndUnixS(to);
 
   const q = useQuery({
-    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryKey: queryKeys.worklogs.range(fromUnix, toUnix),
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 

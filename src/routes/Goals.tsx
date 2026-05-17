@@ -30,6 +30,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { getWorklogsForRange } from "../api/commands";
+import { queryKeys } from "../api/queryKeys";
 import { GoalsPrediction } from "../components/Goals/GoalsPrediction";
 import { PageContainer } from "../components/Layout/PageContainer";
 import { useCalendarMask, isWorkingDayLocal } from "../hooks/useCalendarMask";
@@ -86,7 +87,7 @@ export default function Goals() {
   const toUnix = dayEndUnixS(monthEnd);
 
   const q = useQuery({
-    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryKey: queryKeys.worklogs.range(fromUnix, toUnix),
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 

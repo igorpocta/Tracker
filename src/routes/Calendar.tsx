@@ -28,6 +28,7 @@ import {
   getWorklogsForRange,
   removeNonWorkingDay,
 } from "../api/commands";
+import { queryKeys } from "../api/queryKeys";
 import type { WorklogRow } from "../api/types";
 import {
   CellContextMenu,
@@ -146,7 +147,7 @@ function MonthlyView({
   const toUnix = dayEndUnixS(monthEnd);
 
   const q = useQuery({
-    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryKey: queryKeys.worklogs.range(fromUnix, toUnix),
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
@@ -296,7 +297,7 @@ function YearlyView({
   const toUnix = dayEndUnixS(yearEnd);
 
   const q = useQuery({
-    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryKey: queryKeys.worklogs.range(fromUnix, toUnix),
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 

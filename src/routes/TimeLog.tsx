@@ -23,6 +23,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Plus, Trash2 } f
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useLocation, useOutletContext } from "react-router-dom";
 
+import { invalidateWorklogQueries, queryKeys } from "../api/queryKeys";
 import {
   assignWorklogIssue,
   createManualWorklog,
@@ -150,7 +151,7 @@ export default function TimeLog() {
   const toUnix = dayEndUnixS(to);
 
   const worklogsQ = useQuery({
-    queryKey: ["worklogs-range", fromUnix, toUnix],
+    queryKey: queryKeys.worklogs.range(fromUnix, toUnix),
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
@@ -168,7 +169,7 @@ export default function TimeLog() {
         if (!row.id) return;
         try {
           await deleteLocalOnlyWorklog(row.id);
-          queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+          invalidateWorklogQueries(queryClient);
         } catch (e) {
           ctx.pushToast(
             "error",
@@ -214,7 +215,7 @@ export default function TimeLog() {
                 next.delete(jiraId);
                 return next;
               });
-              queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
+              invalidateWorklogQueries(queryClient);
             }
           },
         },
@@ -260,8 +261,7 @@ export default function TimeLog() {
           ctx.pushToast("error", "Záznam nemá ID, nelze upravit.");
           return;
         }
-        queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-        queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+        invalidateWorklogQueries(queryClient);
       } catch (e) {
         ctx.pushToast(
           "error",
@@ -284,8 +284,7 @@ export default function TimeLog() {
       if (row.id == null) return;
       try {
         await assignWorklogIssue(row.id, issueKey);
-        queryClient.invalidateQueries({ queryKey: ["worklogs-range"] });
-        queryClient.invalidateQueries({ queryKey: ["worklog-history"] });
+        invalidateWorklogQueries(queryClient);
         ctx.pushToast?.("success", `Záznam přiřazen na ${issueKey}.`);
       } catch (e) {
         ctx.pushToast?.(
@@ -402,9 +401,7 @@ export default function TimeLog() {
                 durationSeconds,
                 comment: null,
               });
-              queryClient.invalidateQueries({
-                queryKey: ["worklogs-range"],
-              });
+              invalidateWorklogQueries(queryClient);
             } catch (e) {
               ctx.pushToast(
                 "error",
@@ -429,9 +426,7 @@ export default function TimeLog() {
                   splitRequest.splitAtMs,
                   newIssueKey || null,
                 );
-                queryClient.invalidateQueries({
-                  queryKey: ["worklogs-range"],
-                });
+                invalidateWorklogQueries(queryClient);
               }
             } catch (e) {
               ctx.pushToast(
