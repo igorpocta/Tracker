@@ -78,7 +78,7 @@ pub async fn add_work_report(
     // projevilo jako "0:00–0:39" místo skutečného intervalu časomíry.
     // Zachováme proto skutečný čas, který si pamatujeme lokálně.
     let started_at_s = started_at_ms / 1000;
-    let duration_s = i64::from(minutes).saturating_mul(60);
+    let duration_s = minutes.saturating_mul(60);
     row.started_at = started_at_s;
     row.ended_at = started_at_s.saturating_add(duration_s);
     row.logged_at = started_at_s;
