@@ -83,8 +83,15 @@ uuid = { version = "1", features = ["v4"] }
 # Dock-icon swap potřebuje NSApplication.setApplicationIconImage.
 # Verze sjednocená s Tauri 2.11 transitive deps (Cargo.lock).
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSImage",
+    "NSEvent",
+    "NSResponder",
+] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
+# Pro popover global mouse monitor — RcBlock pro NSEvent handler block.
+block2 = "0.6"
 
 [dev-dependencies]
 wiremock = "0.6"

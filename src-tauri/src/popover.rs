@@ -15,6 +15,9 @@ use tauri::{
     WindowEvent,
 };
 
+#[cfg(target_os = "macos")]
+mod global_mouse_monitor;
+
 /// Window label that must match `tauri.conf.json`.
 pub const POPOVER_LABEL: &str = "popover";
 /// Window label of the main app window.
@@ -105,6 +108,7 @@ pub fn show_under<R: Runtime>(popover: &WebviewWindow<R>, tray_rect: Rect) -> ta
 
     popover.show()?;
     popover.set_focus()?;
+    install_outside_click_monitor(popover);
     let _ = popover.emit("popover:opened", ());
     Ok(())
 }
@@ -124,6 +128,7 @@ pub fn show_centered<R: Runtime>(popover: &WebviewWindow<R>) -> tauri::Result<()
     }
     popover.show()?;
     popover.set_focus()?;
+    install_outside_click_monitor(popover);
     let _ = popover.emit("popover:opened", ());
     Ok(())
 }
@@ -131,7 +136,30 @@ pub fn show_centered<R: Runtime>(popover: &WebviewWindow<R>) -> tauri::Result<()
 /// Hide the popover window.
 pub fn hide<R: Runtime>(popover: &WebviewWindow<R>) -> tauri::Result<()> {
     popover.hide()?;
+    uninstall_outside_click_monitor();
     Ok(())
+}
+
+/// Wrap macOS global monitor install — no-op on jiných platformách,
+/// aby zbytek modulu nemusel větvit přes `#[cfg]`.
+#[inline]
+fn install_outside_click_monitor<R: Runtime>(popover: &WebviewWindow<R>) {
+    #[cfg(target_os = "macos")]
+    {
+        global_mouse_monitor::install(popover.app_handle());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = popover;
+    }
+}
+
+#[inline]
+fn uninstall_outside_click_monitor() {
+    #[cfg(target_os = "macos")]
+    {
+        global_mouse_monitor::uninstall();
+    }
 }
 
 /// Hide the popover by label (helper for command callers).
