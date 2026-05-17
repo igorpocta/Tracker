@@ -448,14 +448,32 @@ function RunningBar({
             unassigned ? "bg-red-500" : "bg-[var(--accent)]",
           )}
         />
-        <span
-          className={clsx(
-            "font-mono text-[11px] uppercase tracking-[0.08em] shrink-0",
-            unassigned ? "text-red-500" : "text-[var(--accent)]",
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span
+            className={clsx(
+              "font-mono text-[11px] uppercase tracking-[0.08em] shrink-0",
+              unassigned ? "text-red-500" : "text-[var(--accent)]",
+            )}
+          >
+            {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
+          </span>
+          {!unassigned && active.summary && active.summary.trim().length > 0 && (
+            <>
+              <span
+                aria-hidden
+                className="text-[var(--text-tertiary)] text-xs shrink-0"
+              >
+                ·
+              </span>
+              <span
+                className="text-sm text-[var(--text-primary)] truncate"
+                title={active.summary}
+              >
+                {active.summary}
+              </span>
+            </>
           )}
-        >
-          {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
-        </span>
+        </div>
         {editingComment ? (
           <input
             type="text"
@@ -472,7 +490,7 @@ function RunningBar({
             }}
             placeholder="Poznámka"
             aria-label="Upravit poznámku"
-            className="flex-1 min-w-0 h-7 px-2 text-xs rounded-[var(--radius-sm)]
+            className="shrink-0 w-44 h-7 px-2 text-xs rounded-[var(--radius-sm)]
                        bg-transparent border border-[var(--border-subtle)]
                        focus:outline-none focus:border-[var(--border-default)]"
           />
@@ -480,7 +498,7 @@ function RunningBar({
           <button
             type="button"
             onClick={() => setEditingComment(true)}
-            className="flex-1 min-w-0 text-left text-xs text-[var(--text-tertiary)] truncate
+            className="shrink-0 max-w-[12rem] text-left text-xs text-[var(--text-tertiary)] truncate
                        hover:text-[var(--text-secondary)] transition-colors duration-150"
             title="Upravit poznámku"
           >

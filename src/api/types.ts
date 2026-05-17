@@ -192,6 +192,8 @@ export interface ActiveTimerState {
   elapsed_seconds: number;
   /** Phase 18B — Item 6: in-flight comment attached to the running timer. */
   comment?: string | null;
+  /** Issue title joined from the local issues cache for display. */
+  summary?: string | null;
 }
 
 /** Visible Jira ticket reported by the browser extension. */

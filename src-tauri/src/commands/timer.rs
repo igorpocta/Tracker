@@ -101,10 +101,28 @@ pub struct ActiveTimerState {
     /// Phase 18B — Item 6: in-progress comment (null when blank).
     #[serde(default)]
     pub comment: Option<String>,
+    /// Issue title (`issues_v2.name`) joined for display in the Running bar.
+    /// `None` when the timer is unassigned or the cache doesn't know the key.
+    #[serde(default)]
+    pub summary: Option<String>,
+}
+
+/// Resolve the human-readable title for an issue key from the local cache.
+/// Returns `None` for an empty key or when the cache has no match — both are
+/// expected (unassigned timer, freshly added key not yet synced).
+fn lookup_summary(db: &Db, issue_key: &str) -> Option<String> {
+    let key = issue_key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    cache::issues::get_by_key(db, key)
+        .ok()
+        .flatten()
+        .map(|i| i.name)
 }
 
 impl ActiveTimerState {
-    fn from_timer(t: &ActiveTimer, now_ms: i64) -> Self {
+    fn from_timer(db: &Db, t: &ActiveTimer, now_ms: i64) -> Self {
         let started_at_ms = t.started_at.saturating_mul(1000);
         let elapsed_seconds = ((now_ms - started_at_ms).max(0)) / 1000;
         Self {
@@ -112,6 +130,7 @@ impl ActiveTimerState {
             started_at: started_at_ms,
             elapsed_seconds,
             comment: t.comment.clone(),
+            summary: lookup_summary(db, &t.issue_key),
         }
     }
 }
@@ -123,7 +142,7 @@ impl ActiveTimerState {
 /// Pure logic for `get_timer_state`. Returns `Ok(None)` if no timer is running.
 pub fn get_timer_state_inner(db: &Db, now_ms: i64) -> Result<Option<ActiveTimerState>, String> {
     match cache::timer::get(db).map_err(|e| e.to_string())? {
-        Some(t) => Ok(Some(ActiveTimerState::from_timer(&t, now_ms))),
+        Some(t) => Ok(Some(ActiveTimerState::from_timer(db, &t, now_ms))),
         None => Ok(None),
     }
 }
@@ -159,6 +178,7 @@ pub fn start_timer_inner(
         started_at: started_at_s.saturating_mul(1000),
         elapsed_seconds: 0,
         comment: comment_norm,
+        summary: lookup_summary(db, issue_key),
     })
 }
 
@@ -183,6 +203,7 @@ pub fn assign_active_timer_inner(
     )
     .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
+        db,
         &ActiveTimer {
             issue_key: issue_key.to_string(),
             started_at: current.started_at,
@@ -208,6 +229,7 @@ pub fn update_timer_comment_inner(
         .map(|c| c.to_string());
     cache::timer::set_comment(db, comment_norm.as_deref()).map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
+        db,
         &ActiveTimer {
             issue_key: current.issue_key,
             started_at: current.started_at,
@@ -235,6 +257,7 @@ pub fn update_timer_start_inner(
     )
     .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
+        db,
         &ActiveTimer {
             issue_key: current.issue_key,
             started_at: started_at_s,

@@ -305,8 +305,12 @@ function StatusCard({ active }: { active: ActiveTimerState | null }) {
             <div className="text-sm font-medium tabular-nums" style={{ color: "var(--accent)" }}>
               {formatDuration(elapsed)}
             </div>
-            <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-              Sledování {active.issue_key}
+            <div className="text-[11px] text-[var(--text-tertiary)] truncate"
+                 title={active.summary ?? undefined}>
+              {active.issue_key}
+              {active.summary && active.summary.trim().length > 0
+                ? ` · ${active.summary}`
+                : ""}
             </div>
           </>
         ) : (
