@@ -68,9 +68,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
         }
     });
 
-    let mask = NSEventMask::LeftMouseDown
-        | NSEventMask::RightMouseDown
-        | NSEventMask::OtherMouseDown;
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
 
     let handle = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &block);
     *guard = handle.map(MonitorHandle);

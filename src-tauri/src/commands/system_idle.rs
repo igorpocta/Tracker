@@ -22,7 +22,10 @@ extern "C" {
     /// `CGEventSourceSecondsSinceLastEventType(stateID, eventType) -> double`.
     /// `stateID = 0` = `kCGEventSourceStateCombinedSessionState` (combined HID).
     /// `eventType = !0u32` = `kCGAnyInputEventType` (libovolný input).
-    fn CGEventSourceSecondsSinceLastEventType(state: u32, event_type: u32) -> std::os::raw::c_double;
+    fn CGEventSourceSecondsSinceLastEventType(
+        state: u32,
+        event_type: u32,
+    ) -> std::os::raw::c_double;
 }
 
 /// Vrátí počet sekund od posledního systémového input eventu.
