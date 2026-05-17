@@ -73,6 +73,15 @@ pub async fn add_work_report(
 
     let now = Utc::now().timestamp();
     let mut row = super::sync::work_report_to_row(&resp, connection_id, now);
+    // Freelo API ukládá jen datum (`date_reported`), ne čas. work_report_to_row
+    // proto vrací `started_at = 00:00 UTC` daného dne — což by se ve výpisu
+    // projevilo jako "0:00–0:39" místo skutečného intervalu časomíry.
+    // Zachováme proto skutečný čas, který si pamatujeme lokálně.
+    let started_at_s = started_at_ms / 1000;
+    let duration_s = i64::from(minutes).saturating_mul(60);
+    row.started_at = started_at_s;
+    row.ended_at = started_at_s.saturating_add(duration_s);
+    row.logged_at = started_at_s;
     let id = cache::worklogs::upsert_from_remote(db, &row)?;
     row.id = Some(id);
 
@@ -106,7 +115,19 @@ pub async fn update_work_report(
     })?;
     let connection_id = existing.connection_id.unwrap_or(0);
     let now = Utc::now().timestamp();
-    let row = super::sync::work_report_to_row(&resp, connection_id, now);
+    let mut row = super::sync::work_report_to_row(&resp, connection_id, now);
+    // Stejný důvod jako v add_work_report: Freelo response nese jen datum,
+    // proto by row.started_at byl 00:00 UTC. Pokud nám přišel nový čas
+    // z UI, použijeme ho; jinak zachováme původní hodnotu z lokálního řádku
+    // (zachová čas, který uživatel viděl před editací).
+    let started_at_s = new_started_at_ms
+        .map(|ms| ms / 1000)
+        .unwrap_or(existing.started_at);
+    let effective_minutes = minutes.unwrap_or((existing.ended_at - existing.started_at) / 60);
+    let duration_s = effective_minutes.saturating_mul(60);
+    row.started_at = started_at_s;
+    row.ended_at = started_at_s.saturating_add(duration_s);
+    row.logged_at = started_at_s;
     cache::worklogs::update_fields(
         db,
         local_id,
