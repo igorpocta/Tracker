@@ -1061,6 +1061,16 @@ export function setActivityThresholdMin(min: number): Promise<void> {
   return invoke<void>("set_activity_threshold_min", { min });
 }
 
+/**
+ * `get_system_idle_seconds(): u64` — počet sekund od posledního systémového
+ * vstupu (myš, klávesnice). Měří na úrovni OS, takže neaktivita uvnitř
+ * Trackeru se nepočítá, pokud uživatel pracuje v jiné aplikaci. Na Linuxu
+ * a v testovém runneru vrací 0.
+ */
+export function getSystemIdleSeconds(): Promise<number> {
+  return invoke<number>("get_system_idle_seconds");
+}
+
 // -----------------------------------------------------------------------------
 // Phase 18A — Autostart (Item 30)
 //

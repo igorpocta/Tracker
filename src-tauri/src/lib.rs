@@ -469,6 +469,7 @@ pub fn run() {
             commands::activity::get_daily_activity,
             commands::activity::get_activity_threshold_min,
             commands::activity::set_activity_threshold_min,
+            commands::system_idle::get_system_idle_seconds,
             // Browser extension
             commands::browser::get_browser_context,
             commands::browser::get_current_visible_ticket,

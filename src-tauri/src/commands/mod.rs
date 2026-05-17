@@ -26,6 +26,7 @@ pub mod rounding;
 pub mod sentry;
 pub mod streaks;
 pub mod suggestions;
+pub mod system_idle;
 pub mod timer;
 pub mod tray;
 pub mod worklog;

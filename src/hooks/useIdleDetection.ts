@@ -1,21 +1,28 @@
 /**
  * Idle detection — Toggl-style "byl jsi pryč, co s tím" workflow.
  *
- * Algoritmus:
- *  - `lastActivity` se aktualizuje při každém mousemove/keydown/mousedown.
- *  - Background interval (každých 5 s) kontroluje `now - lastActivity`. Pokud
- *    překročí threshold A timer běží, zaznamená `idleStart = lastActivity`.
- *  - Když přijde další input, hook detekuje `idleStart != null` a vyhlásí
- *    "idle gap": rozdíl `now - idleStart` v sekundách.
- *  - Gap se předá callbacku, který otevře modal s volbami:
- *    Keep / Discard / Discard & continue.
+ * Algoritmus (nově od bug-fixu #5):
+ *  - Backend command `get_system_idle_seconds` vrací počet sekund od
+ *    posledního systémového vstupu (CGEventSource na macOS, GetLastInputInfo
+ *    na Windows). Měří se napříč celým OS, takže práce v IDE nebo prohlížeči
+ *    se počítá jako aktivita.
+ *  - Hook polluje každých 5 s. Když pollovaný idle ≥ threshold a timer běží,
+ *    poznamená `idleStart = now - idleSecs`.
+ *  - Když další poll vrátí idle < threshold (= uživatel se vrátil), vyhlásí
+ *    "idle gap": rozdíl `now - idleStart`. Pak se předá callbacku, který
+ *    otevře modal s volbami Keep / Discard / Discard & continue.
  *
  * Threshold se sdílí s `activity_threshold_min` (existující pref).
+ *
+ * Pre-refactor (2026-05): hook používal `window.addEventListener` na
+ * `mousemove`/`keydown`, takže detekoval jen aktivitu uvnitř Tracker okna.
+ * Uživatel pracující v jiné aplikaci dostával falešné idle dialogy po
+ * návratu.
  */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { getActivityThresholdMin } from "../api/commands";
+import { getActivityThresholdMin, getSystemIdleSeconds } from "../api/commands";
 import { useTimerStore } from "../stores/timerStore";
 
 export interface IdleGap {
@@ -27,6 +34,9 @@ export interface IdleGap {
   durationSeconds: number;
 }
 
+/** Jak často se ptáme backendu na systémový idle čas. */
+const POLL_INTERVAL_MS = 5_000;
+
 export function useIdleDetection(): {
   gap: IdleGap | null;
   dismiss: () => void;
@@ -37,58 +47,64 @@ export function useIdleDetection(): {
     queryFn: getActivityThresholdMin,
     staleTime: 60_000,
   });
-  const thresholdMs = (thresholdQ.data ?? 5) * 60 * 1000;
+  const thresholdSeconds = (thresholdQ.data ?? 5) * 60;
 
-  const lastActivityRef = useRef<number>(Date.now());
   const idleStartRef = useRef<number | null>(null);
   const [gap, setGap] = useState<IdleGap | null>(null);
 
-  useEffect(() => {
-    const onActivity = () => {
-      const now = Date.now();
-      // Detekce návratu z idle (pokud jsme byli déle pryč než threshold).
-      if (
-        idleStartRef.current !== null &&
-        active &&
-        now - idleStartRef.current >= thresholdMs
-      ) {
-        setGap({
-          startedAtMs: idleStartRef.current,
-          returnedAtMs: now,
-          durationSeconds: Math.max(0, Math.round((now - idleStartRef.current) / 1000)),
-        });
-      }
-      lastActivityRef.current = now;
-      idleStartRef.current = null;
-    };
-    const events: (keyof WindowEventMap)[] = ["mousemove", "keydown", "mousedown"];
-    events.forEach((e) =>
-      window.addEventListener(e, onActivity, { passive: true }),
-    );
-    return () => {
-      events.forEach((e) => window.removeEventListener(e, onActivity));
-    };
-  }, [active, thresholdMs]);
-
-  // Background polling: pokud uplynul threshold bez aktivity a timer běží,
-  // poznamenat `idleStart`. Jakmile přijde další event, onActivity to nasype
-  // do `gap`.
   useEffect(() => {
     if (!active) {
       idleStartRef.current = null;
       return;
     }
-    const id = window.setInterval(() => {
-      const now = Date.now();
-      if (
-        idleStartRef.current === null &&
-        now - lastActivityRef.current >= thresholdMs
-      ) {
-        idleStartRef.current = lastActivityRef.current;
+
+    let cancelled = false;
+    const tick = async () => {
+      let idleSecs: number;
+      try {
+        idleSecs = await getSystemIdleSeconds();
+      } catch {
+        // Backend nedosažitelný (typicky v jsdom testech) — nic neděláme.
+        return;
       }
-    }, 5_000);
-    return () => window.clearInterval(id);
-  }, [active, thresholdMs]);
+      if (cancelled) return;
+
+      const now = Date.now();
+      const isIdle = idleSecs >= thresholdSeconds;
+
+      if (isIdle) {
+        // První detekce přechodu do idle: spočítej `startedAt` zpětně,
+        // ať gap odpovídá reálnému času bez aktivity, ne až momentu pollu.
+        if (idleStartRef.current === null) {
+          idleStartRef.current = now - idleSecs * 1000;
+        }
+      } else if (idleStartRef.current !== null) {
+        // Návrat z idle — vyhlásíme gap, pokud byl aspoň `threshold` dlouhý
+        // (idle už klesl pod threshold, ale původní startedAt zachytí celou
+        // dobu, takže porovnáme délku zpětně).
+        const startedAtMs = idleStartRef.current;
+        idleStartRef.current = null;
+        const durationSeconds = Math.max(0, Math.round((now - startedAtMs) / 1000));
+        if (durationSeconds >= thresholdSeconds) {
+          setGap({
+            startedAtMs,
+            returnedAtMs: now,
+            durationSeconds,
+          });
+        }
+      }
+    };
+
+    // První kontrola hned, pak interval.
+    void tick();
+    const id = window.setInterval(() => {
+      void tick();
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [active, thresholdSeconds]);
 
   return {
     gap,
