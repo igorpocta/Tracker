@@ -555,7 +555,10 @@ export function AppShell() {
  * fully reliable. The module-level static import ensures the API is loaded
  * before the first click.
  *
- * Double-click toggles maximize/restore (macOS title-bar convention).
+ * Double-click se zoom-toggle řeší nativně přes `data-tauri-drag-region`
+ * + macOS NSWindow titlebar — vlastní `onDoubleClick` handler vedl ke
+ * dvojitému togglu (Tauri zoom + náš toggleMaximize), což na macOS bliklo
+ * maximize/restore/maximize a uživatel viděl flash. Necháváme to na OS.
  *
  * Capability `core:window:allow-start-dragging` is added in
  * `src-tauri/capabilities/default.json`.
@@ -574,19 +577,10 @@ function DragStrip() {
       });
   }, []);
 
-  const onDoubleClick = useCallback(() => {
-    getCurrentWindow()
-      .toggleMaximize()
-      .catch(() => {
-        /* noop */
-      });
-  }, []);
-
   return (
     <div
       aria-hidden
       onMouseDown={onMouseDown}
-      onDoubleClick={onDoubleClick}
       className="fixed top-0 left-0 right-0 h-8 z-[9999]"
       data-tauri-drag-region
       style={
