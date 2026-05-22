@@ -15,7 +15,7 @@
 //! Tombstoned rows stay in the database forever — they form the local
 //! audit trail.
 
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{NaiveDate, Utc};
 use thiserror::Error;
 
 use super::adf::extract_adf_text;
@@ -39,6 +39,18 @@ pub enum SyncError {
 /// get near that — we still paginate just in case.
 const ISSUE_WORKLOG_PAGE_SIZE: u32 = 1000;
 
+/// Returns `true` if `started_ts` (UTC unix seconds) falls inside the
+/// LOCAL calendar day range `[from, to]`. Used by sync to decide whether
+/// a worklog Jira returned should land in this window's slice of the
+/// local cache.
+#[allow(dead_code)]
+fn is_in_local_day_window(started_ts: i64, from: NaiveDate, to: NaiveDate) -> bool {
+    match crate::time::local_day_bounds(from, to) {
+        Some((from_ts, to_ts)) => started_ts >= from_ts && started_ts <= to_ts,
+        None => false,
+    }
+}
+
 pub async fn sync_worklogs_for_range(
     client: &JiraClient,
     db: &Db,
@@ -55,28 +67,9 @@ pub async fn sync_worklogs_for_range(
     let me = client.myself().await?;
     let me_account_id = me.account_id;
 
-    // Range in UTC unix seconds: `from_date` 00:00 UTC through `to_date`
-    // 23:59:59 UTC. This is intentionally generous on the boundary; Jira
-    // JQL evaluates `worklogDate` in the user's timezone, so a worklog
-    // logged just after midnight local time can still satisfy JQL — we
-    // want to keep it instead of dropping it on a strict UTC bound.
-    let from_ts = Utc
-        .with_ymd_and_hms(
-            from_date.year(),
-            from_date.month(),
-            from_date.day(),
-            0,
-            0,
-            0,
-        )
-        .single()
-        .ok_or_else(|| SyncError::InvalidRange("from_date is ambiguous".into()))?
-        .timestamp();
-    let to_ts = Utc
-        .with_ymd_and_hms(to_date.year(), to_date.month(), to_date.day(), 23, 59, 59)
-        .single()
-        .ok_or_else(|| SyncError::InvalidRange("to_date is ambiguous".into()))?
-        .timestamp();
+    let (from_ts, to_ts) = crate::time::local_day_bounds(from_date, to_date).ok_or_else(
+        || SyncError::InvalidRange("local day bounds are ambiguous (DST?)".into()),
+    )?;
 
     // JQL: account ids are [a-z0-9:-] and don't need quoting.
     let jql = format!(
@@ -221,3 +214,39 @@ trait Pipe: Sized {
 }
 
 impl<T> Pipe for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn after_midnight_local_is_kept_in_target_day_window() {
+        // 2026-05-14 00:30 local — must fall inside 2026-05-14 window.
+        // Note: this test uses `chrono::Local` (system timezone). It still
+        // passes regardless of system timezone because both `started` and
+        // the window bounds inside `is_in_local_day_window` use the same
+        // `Local`.
+        let day = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+        let started = chrono::Local
+            .with_ymd_and_hms(2026, 5, 14, 0, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        assert!(
+            is_in_local_day_window(started, day, day),
+            "post-midnight worklog must stay in the local day it was logged in"
+        );
+    }
+
+    #[test]
+    fn pre_midnight_local_is_kept_in_previous_day_window() {
+        let prev = NaiveDate::from_ymd_opt(2026, 5, 13).unwrap();
+        let started = chrono::Local
+            .with_ymd_and_hms(2026, 5, 13, 23, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        assert!(is_in_local_day_window(started, prev, prev));
+    }
+}

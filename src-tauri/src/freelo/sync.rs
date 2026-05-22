@@ -1,7 +1,7 @@
 //! Freelo sync — pulls tasks into `issues_v2` and work-reports into
 //! `worklogs`. Mirrors the Jira sync's mark-and-sweep semantics.
 
-use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike, Utc};
+use chrono::{Local, NaiveDate, TimeZone, Timelike, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
@@ -89,16 +89,9 @@ pub async fn sync_worklogs_for_range(
         upserted += 1;
     }
 
-    let from_ts = Utc
-        .with_ymd_and_hms(from.year(), from.month(), from.day(), 0, 0, 0)
-        .single()
-        .ok_or_else(|| FreeloSyncError::InvalidRange("from is ambiguous".into()))?
-        .timestamp();
-    let to_ts = Utc
-        .with_ymd_and_hms(to.year(), to.month(), to.day(), 23, 59, 59)
-        .single()
-        .ok_or_else(|| FreeloSyncError::InvalidRange("to is ambiguous".into()))?
-        .timestamp();
+    let (from_ts, to_ts) = crate::time::local_day_bounds(from, to).ok_or_else(
+        || FreeloSyncError::InvalidRange("local day bounds are ambiguous (DST?)".into()),
+    )?;
 
     let local_ids = cache::worklogs::remote_ids_in_range(db, connection_id, from_ts, to_ts)?;
     for remote_id in &local_ids {
@@ -228,6 +221,34 @@ mod tests {
             reported_date(&w),
             Some(NaiveDate::from_ymd_opt(2026, 5, 14).unwrap())
         );
+    }
+
+    #[test]
+    fn work_report_with_iso_timestamp_after_local_midnight_uses_reported_local_day() {
+        let parsed = reported_date(&FreeloWorkReport {
+            id: 9,
+            task_id: 1,
+            task_name: None,
+            minutes: 10,
+            date_reported: "2026-05-14T00:30:00+02:00".into(),
+            description: None,
+            user_id: 7,
+        })
+        .unwrap();
+        assert_eq!(parsed, NaiveDate::from_ymd_opt(2026, 5, 14).unwrap());
+    }
+
+    #[test]
+    fn freelo_mark_and_sweep_window_is_local_day_not_utc() {
+        let cest = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+        let (from_ts, to_ts) = crate::time::local_day_bounds_in_tz(&cest, day, day).unwrap();
+        let after_midnight = cest
+            .with_ymd_and_hms(2026, 5, 14, 0, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        assert!(after_midnight >= from_ts && after_midnight <= to_ts);
     }
 
     #[test]
