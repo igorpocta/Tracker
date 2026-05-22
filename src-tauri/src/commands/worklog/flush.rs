@@ -26,10 +26,17 @@ pub const MAX_FLUSH_PER_RUN: u32 = 50;
 /// Filtering responsibility lives in [`cache::worklogs::unsynced_with_issue`],
 /// which already excludes tombstoned and pending-delete rows.
 ///
-/// Idempotency: each row is keyed on its local_id; once the helper sets
-/// `remote_id`, a follow-up flush call sees `is_synced = true` and skips
-/// the row entirely. So even if two flush invocations race, neither
-/// duplicates the remote worklog.
+/// Sequential idempotency: each row is keyed on its local_id; once the
+/// helper sets `remote_id`, a follow-up flush call sees `is_synced = true`
+/// and skips the row entirely.
+///
+/// NOTE: concurrent flush calls are NOT race-safe. The push goes
+/// `SELECT` → HTTP POST → `UPDATE`; nothing serialises that window. Two
+/// flushes firing simultaneously (e.g. manual click hitting at the same
+/// instant as the periodic tick) could both POST and produce duplicate
+/// upstream worklogs. In practice the auto-sync cadence and rare manual
+/// presses make this vanishingly unlikely, but if it ever bites, gate
+/// this function behind a process-wide `tokio::sync::Mutex` on `AppState`.
 pub async fn flush_unsynced_worklogs<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> usize {
     let candidates: Vec<WorklogRow> =
         match cache::worklogs::unsynced_with_issue(&state.db, MAX_FLUSH_PER_RUN) {
