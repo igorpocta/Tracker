@@ -89,9 +89,9 @@ pub async fn sync_worklogs_for_range(
         upserted += 1;
     }
 
-    let (from_ts, to_ts) = crate::time::local_day_bounds(from, to).ok_or_else(
-        || FreeloSyncError::InvalidRange("local day bounds are ambiguous (DST?)".into()),
-    )?;
+    let (from_ts, to_ts) = crate::time::local_day_bounds(from, to).ok_or_else(|| {
+        FreeloSyncError::InvalidRange("local day bounds are ambiguous (DST?)".into())
+    })?;
 
     let local_ids = cache::worklogs::remote_ids_in_range(db, connection_id, from_ts, to_ts)?;
     for remote_id in &local_ids {

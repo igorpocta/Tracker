@@ -67,9 +67,8 @@ pub async fn sync_worklogs_for_range(
     let me = client.myself().await?;
     let me_account_id = me.account_id;
 
-    let (from_ts, to_ts) = crate::time::local_day_bounds(from_date, to_date).ok_or_else(
-        || SyncError::InvalidRange("local day bounds are ambiguous (DST?)".into()),
-    )?;
+    let (from_ts, to_ts) = crate::time::local_day_bounds(from_date, to_date)
+        .ok_or_else(|| SyncError::InvalidRange("local day bounds are ambiguous (DST?)".into()))?;
 
     // JQL: account ids are [a-z0-9:-] and don't need quoting.
     let jql = format!(
