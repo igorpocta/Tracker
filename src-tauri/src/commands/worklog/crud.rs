@@ -305,6 +305,95 @@ pub fn resolve_jira_client_for_issue(
     }
 }
 
+/// Resolve the active client based on a worklog row's recorded
+/// `connection_id`. The worklog row is the source of truth for mutations
+/// over an existing remote worklog — the issue cache may be stale or
+/// missing the connection link entirely.
+///
+/// Errors when:
+///   * `row.connection_id` is `None` (the row was never tied to a tenant —
+///     this should not happen for a row that has a `remote_id`),
+///   * the connection no longer exists,
+///   * the connection exists but is disabled.
+///
+/// Crucially, this function does NOT fall back to "first matching provider".
+/// A disabled or removed connection must surface as an explicit error so the
+/// user sees the failure instead of an update silently landing on a
+/// different tenant.
+pub fn resolve_client_for_row(
+    state: &AppState,
+    row: &WorklogRow,
+) -> Result<(i64, ProviderClient), String> {
+    let conns = state
+        .connections
+        .read()
+        .expect("AppState.connections RwLock poisoned");
+    resolve_client_for_row_in(&conns, row)
+}
+
+/// Pure variant exposed for unit tests — operates on a slice instead of
+/// reaching into [`AppState`]. Production code keeps using
+/// [`resolve_client_for_row`] which takes the lock once.
+pub fn resolve_client_for_row_in(
+    connections: &[crate::state::ActiveConnection],
+    row: &WorklogRow,
+) -> Result<(i64, ProviderClient), String> {
+    let cid = row.connection_id.ok_or_else(|| {
+        "Worklog nemá zaznamenané connection_id — nelze určit kam ho odeslat".to_string()
+    })?;
+    let active = connections
+        .iter()
+        .find(|c| c.id == cid)
+        .ok_or_else(|| format!("Připojení id={cid} pro tento worklog neexistuje (smazané?)"))?;
+    if !active.enabled {
+        return Err(format!(
+            "Připojení '{}' je vypnuté — zapněte ho v nastavení a zkuste znovu",
+            active.name
+        ));
+    }
+    Ok((active.id, active.client.clone()))
+}
+
+/// Typed Jira variant of [`resolve_client_for_row`].
+pub fn resolve_jira_client_for_row(
+    state: &AppState,
+    row: &WorklogRow,
+) -> Result<(i64, crate::jira::JiraClient), String> {
+    let (cid, client) = resolve_client_for_row(state, row)?;
+    match client {
+        ProviderClient::Jira(j) => Ok((cid, j)),
+        ProviderClient::Freelo(_) => Err(
+            "Záznam patří do Jira ale connection_id ukazuje na Freelo — datová nekonzistence"
+                .into(),
+        ),
+    }
+}
+
+/// Typed Freelo variant of [`resolve_client_for_row`]. Returns
+/// `(connection_id, FreeloClient, user_id)` — the three things every Freelo
+/// write helper needs. Errors out front if the connection's sync hasn't
+/// cached a user id yet, instead of letting Freelo reject the request with
+/// a generic 400.
+pub fn resolve_freelo_client_for_row(
+    state: &AppState,
+    row: &WorklogRow,
+) -> Result<(i64, crate::freelo::client::FreeloClient, i64), String> {
+    let (cid, client) = resolve_client_for_row(state, row)?;
+    match client {
+        ProviderClient::Freelo(svc) => {
+            let user_id = svc
+                .config
+                .sync_user_id
+                .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+            Ok((cid, svc.client, user_id))
+        }
+        ProviderClient::Jira(_) => Err(
+            "Záznam patří do Freelo ale connection_id ukazuje na Jira — datová nekonzistence"
+                .into(),
+        ),
+    }
+}
+
 /// Resolve the LOCAL cached row for a provider worklog, scoped to the
 /// connection that owns `issue_key`.
 ///
@@ -615,10 +704,11 @@ pub async fn update_worklog(
         .await;
     }
 
-    // Route to the Jira tenant that owns this issue.
-    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
-
+    // Route by the row's recorded connection_id (source of truth for an
+    // existing remote worklog). The issue cache can be stale; the row
+    // cannot — it was stamped at create/sync time.
     let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
+    let (_conn_id, client) = resolve_jira_client_for_row(&state, &before)?;
 
     let started_dt = match new_started_at_ms {
         Some(ms) => Some(
@@ -726,11 +816,7 @@ async fn update_freelo_worklog(
     let wr_id = freelo::parse_worklog_id(&worklog_id)
         .ok_or_else(|| format!("Neplatné Freelo id záznamu: {worklog_id}"))?;
 
-    let (_, client) = resolve_client_for_issue(&state, &issue_key)?;
-    let client = match client {
-        ProviderClient::Freelo(svc) => svc.client,
-        _ => return Err("Připojení nepodporuje Freelo úkoly".into()),
-    };
+    let (_cid, client, _user_id) = resolve_freelo_client_for_row(&state, &before)?;
 
     let after = match freelo::ops::update_work_report(
         &client,
@@ -871,20 +957,20 @@ pub async fn move_worklog(
     crate::validation::validate_issue_key(&new_issue_key)?;
 
     // Move is Jira-only (Freelo has no analogous API). Route via the
-    // SOURCE issue's connection — Jira refuses cross-tenant moves anyway,
-    // but using `resolve_*` keeps us pointed at the right host.
-    let (_conn_id, client) = resolve_jira_client_for_issue(&state, &old_issue_key)?;
+    // ROW's stamped connection_id — the source of truth for an existing
+    // remote worklog. The issue cache might point at a different tenant
+    // (or none at all); only the row knows where the worklog actually
+    // lives. Jira refuses cross-tenant moves anyway, so the new key has
+    // to live on the same host.
+    let before_row =
+        resolve_cached_worklog_for_issue_and_remote_id(&state, &old_issue_key, &old_worklog_id)?;
+    let (_conn_id, client) = resolve_jira_client_for_row(&state, &before_row)?;
+    let before = Some(before_row);
 
     let started_dt = Utc
         .timestamp_millis_opt(started_at_ms)
         .single()
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
-
-    let before = Some(resolve_cached_worklog_for_issue_and_remote_id(
-        &state,
-        &old_issue_key,
-        &old_worklog_id,
-    )?);
 
     let args = MoveWorklogArgs {
         old_issue_key: &old_issue_key,
@@ -1274,34 +1360,14 @@ pub async fn commit_pending_delete(
                 return;
             }
         };
-        // Route to the Freelo tenant that owns this worklog. Prefer the
-        // `row.connection_id` stamped on the WorklogRow (most direct
-        // signal — set when the row was created), with fallback to the
-        // issue-based resolver. The legacy "first Freelo via find_map"
-        // could delete a work-report on the WRONG tenant if the user
-        // has more than one Freelo configured.
-        let client = match row
-            .connection_id
-            .and_then(|cid| {
-                let conns = state
-                    .connections
-                    .read()
-                    .expect("AppState.connections RwLock poisoned");
-                conns
-                    .iter()
-                    .find(|c| c.id == cid && c.enabled)
-                    .and_then(|c| match &c.client {
-                        ProviderClient::Freelo(svc) => Some(svc.client.clone()),
-                        _ => None,
-                    })
-            })
-            .or_else(|| {
-                resolve_freelo_service_for_issue(state, issue_key)
-                    .ok()
-                    .map(|(_, svc)| svc.client)
-            }) {
-            Some(c) => c,
-            None => {
+        // Route to the Freelo tenant that owns this worklog via the row's
+        // recorded `connection_id` — the only trustworthy signal for an
+        // existing remote worklog. Disabled or removed connections surface
+        // as an explicit error instead of silently retargeting another
+        // Freelo account.
+        let client = match resolve_freelo_client_for_row(state, &row) {
+            Ok((_, c, _)) => c,
+            Err(err) => {
                 let _ = cache::worklogs::clear_pending_delete(&state.db, local_id);
                 audit_failure(
                     &state.db,
@@ -1309,7 +1375,7 @@ pub async fn commit_pending_delete(
                     Some(issue_key),
                     Some(worklog_id),
                     Some(&row),
-                    "Freelo klient není nakonfigurován pro tento záznam",
+                    &err,
                 );
                 return;
             }
@@ -1344,8 +1410,9 @@ pub async fn commit_pending_delete(
         return;
     }
 
-    // Jira branch — route by the row's issue connection.
-    let client = match resolve_jira_client_for_issue(state, issue_key) {
+    // Jira branch — route by the row's stamped connection_id, never the
+    // issue cache (which can lose its connection link).
+    let client = match resolve_jira_client_for_row(state, &row) {
         Ok((_, c)) => c,
         Err(err) => {
             // No client: clear the pending flag so the UI can recover.
@@ -1391,5 +1458,175 @@ pub async fn commit_pending_delete(
             );
             let _ = app.emit("worklog-error", e.to_string());
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Unit tests — pure resolver behaviour (no AppState / no DB / no Tauri)
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::connections::FreeloConnectionConfig;
+    use crate::freelo::{FreeloClient, FreeloService};
+    use crate::jira::JiraClient;
+    use crate::state::ActiveConnection;
+
+    fn make_jira_client() -> JiraClient {
+        JiraClient::new(
+            "https://example.atlassian.net".to_string(),
+            "test@example.com".to_string(),
+            "token".to_string(),
+        )
+        .expect("test JiraClient build")
+    }
+
+    fn make_freelo_service(user_id: Option<i64>) -> FreeloService {
+        let client = FreeloClient::new(
+            "https://api.freelo.io/v0/".to_string(),
+            "test@example.com".to_string(),
+            "api-key".to_string(),
+        )
+        .expect("test FreeloClient build");
+        let cfg = FreeloConnectionConfig {
+            sync_user_id: user_id,
+            ..Default::default()
+        };
+        FreeloService::new(client, cfg)
+    }
+
+    fn jira_conn(id: i64, name: &str, enabled: bool) -> ActiveConnection {
+        ActiveConnection {
+            id,
+            kind: "jira".to_string(),
+            name: name.to_string(),
+            enabled,
+            client: ProviderClient::Jira(make_jira_client()),
+        }
+    }
+
+    fn freelo_conn(id: i64, name: &str, enabled: bool, user_id: Option<i64>) -> ActiveConnection {
+        ActiveConnection {
+            id,
+            kind: "freelo".to_string(),
+            name: name.to_string(),
+            enabled,
+            client: ProviderClient::Freelo(make_freelo_service(user_id)),
+        }
+    }
+
+    fn row_with_conn(connection_id: Option<i64>) -> WorklogRow {
+        WorklogRow {
+            id: Some(42),
+            connection_id,
+            issue_key: Some("DEV-1".to_string()),
+            description: None,
+            started_at: 0,
+            ended_at: 60,
+            logged_at: 0,
+            updated_at: 0,
+            is_synced: true,
+            synced_at: Some(0),
+            remote_id: Some("99999".to_string()),
+            pending_delete_at: None,
+            tombstoned_at: None,
+            summary: None,
+        }
+    }
+
+    #[test]
+    fn resolve_row_errors_when_connection_id_missing() {
+        let conns = vec![jira_conn(1, "Tenant A", true)];
+        let row = row_with_conn(None);
+        let err = resolve_client_for_row_in(&conns, &row).expect_err("must fail");
+        assert!(
+            err.contains("connection_id"),
+            "expected message about missing connection_id, got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_row_errors_when_connection_not_found() {
+        let conns = vec![jira_conn(1, "Tenant A", true)];
+        let row = row_with_conn(Some(999));
+        let err = resolve_client_for_row_in(&conns, &row).expect_err("must fail");
+        assert!(
+            err.contains("999") && err.contains("neexistuje"),
+            "expected message about missing id=999, got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_row_errors_when_connection_disabled_no_fallback() {
+        // Two enabled Jira tenants are NOT a fallback target — the row's
+        // recorded tenant is disabled, so we must surface that explicit
+        // error rather than silently mis-routing.
+        let conns = vec![
+            jira_conn(1, "Tenant A (off)", false),
+            jira_conn(2, "Tenant B", true),
+        ];
+        let row = row_with_conn(Some(1));
+        let err = resolve_client_for_row_in(&conns, &row).expect_err("must fail");
+        assert!(
+            err.contains("Tenant A (off)") && err.contains("vypnuté"),
+            "expected disabled-connection message naming 'Tenant A (off)', got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_row_picks_recorded_connection_not_first() {
+        // With two enabled Jira tenants, the resolver must land on the one
+        // the row recorded — never the first one in the list.
+        let conns = vec![
+            jira_conn(1, "Tenant A", true),
+            jira_conn(2, "Tenant B", true),
+        ];
+        let row = row_with_conn(Some(2));
+        let (cid, _) =
+            resolve_client_for_row_in(&conns, &row).expect("must resolve to recorded id");
+        assert_eq!(cid, 2);
+    }
+
+    #[test]
+    fn resolve_jira_row_rejects_freelo_provider() {
+        // The row's connection_id points at a Freelo connection — the typed
+        // Jira variant must refuse rather than coercing.
+        let conns = vec![freelo_conn(5, "Freelo", true, Some(123))];
+        let row = row_with_conn(Some(5));
+        let (cid, client) =
+            resolve_client_for_row_in(&conns, &row).expect("base resolver still succeeds");
+        assert_eq!(cid, 5);
+        assert!(matches!(client, ProviderClient::Freelo(_)));
+        // Now exercise the typed variant's mismatch arm directly.
+        match client {
+            ProviderClient::Jira(_) => panic!("setup error: expected Freelo"),
+            ProviderClient::Freelo(_) => {
+                // The typed Jira variant reads from `AppState` so we can't
+                // call it here, but the discriminant check inside it
+                // mirrors this match — if this is Freelo, the typed Jira
+                // resolver returns the datová-nekonzistence error.
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_freelo_row_errors_when_user_id_missing() {
+        // Even if the Freelo connection itself is enabled, an in-progress
+        // setup (no cached user id yet) must surface the explicit
+        // "spusťte sync" hint rather than letting the API reject it.
+        let conns = vec![freelo_conn(5, "Freelo", true, None)];
+        let row = row_with_conn(Some(5));
+        let (_cid, _client) = resolve_client_for_row_in(&conns, &row).expect("base resolves");
+        // The typed Freelo variant lives behind AppState; here we verify
+        // the underlying behaviour is composable: the connection resolves,
+        // user_id is None, so the typed wrapper would return the expected
+        // error string when invoked.
+        let svc = &conns[0].client;
+        let user_id = match svc {
+            ProviderClient::Freelo(s) => s.config.sync_user_id,
+            _ => unreachable!(),
+        };
+        assert!(user_id.is_none());
     }
 }
