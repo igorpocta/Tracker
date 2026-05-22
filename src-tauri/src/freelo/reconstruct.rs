@@ -6,7 +6,7 @@
 //! Freelo, jinak Jira). Klienti, error type i návratové hodnoty jsou
 //! ekvivalentní.
 
-use chrono::{NaiveDate, TimeZone, Utc};
+use chrono::{Local, NaiveDate, TimeZone};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -487,7 +487,8 @@ async fn retry_delete(
 
 fn date_from_started_at(unix_s: i64) -> Result<NaiveDate, ReconstructError> {
     let _ = ms_to_date; // ujištění, že funkce existuje a je v scope
-    Utc.timestamp_opt(unix_s, 0)
+    Local
+        .timestamp_opt(unix_s, 0)
         .single()
         .map(|dt| dt.date_naive())
         .ok_or(ReconstructError::BadTimestamp)

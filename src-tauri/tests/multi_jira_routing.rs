@@ -15,8 +15,11 @@
 use tempfile::TempDir;
 use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
 use tracker_lib::cache::issues::IssueRow;
+use tracker_lib::cache::worklogs::{upsert_from_remote, WorklogRow};
 use tracker_lib::cache::{self, Db};
-use tracker_lib::commands::worklog::crud::resolve_jira_client_for_issue;
+use tracker_lib::commands::worklog::crud::{
+    resolve_cached_worklog_for_issue_and_remote_id, resolve_jira_client_for_issue,
+};
 use tracker_lib::jira::JiraClient;
 use tracker_lib::state::{ActiveConnection, AppState, ProviderClient};
 use wiremock::matchers::{method, path};
@@ -215,4 +218,56 @@ async fn resolver_errors_when_issue_is_on_freelo() {
         err.to_lowercase().contains("freelo") || err.to_lowercase().contains("žádné aktivní"),
         "unexpected error: {err}"
     );
+}
+
+#[tokio::test]
+async fn cached_worklog_lookup_is_scoped_by_issue_connection() {
+    let (_dir, state, _server_a, _server_b, conn_a, conn_b) = two_jira_state().await;
+
+    let row_a = WorklogRow {
+        id: None,
+        connection_id: Some(conn_a),
+        issue_key: Some("ACME-1".into()),
+        description: Some("tenant A row".into()),
+        started_at: 1_700_000_000,
+        ended_at: 1_700_000_900,
+        logged_at: 1_700_000_000,
+        updated_at: 1_700_000_000,
+        is_synced: true,
+        synced_at: Some(1_700_000_000),
+        remote_id: Some("shared-remote-id".into()),
+        pending_delete_at: None,
+        tombstoned_at: None,
+        summary: None,
+    };
+    let row_b = WorklogRow {
+        id: None,
+        connection_id: Some(conn_b),
+        issue_key: Some("BRAVO-1".into()),
+        description: Some("tenant B row".into()),
+        started_at: 1_700_001_000,
+        ended_at: 1_700_001_900,
+        logged_at: 1_700_001_000,
+        updated_at: 1_700_001_000,
+        is_synced: true,
+        synced_at: Some(1_700_001_000),
+        remote_id: Some("shared-remote-id".into()),
+        pending_delete_at: None,
+        tombstoned_at: None,
+        summary: None,
+    };
+    upsert_from_remote(&state.db, &row_a).expect("seed A worklog");
+    upsert_from_remote(&state.db, &row_b).expect("seed B worklog");
+
+    let resolved_a =
+        resolve_cached_worklog_for_issue_and_remote_id(&state, "ACME-1", "shared-remote-id")
+            .expect("resolve A row");
+    assert_eq!(resolved_a.connection_id, Some(conn_a));
+    assert_eq!(resolved_a.issue_key.as_deref(), Some("ACME-1"));
+
+    let resolved_b =
+        resolve_cached_worklog_for_issue_and_remote_id(&state, "BRAVO-1", "shared-remote-id")
+            .expect("resolve B row");
+    assert_eq!(resolved_b.connection_id, Some(conn_b));
+    assert_eq!(resolved_b.issue_key.as_deref(), Some("BRAVO-1"));
 }

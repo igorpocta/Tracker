@@ -305,6 +305,34 @@ pub fn resolve_jira_client_for_issue(
     }
 }
 
+/// Resolve the LOCAL cached row for a provider worklog, scoped to the
+/// connection that owns `issue_key`.
+///
+/// `remote_id` is unique only inside `(connection_id, remote_id)`. Looking up
+/// by `remote_id` alone can therefore hit the wrong row when the user has more
+/// than one Jira/Freelo connection configured, or when Jira and Freelo happen
+/// to generate the same numeric id string. We first scope by the issue's
+/// owning connection and only fall back to the legacy global lookup if the
+/// issues cache genuinely has no connection signal.
+pub fn resolve_cached_worklog_for_issue_and_remote_id(
+    state: &AppState,
+    issue_key: &str,
+    remote_id: &str,
+) -> Result<WorklogRow, String> {
+    let conn_id =
+        cache::issues::get_connection_id_by_key(&state.db, issue_key).map_err(|e| e.to_string())?;
+    if let Some(cid) = conn_id {
+        if let Some(row) = cache::worklogs::get_by_remote_id(&state.db, cid, remote_id)
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(row);
+        }
+    }
+    cache::worklogs::get_by_remote_id_any(&state.db, remote_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())
+}
+
 /// Create a new worklog manually (the AddEntry panel) and push it to the
 /// provider. Dispatches by `issue_key` prefix:
 ///   - `FRL-…` → Freelo `add_work_report`
@@ -590,9 +618,7 @@ pub async fn update_worklog(
     // Route to the Jira tenant that owns this issue.
     let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
 
-    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
+    let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
 
     let started_dt = match new_started_at_ms {
         Some(ms) => Some(
@@ -691,9 +717,7 @@ async fn update_freelo_worklog(
     new_duration_seconds: Option<i64>,
     new_comment: Option<String>,
 ) -> Result<WorklogRow, String> {
-    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
+    let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
     let local_id = before
         .id
         .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
@@ -763,9 +787,7 @@ pub async fn delete_worklog(
     worklog_id: String,
     issue_key: String,
 ) -> Result<(), String> {
-    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
+    let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
     let local_id = before
         .id
         .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
@@ -802,7 +824,7 @@ pub async fn undo_delete_worklog(
     state: tauri::State<'_, AppState>,
     worklog_id: String,
 ) -> Result<(), String> {
-    let before = cache::worklogs::get_by_remote_id_any(&state.db, &worklog_id)
+    let before = cache::worklogs::get_pending_delete_by_remote_id_any(&state.db, &worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
     let local_id = before
@@ -858,8 +880,11 @@ pub async fn move_worklog(
         .single()
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
 
-    let before = cache::worklogs::get_by_remote_id_any(&state.db, &old_worklog_id)
-        .map_err(|e| e.to_string())?;
+    let before = Some(resolve_cached_worklog_for_issue_and_remote_id(
+        &state,
+        &old_issue_key,
+        &old_worklog_id,
+    )?);
 
     let args = MoveWorklogArgs {
         old_issue_key: &old_issue_key,

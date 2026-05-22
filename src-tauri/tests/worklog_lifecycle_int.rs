@@ -25,8 +25,8 @@ use tracker_lib::cache::audit::{self, list as audit_list, AuditEvent, AuditOp};
 use tracker_lib::cache::connections::{insert as insert_conn, NewConnection};
 use tracker_lib::cache::issues::{upsert as issue_upsert, IssueRow};
 use tracker_lib::cache::worklogs::{
-    clear_pending_delete, get_by_id, mark_pending_delete, mark_tombstoned, upsert_from_remote,
-    WorklogRow,
+    clear_pending_delete, get_by_id, get_pending_delete_by_remote_id_any, mark_pending_delete,
+    mark_tombstoned, upsert_from_remote, WorklogRow,
 };
 use tracker_lib::cache::Db;
 use tracker_lib::jira::JiraClient;
@@ -294,4 +294,46 @@ async fn commit_pending_delete_treats_404_as_already_gone() {
     mark_tombstoned(&db, local_id, now_s).unwrap();
     let row = get_by_id(&db, local_id).unwrap().expect("row");
     assert!(row.tombstoned_at.is_some());
+}
+
+#[tokio::test]
+async fn pending_delete_lookup_prefers_the_row_currently_in_undo_window() {
+    let (_s, _c) = server_and_client().await;
+    let (_d, db, conn_a) = fresh_db_with_conn("http://example.invalid", "DEV-205");
+    let cfg_b = r#"{"base_url":"http://example.invalid","email":"bob@example.com"}"#;
+    let conn_b = insert_conn(
+        &db,
+        NewConnection {
+            provider: "jira",
+            name: "other-tenant",
+            enabled: true,
+            config_json: cfg_b,
+        },
+    )
+    .expect("seed connection B");
+    issue_upsert(
+        &db,
+        &IssueRow {
+            connection_id: conn_b,
+            issue_id: "DEV-206".to_string(),
+            issue_key: "DEV-206".to_string(),
+            name: "Other".into(),
+            ..Default::default()
+        },
+    )
+    .expect("seed issue B");
+
+    let row_a = seed_synced_row(&db, conn_a, "shared-undo-id", "DEV-205");
+    let row_b = seed_synced_row(&db, conn_b, "shared-undo-id", "DEV-206");
+
+    mark_pending_delete(&db, row_b.id.unwrap(), Utc::now().timestamp()).unwrap();
+
+    let pending = get_pending_delete_by_remote_id_any(&db, "shared-undo-id")
+        .unwrap()
+        .expect("pending row");
+    assert_eq!(pending.id, row_b.id);
+    assert_eq!(pending.issue_key.as_deref(), Some("DEV-206"));
+
+    let untouched = get_by_id(&db, row_a.id.unwrap()).unwrap().unwrap();
+    assert!(untouched.pending_delete_at.is_none());
 }

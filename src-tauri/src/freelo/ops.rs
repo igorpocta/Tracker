@@ -1,7 +1,7 @@
 //! Create / update / delete operations for Freelo work-reports, mapping the
 //! shared command surface onto the Freelo API.
 
-use chrono::{NaiveDate, TimeZone, Utc};
+use chrono::{Local, NaiveDate, TimeZone, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
@@ -37,14 +37,22 @@ pub fn seconds_to_minutes(seconds: i64) -> Result<i64, FreeloOpError> {
     Ok(m)
 }
 
+/// Convert a unix-milliseconds timestamp to the LOCAL calendar date the user
+/// saw on screen when they picked the time.
+///
+/// Freelo stores only a date (`YYYY-MM-DD`), not a time-of-day. Converting via
+/// UTC would shift entries around local midnight: `2026-05-21 00:30 +02`
+/// becomes `2026-05-20` in UTC, so the work-report gets posted to the previous
+/// day. We therefore derive the date in the user's local timezone.
+fn ms_to_date_in_tz<TZ: TimeZone>(tz: &TZ, ms: i64) -> Option<NaiveDate> {
+    tz.timestamp_millis_opt(ms)
+        .single()
+        .map(|dt| dt.date_naive())
+}
+
 /// Convert a unix milliseconds timestamp to a local-date for the Freelo API.
 pub fn ms_to_date(ms: i64) -> NaiveDate {
-    let dt = Utc
-        .timestamp_millis_opt(ms)
-        .single()
-        .unwrap_or_else(Utc::now)
-        .naive_utc();
-    dt.date()
+    ms_to_date_in_tz(&Local, ms).unwrap_or_else(|| Local::now().date_naive())
 }
 
 /// Add a new work-report to Freelo for the given task and record it locally.
@@ -171,5 +179,19 @@ mod tests {
         assert_eq!(seconds_to_minutes(60).unwrap(), 1);
         assert_eq!(seconds_to_minutes(90).unwrap(), 2);
         assert_eq!(seconds_to_minutes(89).unwrap(), 1);
+    }
+
+    #[test]
+    fn ms_to_date_uses_local_calendar_day_not_utc() {
+        let tz = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let ms = tz
+            .with_ymd_and_hms(2026, 5, 21, 0, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(
+            ms_to_date_in_tz(&tz, ms),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap())
+        );
     }
 }

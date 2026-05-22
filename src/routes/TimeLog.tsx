@@ -58,6 +58,12 @@ import { usePrefsStore } from "../stores/prefsStore";
 
 type Mode = "day" | "week";
 
+function worklogUiKey(row: ApiWorklogRow): string {
+  if (row.id != null) return `local:${row.id}`;
+  if (row.jira_worklog_id) return `remote:${row.jira_worklog_id}`;
+  return `started:${row.issue_key ?? "none"}:${row.started_at}`;
+}
+
 export default function TimeLog() {
   const ctx = useOutletContext<ShellOutletContext>();
   const queryClient = useQueryClient();
@@ -155,14 +161,13 @@ export default function TimeLog() {
     queryFn: () => getWorklogsForRange(fromUnix, toUnix),
   });
 
-  const rows = (worklogsQ.data ?? []).filter(
-    (r) => !r.jira_worklog_id || !hiddenIds.has(r.jira_worklog_id),
-  );
+  const rows = (worklogsQ.data ?? []).filter((r) => !hiddenIds.has(worklogUiKey(r)));
   const totalSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
 
   const handleDelete = useCallback(
     async (row: ApiWorklogRow) => {
       const jiraId = row.jira_worklog_id;
+      const hiddenKey = worklogUiKey(row);
       // Phase 18A — Item 7: local-only rows (no Jira id) bypass the Jira
       // DELETE and are hard-deleted from the cache directly.
       if (!jiraId) {
@@ -181,7 +186,7 @@ export default function TimeLog() {
       // Optimistic hide.
       setHiddenIds((prev) => {
         const next = new Set(prev);
-        next.add(jiraId);
+        next.add(hiddenKey);
         return next;
       });
       try {
@@ -190,7 +195,7 @@ export default function TimeLog() {
         // Failure to even mark pending → un-hide + show error.
         setHiddenIds((prev) => {
           const next = new Set(prev);
-          next.delete(jiraId);
+          next.delete(hiddenKey);
           return next;
         });
         ctx.pushToast(
@@ -212,7 +217,7 @@ export default function TimeLog() {
             } finally {
               setHiddenIds((prev) => {
                 const next = new Set(prev);
-                next.delete(jiraId);
+                next.delete(hiddenKey);
                 return next;
               });
               invalidateWorklogQueries(queryClient);
@@ -1027,4 +1032,3 @@ function CreateWorklogDialog({
     </div>
   );
 }
-

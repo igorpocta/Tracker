@@ -1,7 +1,7 @@
 //! Freelo sync — pulls tasks into `issues_v2` and work-reports into
 //! `worklogs`. Mirrors the Jira sync's mark-and-sweep semantics.
 
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
@@ -70,7 +70,18 @@ pub async fn sync_worklogs_for_range(
     let mut seen_remote_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for e in &entries {
-        let row = work_report_to_row(e, connection_id, now);
+        let remote_id = e.id.to_string();
+        let existing = cache::worklogs::get_by_remote_id(db, connection_id, &remote_id)?;
+        let mut row = work_report_to_row(e, connection_id, now);
+        if let (Some(prev), Some(reported_date)) = (existing.as_ref(), reported_date(e)) {
+            if let Some(started_at) =
+                combine_date_with_existing_local_time(&Local, reported_date, prev.started_at)
+            {
+                let duration_s = row.duration_s();
+                row.started_at = started_at;
+                row.ended_at = started_at.saturating_add(duration_s);
+            }
+        }
         cache::worklogs::upsert_from_remote(db, &row)?;
         if let Some(id) = &row.remote_id {
             seen_remote_ids.insert(id.clone());
@@ -99,20 +110,46 @@ pub async fn sync_worklogs_for_range(
     Ok(upserted)
 }
 
+fn reported_date(w: &FreeloWorkReport) -> Option<NaiveDate> {
+    chrono::DateTime::parse_from_rfc3339(&w.date_reported)
+        .ok()
+        .map(|dt| dt.date_naive())
+        .or_else(|| NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d").ok())
+}
+
+fn local_midnight_timestamp<TZ: TimeZone>(tz: &TZ, date: NaiveDate) -> Option<i64> {
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    tz.from_local_datetime(&midnight)
+        .single()
+        .map(|dt| dt.timestamp())
+}
+
+fn combine_date_with_existing_local_time<TZ: TimeZone>(
+    tz: &TZ,
+    date: NaiveDate,
+    existing_started_at: i64,
+) -> Option<i64> {
+    let existing_local = tz.timestamp_opt(existing_started_at, 0).single()?;
+    let local_dt = date.and_hms_opt(
+        existing_local.hour(),
+        existing_local.minute(),
+        existing_local.second(),
+    )?;
+    tz.from_local_datetime(&local_dt)
+        .single()
+        .map(|dt| dt.timestamp())
+}
+
 /// Convert a Freelo work-report into the multi-provider `WorklogRow`.
 pub fn work_report_to_row(w: &FreeloWorkReport, connection_id: i64, now: i64) -> WorklogRow {
-    // Freelo `date_reported` is either an ISO 8601 timestamp with TZ
-    // ("2026-04-15T12:24:27+02:00") or a bare date ("2026-05-14") in
-    // older shapes. Try the richer parse first.
-    let started_at = chrono::DateTime::parse_from_rfc3339(&w.date_reported)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc).timestamp())
-        .or_else(|| {
-            NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d")
-                .ok()
-                .and_then(|d| Utc.from_local_datetime(&d.and_hms_opt(0, 0, 0)?).single())
-                .map(|dt| dt.timestamp())
-        })
+    // Freelo is date-only from Tracker's perspective: even when the API shape
+    // includes an ISO timestamp, that time-of-day is not the authoritative
+    // "work started at" clock value. We therefore normalize every report to
+    // the reported LOCAL calendar day at local midnight; sync callers that
+    // already have a cached Tracker row can re-attach the previous wall-clock
+    // time-of-day afterwards.
+    let started_at = reported_date(w)
+        .and_then(|d| local_midnight_timestamp(&Local, d))
         .unwrap_or(now);
 
     let duration_s = w.minutes.saturating_mul(60).max(0);
@@ -174,5 +211,45 @@ mod tests {
             user_id: 7,
         };
         assert!(work_report_to_row(&w, 42, 0).description.is_none());
+    }
+
+    #[test]
+    fn reported_date_ignores_time_of_day_component() {
+        let w = FreeloWorkReport {
+            id: 4,
+            task_id: 88,
+            task_name: None,
+            minutes: 30,
+            date_reported: "2026-05-14T12:24:27+02:00".into(),
+            description: None,
+            user_id: 7,
+        };
+        assert_eq!(
+            reported_date(&w),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 14).unwrap())
+        );
+    }
+
+    #[test]
+    fn combine_date_with_existing_local_time_preserves_clock_value() {
+        let tz = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let existing_started_at = tz
+            .with_ymd_and_hms(2026, 5, 14, 9, 30, 0)
+            .single()
+            .unwrap()
+            .timestamp();
+        let next = combine_date_with_existing_local_time(
+            &tz,
+            NaiveDate::from_ymd_opt(2026, 5, 15).unwrap(),
+            existing_started_at,
+        )
+        .unwrap();
+        let next_local = tz.timestamp_opt(next, 0).single().unwrap();
+        assert_eq!(
+            next_local.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 5, 15).unwrap()
+        );
+        assert_eq!(next_local.hour(), 9);
+        assert_eq!(next_local.minute(), 30);
     }
 }

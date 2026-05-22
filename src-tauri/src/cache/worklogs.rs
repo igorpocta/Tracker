@@ -341,6 +341,32 @@ pub fn get_by_remote_id_any(db: &Db, remote_id: &str) -> Result<Option<WorklogRo
     }
 }
 
+/// Look up the row currently sitting in the undo window for `remote_id`.
+///
+/// `remote_id` is only unique within `(connection_id, remote_id)`, not across
+/// all providers / tenants. The delete flow, however, marks exactly one row as
+/// `pending_delete_at != NULL`, so this helper can unambiguously find the row
+/// the user just deleted when they hit "undo".
+pub fn get_pending_delete_by_remote_id_any(
+    db: &Db,
+    remote_id: &str,
+) -> Result<Option<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.remote_id = ?1
+           AND w.pending_delete_at IS NOT NULL
+           AND w.tombstoned_at IS NULL
+         ORDER BY w.pending_delete_at DESC
+         LIMIT 1"
+    ))?;
+    match stmt.query_row([remote_id], row_to_worklog) {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Mutations used by the two-way sync commands
 // -----------------------------------------------------------------------------
