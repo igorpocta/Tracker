@@ -10,7 +10,7 @@ use chrono::NaiveDate;
 
 use super::JiraClient;
 use crate::cache::Db;
-use crate::worklog_service::{ServiceFuture, WorklogService};
+use crate::worklog_service::{ServiceFuture, SyncOutcome, WorklogService};
 
 impl WorklogService for JiraClient {
     fn provider_name(&self) -> &'static str {
@@ -30,19 +30,22 @@ impl WorklogService for JiraClient {
         conn_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> ServiceFuture<'a, usize> {
+    ) -> ServiceFuture<'a, SyncOutcome> {
         Box::pin(async move {
             // Readiness gate: the worklog sync needs the current user's
-            // account id to filter JQL on `worklogAuthor`. The orchestrator
-            // historically pre-checked `myself()` and silently skipped the
-            // worklog phase when it failed — preserve that by short-circuiting
-            // to Ok(0) here instead of bubbling up an error.
-            if self.myself().await.is_err() {
-                return Ok(0);
+            // account id to filter JQL on `worklogAuthor`. If `myself()`
+            // fails we must surface that to the orchestrator as Skipped
+            // (the provider was never called) — short-circuiting to Ok(0)
+            // would let the orchestrator clear the persisted error and
+            // report a healthy run that secretly did nothing.
+            if let Err(e) = self.myself().await {
+                return Ok(SyncOutcome::skipped(format!(
+                    "jira: nepodařilo se získat účet (myself: {e})"
+                )));
             }
             let n = crate::jira::worklog_sync::sync_worklogs_for_range(self, db, conn_id, from, to)
                 .await?;
-            Ok(n)
+            Ok(SyncOutcome::ok(n))
         })
     }
 }

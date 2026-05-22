@@ -15,7 +15,7 @@ use chrono::NaiveDate;
 use super::client::FreeloClient;
 use crate::cache::Db;
 use crate::commands::connections::FreeloConnectionConfig;
-use crate::worklog_service::{ServiceFuture, WorklogService};
+use crate::worklog_service::{ServiceFuture, SyncOutcome, WorklogService};
 
 /// A built Freelo connection: the HTTP client plus the persisted config
 /// (selected projects, cached user id). One per `ProviderClient::Freelo`.
@@ -56,15 +56,18 @@ impl WorklogService for FreeloService {
         conn_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> ServiceFuture<'a, usize> {
+    ) -> ServiceFuture<'a, SyncOutcome> {
         Box::pin(async move {
             // Readiness gate: Freelo's worklog endpoint needs an explicit
             // `user_id`. We cache it on the config at sync time; when the
             // connection has never resolved it (first run, or hand-rolled
-            // import) silently skip rather than 400-ing. Mirrors the
-            // historical behavior of `sync_one_connection`.
+            // import) we surface Skipped so the orchestrator keeps the
+            // persisted error and the UI sees a warning — short-circuiting
+            // to Ok(0) used to silently fake a healthy sync.
             let Some(user_id) = self.config.sync_user_id else {
-                return Ok(0);
+                return Ok(SyncOutcome::skipped(
+                    "freelo: chybí sync_user_id (spusťte inicializaci syncu)".to_string(),
+                ));
             };
             let n = crate::freelo::sync::sync_worklogs_for_range(
                 &self.client,
@@ -76,7 +79,7 @@ impl WorklogService for FreeloService {
                 &self.config.selected_project_ids,
             )
             .await?;
-            Ok(n)
+            Ok(SyncOutcome::ok(n))
         })
     }
 }

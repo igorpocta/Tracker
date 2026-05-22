@@ -35,6 +35,40 @@ use crate::cache::Db;
 pub type ServiceFuture<'a, T> =
     std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<T>> + Send + 'a>>;
 
+/// Outcome of a worklog sync attempt.
+///
+/// `Ok(0)` and `Skipped { .. }` are NOT equivalent:
+///   * `Ok(0)` — the provider was called, returned an empty list.
+///   * `Skipped { reason }` — the readiness gate failed (no user id,
+///     `myself()` errored, etc.); the provider was never called.
+///
+/// Treating Skipped as Ok caused tracker to clear the previous error
+/// state and emit a healthy "0 imported" event even though nothing
+/// happened — the user saw a green sync that secretly synced nothing.
+#[derive(Debug, Clone)]
+pub enum SyncOutcome {
+    Ok { count: usize },
+    Skipped { reason: String },
+}
+
+impl SyncOutcome {
+    pub fn ok(count: usize) -> Self {
+        Self::Ok { count }
+    }
+    pub fn skipped(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
+        }
+    }
+    /// Count for stats / UI; Skipped counts as 0.
+    pub fn count(&self) -> usize {
+        match self {
+            Self::Ok { count } => *count,
+            Self::Skipped { .. } => 0,
+        }
+    }
+}
+
 /// Per-provider sync surface. One implementation per provider client.
 ///
 /// All methods return the count of rows the call affected (issues
@@ -52,15 +86,17 @@ pub trait WorklogService: Send + Sync {
 
     /// Pull all worklogs in the inclusive `[from, to]` window into the
     /// local cache, applying the provider's mark-and-sweep semantics for
-    /// rows that disappeared upstream. Returns the number of worklogs
-    /// upserted.
+    /// rows that disappeared upstream. Returns [`SyncOutcome`] so the
+    /// orchestrator can tell "provider ran and saw nothing" (Ok(0)) apart
+    /// from "readiness gate aborted before the provider was called"
+    /// (Skipped).
     fn sync_worklogs<'a>(
         &'a self,
         db: &'a Db,
         conn_id: i64,
         from: NaiveDate,
         to: NaiveDate,
-    ) -> ServiceFuture<'a, usize>;
+    ) -> ServiceFuture<'a, SyncOutcome>;
 }
 
 #[cfg(test)]
@@ -99,10 +135,10 @@ mod tests {
             _conn_id: i64,
             _from: NaiveDate,
             _to: NaiveDate,
-        ) -> ServiceFuture<'a, usize> {
+        ) -> ServiceFuture<'a, SyncOutcome> {
             Box::pin(async move {
                 self.worklog_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(self.worklogs_to_return)
+                Ok(SyncOutcome::ok(self.worklogs_to_return))
             })
         }
     }
@@ -149,8 +185,11 @@ mod tests {
         let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
 
-        let n = svc.sync_worklogs(&db, 42, from, to).await.expect("ok");
-        assert_eq!(n, 13);
+        let outcome = svc.sync_worklogs(&db, 42, from, to).await.expect("ok");
+        match outcome {
+            SyncOutcome::Ok { count } => assert_eq!(count, 13),
+            SyncOutcome::Skipped { reason } => panic!("expected Ok, got Skipped({reason})"),
+        }
         assert_eq!(calls_w.load(Ordering::SeqCst), 1);
         assert_eq!(calls_i.load(Ordering::SeqCst), 0);
     }
@@ -175,8 +214,15 @@ mod tests {
         let r2 = svc.sync_worklogs(&db, 1, from, to).await.expect("ok");
 
         assert_eq!(r1, 3);
-        assert_eq!(r2, 5);
+        assert_eq!(r2.count(), 5);
         assert_eq!(calls_i.load(Ordering::SeqCst), 1);
         assert_eq!(calls_w.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn sync_outcome_helpers_count_correctly() {
+        assert_eq!(SyncOutcome::ok(0).count(), 0);
+        assert_eq!(SyncOutcome::ok(7).count(), 7);
+        assert_eq!(SyncOutcome::skipped("nope").count(), 0);
     }
 }
