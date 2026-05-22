@@ -11,6 +11,7 @@ pub mod popover;
 pub mod sentry_init;
 pub mod server;
 pub mod state;
+pub mod time;
 pub mod tray;
 pub mod tray_pulse;
 pub mod tray_ticker;
