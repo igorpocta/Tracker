@@ -185,6 +185,32 @@ export function combineDateAndTime(baseDate: Date, hhmm: string): Date | null {
   );
 }
 
+/**
+ * Like `combineDateAndTime`, but if the resulting datetime is BEFORE
+ * `baseDate`, advance it by one calendar day. Used when editing the end
+ * time of a worklog: a record from 23:30 to 00:30 must be interpreted as
+ * +1h (cross-midnight), not as a same-day 24h-loop.
+ *
+ * Returns `null` if the time string fails to parse.
+ */
+export function combineDateAndTimeAllowingNextDay(
+  baseDate: Date,
+  hhmm: string,
+): Date | null {
+  const same = combineDateAndTime(baseDate, hhmm);
+  if (!same) return null;
+  if (same.getTime() >= baseDate.getTime()) return same;
+  // Roll to next calendar day.
+  return new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate() + 1,
+    same.getHours(),
+    same.getMinutes(),
+    0,
+  );
+}
+
 /** Long-form display label, e.g. "Tuesday, 13 May 2026". */
 export function formatLongDayLabel(date: Date): string {
   return new Intl.DateTimeFormat(undefined, {

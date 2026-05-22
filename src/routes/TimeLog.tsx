@@ -46,6 +46,7 @@ import { SuggestionBanner } from "../components/Timer/SuggestionBanner";
 import {
   addDays,
   combineDateAndTime,
+  combineDateAndTimeAllowingNextDay,
   dayEndUnixS,
   dayStartUnixS,
   formatHHMM,
@@ -598,9 +599,11 @@ export function WorklogRow({
 
   const commitEnd = async () => {
     setEditing(null);
-    const newEnd = combineDateAndTime(started, draftEnd);
+    const newEnd = combineDateAndTimeAllowingNextDay(started, draftEnd);
     if (!newEnd) return;
-    const newDur = Math.max(0, Math.round((newEnd.getTime() - started.getTime()) / 1000));
+    const newDur = Math.round((newEnd.getTime() - started.getTime()) / 1000);
+    // Sanity guard — UI also enforces this so the backend's 24h limit isn't hit.
+    if (newDur <= 0 || newDur > 24 * 60 * 60) return;
     if (newDur === row.duration_s) return;
     await onUpdate(row, { durationSeconds: newDur });
   };

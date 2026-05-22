@@ -15,7 +15,7 @@
  * state from the first edit session.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -96,5 +96,39 @@ describe("<WorklogRow /> inline edit lifecycle", () => {
     await user.click(screen.getByTitle("Upravit komentář"));
     const secondInput = screen.getByPlaceholderText("Komentář") as HTMLInputElement;
     expect(secondInput.value).toBe("beta");
+  });
+
+  it("interprets end time before start time as next-day end (cross-midnight)", async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const onDelete = vi.fn();
+    const onAssign = vi.fn();
+
+    // Row starting 2026-05-14 23:30 local, ending 23:45 (15 min duration).
+    const startedAt = new Date(2026, 4, 14, 23, 30, 0).getTime() / 1000;
+    withProviders(
+      <WorklogRow
+        row={row({ started_at: startedAt, duration_s: 15 * 60 })}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+        onAssign={onAssign}
+      />,
+    );
+
+    // Enter edit mode on the end-time cell.
+    await user.click(screen.getByTitle("Upravit konec"));
+    const endInput = screen.getByLabelText("Konec") as HTMLInputElement;
+
+    // Set the end time to 00:30 — a time BEFORE the start (23:30). The
+    // commitEnd handler must interpret this as the next calendar day,
+    // producing a +1h duration (3600s) rather than a negative or no-op.
+    fireEvent.change(endInput, { target: { value: "00:30" } });
+    fireEvent.blur(endInput);
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ started_at: startedAt }),
+      { durationSeconds: 3600 },
+    );
   });
 });

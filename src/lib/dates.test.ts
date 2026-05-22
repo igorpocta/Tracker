@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDays,
+  combineDateAndTimeAllowingNextDay,
   dayEndUnixS,
   dayRangeUnixS,
   dayStartUnixS,
@@ -114,5 +115,39 @@ describe("dates", () => {
     const b = new Date(2026, 0, 8);
     expect(daysBetween(a, b)).toBe(7);
     expect(daysBetween(b, a)).toBe(-7);
+  });
+});
+
+describe("combineDateAndTimeAllowingNextDay", () => {
+  it("returns null for invalid time string", () => {
+    const base = new Date(2026, 4, 14, 23, 30, 0); // 2026-05-14 23:30 local
+    expect(combineDateAndTimeAllowingNextDay(base, "x:y")).toBeNull();
+  });
+
+  it("uses the same day when the time is after the base time", () => {
+    const base = new Date(2026, 4, 14, 9, 0, 0);
+    const out = combineDateAndTimeAllowingNextDay(base, "17:30")!;
+    expect(out.getFullYear()).toBe(2026);
+    expect(out.getMonth()).toBe(4);
+    expect(out.getDate()).toBe(14);
+    expect(out.getHours()).toBe(17);
+    expect(out.getMinutes()).toBe(30);
+  });
+
+  it("rolls to the next day when the time is BEFORE the base time", () => {
+    // base = 2026-05-14 23:30; end = 00:30 → must be 2026-05-15 00:30
+    const base = new Date(2026, 4, 14, 23, 30, 0);
+    const out = combineDateAndTimeAllowingNextDay(base, "00:30")!;
+    expect(out.getDate()).toBe(15);
+    expect(out.getHours()).toBe(0);
+    expect(out.getMinutes()).toBe(30);
+    // Resulting interval is +1h.
+    expect(out.getTime() - base.getTime()).toBe(60 * 60 * 1000);
+  });
+
+  it("does NOT roll when the time exactly equals the base time", () => {
+    const base = new Date(2026, 4, 14, 12, 0, 0);
+    const out = combineDateAndTimeAllowingNextDay(base, "12:00")!;
+    expect(out.getDate()).toBe(14);
   });
 });
