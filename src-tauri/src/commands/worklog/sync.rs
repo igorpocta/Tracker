@@ -77,11 +77,11 @@ fn clear_sync_error(db: &cache::Db, connection_id: i64) {
 ///   - `Skipped { reason }` — persist as a `worklogs_skipped` phase tag
 ///     under the same `last_sync_error:N` key so the UI's "last error"
 ///     panel surfaces the skip as a warning. Returns 0.
-fn apply_worklog_outcome(db: &cache::Db, conn_id: i64, outcome: &SyncOutcome) -> usize {
+fn apply_worklog_outcome(db: &cache::Db, conn_id: i64, outcome: SyncOutcome) -> usize {
     match outcome {
-        SyncOutcome::Ok { count } => *count,
+        SyncOutcome::Ok { count } => count,
         SyncOutcome::Skipped { reason } => {
-            store_sync_error(db, conn_id, "worklogs_skipped", reason);
+            store_sync_error(db, conn_id, "worklogs_skipped", &reason);
             0
         }
     }
@@ -231,13 +231,7 @@ pub async fn sync_one_connection(
         Ok(SyncOutcome::Skipped { reason }) => {
             // UI musí poznat skip jako varování, ne jako "OK 0":
             emit("worklogs", None, Some(&format!("skipped: {reason}")));
-            worklogs_n = apply_worklog_outcome(
-                db,
-                conn_id,
-                &SyncOutcome::Skipped {
-                    reason: reason.clone(),
-                },
-            );
+            worklogs_n = apply_worklog_outcome(db, conn_id, SyncOutcome::Skipped { reason });
             any_error = true;
         }
         Err(e) => {
@@ -361,10 +355,14 @@ pub struct SyncErrorEntry {
     pub at: i64,
 }
 
-/// Vrátí seznam connections s persistovaným posledním sync errorem.
-/// Když je seznam prázdný, nic nepadlo. Po úspěšném syncu connection
-/// automaticky zmizí z výsledku — `sync_one_connection` ji při úspěchu
-/// vyčistí.
+/// Vrátí seznam connections s persistovaným posledním sync errorem
+/// **nebo skipem** (`phase = "worklogs_skipped"`). Položka může
+/// reprezentovat tvrdou chybu nebo "fáze se nespustila kvůli chybějící
+/// konfiguraci". Klient si rozliší podle `phase`.
+///
+/// Po úspěšném syncu (žádný error, žádný skip) connection z výsledku
+/// zmizí — `sync_one_connection` `clear_sync_error` zavolá jen když
+/// všechny fáze proběhly bez problému.
 #[tauri::command]
 pub async fn get_sync_errors(
     state: tauri::State<'_, AppState>,
@@ -455,22 +453,28 @@ mod readiness_tests {
     }
 
     #[test]
-    fn skipped_outcome_does_not_clear_persisted_error() {
+    fn skipped_outcome_persists_phase_and_reason() {
         let db = temp_db();
-        // Seed: pretend a previous run failed.
         store_sync_error(&db, 42, "worklogs", "boom");
-        // The new outcome path: a "skipped" run from this iteration
-        // must NOT call clear_sync_error.
-        let outcome = SyncOutcome::Skipped {
-            reason: "freelo: chybí user id".into(),
-        };
-        let counted = apply_worklog_outcome(&db, 42, &outcome);
-        assert_eq!(counted, 0);
-        let (_phase, err) = read_sync_error(&db, 42);
-        // Skipped writes its OWN phase tag (worklogs_skipped) with the new
-        // reason; the previous worklog error is overwritten in storage, but
-        // crucially the persistent error state is NOT EMPTY — the UI's
-        // "last error" panel always has something to show after a skip.
+        apply_worklog_outcome(
+            &db,
+            42,
+            SyncOutcome::Skipped {
+                reason: "freelo: chybí user id".into(),
+            },
+        );
+        let (phase, err) = read_sync_error(&db, 42);
+        assert_eq!(
+            phase.as_deref(),
+            Some("worklogs_skipped"),
+            "skipped overwrites phase tag to worklogs_skipped"
+        );
+        assert_eq!(
+            err.as_deref(),
+            Some("freelo: chybí user id"),
+            "skipped persists its own reason, the seeded 'boom' is gone"
+        );
+        // Critical: clear_sync_error was NOT called — the entry remains.
         assert!(
             err.is_some(),
             "skipped outcome must NOT leave the error state empty"
@@ -478,17 +482,15 @@ mod readiness_tests {
     }
 
     #[test]
-    fn ok_zero_outcome_clears_previous_error() {
+    fn apply_outcome_for_ok_does_not_itself_clear_error() {
         let db = temp_db();
         store_sync_error(&db, 42, "worklogs", "boom");
-        let outcome = SyncOutcome::Ok { count: 0 };
-        let counted = apply_worklog_outcome(&db, 42, &outcome);
+        let counted = apply_worklog_outcome(&db, 42, SyncOutcome::Ok { count: 0 });
         assert_eq!(counted, 0);
-        // Note: apply_worklog_outcome only RETURNS count; the actual
-        // clearing of the previous error happens later in sync_one_connection
-        // when all phases pass (any_error stays false). So this test verifies
-        // apply_worklog_outcome does NOT itself clear the error (that's
-        // sync_one_connection's job at the end).
+        // apply_worklog_outcome is a phase-level helper; end-of-run clearing
+        // is sync_one_connection's responsibility (gated by `any_error == false`).
+        // This test pins down that contract — the helper itself MUST NOT
+        // touch the persisted error state on Ok.
         let (_, err) = read_sync_error(&db, 42);
         assert_eq!(
             err.as_deref(),

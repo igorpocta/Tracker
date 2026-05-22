@@ -319,19 +319,33 @@ function CacheRing({
     label = formatCacheCount(cachedIssues);
   }
   const hasError = syncErrors.length > 0;
+  // "Skip" znamená, že se fáze nespustila kvůli chybějící konfiguraci —
+  // to není failure. Když jsou v seznamu JEN skipy, držíme ring v warning
+  // barvě a tooltip mluví o přeskočení. Smíšený stav (skip + tvrdý error)
+  // počítáme jako error, ať uživatel hned vidí, že je tam něco horšího.
+  const hasOnlySkips =
+    syncErrors.length > 0 &&
+    syncErrors.every((e) => e.phase === "worklogs_skipped");
   const errorTitle = hasError
     ? syncErrors
         .map((e) => `#${e.connection_id} ${e.phase}: ${e.error}`)
         .join("\n")
     : null;
+  const headline = hasOnlySkips
+    ? "Worklog sync byl přeskočen"
+    : "Poslední sync selhal";
   const title = syncing
     ? "Synchronizace probíhá…"
     : hasError
-      ? `Poslední sync selhal · klikni pro nový pokus\n\n${errorTitle}`
+      ? `${headline} · klikni pro nový pokus\n\n${errorTitle}`
       : running
         ? `Sledování běží · klikni pro sync (${cachedIssues} úkolů v cache)`
         : `${cachedIssues} úkolů v cache · klikni pro sync`;
-  const ringColor = hasError ? "var(--danger, #c0392b)" : "var(--accent)";
+  const ringColor = hasError
+    ? hasOnlySkips
+      ? "var(--warning, var(--text-tertiary))"
+      : "var(--danger, #c0392b)"
+    : "var(--accent)";
   // Inline styly mají vyšší specificitu než pseudo-classy v Tailwind preflight,
   // ale `:focus` a `:disabled` v UA stylech přebíjí třídy, ne inline. Proto
   // všechno barevné držíme inline — accent přežije focus, hover i disabled.

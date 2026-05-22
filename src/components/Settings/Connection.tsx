@@ -344,32 +344,50 @@ function ConnectionCard({
         </p>
       )}
 
-      {syncError && (
-        <div
-          className="flex items-start gap-2 pl-11 pr-2 py-1.5 rounded-[var(--radius-sm)]"
-          style={{
-            background: "color-mix(in srgb, var(--danger, #c0392b) 8%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--danger, #c0392b) 25%, transparent)",
-          }}
-          role="alert"
-        >
-          <CircleAlert
-            className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[var(--danger)]"
-            aria-hidden
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-medium text-[var(--danger)]">
-              {syncErrorLabel(syncError.phase)} selhala
-            </p>
-            <p className="text-[11px] text-[var(--text-secondary)] break-words">
-              {syncError.error}
-            </p>
-            <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-              {formatErrorTime(syncError.at)}
-            </p>
-          </div>
-        </div>
-      )}
+      {syncError &&
+        (() => {
+          const isSkip = syncError.phase === "worklogs_skipped";
+          // Skip = "fáze se nespustila" (warning), error = "fáze padla" (danger).
+          // Same panel layout, different palette + headline shape, so the user
+          // can tell "missing config" apart from "remote API blew up" at a glance.
+          const accent = isSkip
+            ? "var(--warning, var(--text-tertiary))"
+            : "var(--danger, #c0392b)";
+          return (
+            <div
+              className="flex items-start gap-2 pl-11 pr-2 py-1.5 rounded-[var(--radius-sm)]"
+              style={{
+                background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+                border: `1px solid color-mix(in srgb, ${accent} 25%, transparent)`,
+              }}
+              role="alert"
+            >
+              <CircleAlert
+                className="w-3.5 h-3.5 mt-0.5 shrink-0"
+                style={{ color: accent }}
+                aria-hidden
+              />
+              <div className="flex-1 min-w-0">
+                <p
+                  className="text-[11px] font-medium"
+                  style={{ color: accent }}
+                >
+                  {isSkip
+                    ? `${syncErrorLabel(syncError.phase)} — ${syncError.error}`
+                    : `${syncErrorLabel(syncError.phase)} selhala`}
+                </p>
+                {!isSkip && (
+                  <p className="text-[11px] text-[var(--text-secondary)] break-words">
+                    {syncError.error}
+                  </p>
+                )}
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                  {formatErrorTime(syncError.at)}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
       {conn.provider === "freelo" && (
         <>
@@ -822,10 +840,18 @@ function formatSyncTime(unixS: number): string {
 }
 
 function syncErrorLabel(phase: string): string {
-  if (phase === "connection") return "Připojení";
-  if (phase === "issues") return "Načtení úkolů";
-  if (phase === "worklogs") return "Načtení záznamů";
-  return phase;
+  switch (phase) {
+    case "connection":
+      return "Připojení";
+    case "issues":
+      return "Načtení úkolů";
+    case "worklogs":
+      return "Načtení záznamů";
+    case "worklogs_skipped":
+      return "Worklog sync byl přeskočen";
+    default:
+      return phase;
+  }
 }
 
 function formatErrorTime(unixS: number): string {
