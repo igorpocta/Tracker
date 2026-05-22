@@ -22,8 +22,10 @@
 
 pub mod audit;
 pub mod crud;
+pub mod flush;
 pub mod sync;
 
 pub use audit::*;
 pub use crud::*;
+pub use flush::flush_unsynced_worklogs;
 pub use sync::*;

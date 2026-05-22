@@ -280,6 +280,14 @@ pub async fn refresh_all(
     let mut total_issues = 0usize;
     let mut total_worklogs = 0usize;
 
+    // Drain the backlog of locally-recorded-but-never-pushed worklogs
+    // BEFORE the pull phase. Otherwise mark-and-sweep on a fresh pull
+    // might race with rows that are about to land upstream.
+    let flushed = crate::commands::worklog::flush_unsynced_worklogs(&app, &state).await;
+    if flushed > 0 {
+        tracing::info!("refresh_all: flushed {flushed} backlogged worklog(s)");
+    }
+
     let active = state
         .connections
         .read()
