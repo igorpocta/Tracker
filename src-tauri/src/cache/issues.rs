@@ -71,41 +71,80 @@ const SELECT_COLS: &str = "id, connection_id, issue_id, issue_key, name,
                            parent_key, parent_name, status, is_archived,
                            created_at, updated_at, remote_updated_at, last_synced_at";
 
-/// Insert or update keyed by `(connection_id, issue_key)`. On UPDATE the
-/// `created_at` and `id` are preserved.
+/// Insert or update. Tabulka má dva UNIQUE indexy — `(connection_id,
+/// issue_key)` a `(connection_id, issue_id)`. `issue_id` je stabilní
+/// (interní ID z provideru), `issue_key` se může v čase měnit (Jira
+/// project rename, přesun issue mezi projekty). Proto: nejdřív UPDATE
+/// podle stabilního páru `(connection_id, issue_id)` — to ošetří změnu
+/// klíče a zachová lokální `id` i `created_at`. Pokud taková řádka
+/// neexistuje, INSERT s `ON CONFLICT(connection_id, issue_key)` jako
+/// fallback (běžný nový záznam, případně reuse keyu novým id).
 pub fn upsert(db: &Db, issue: &IssueRow) -> Result<(), DbError> {
-    let conn = db.pool().get()?;
-    conn.execute(
-        "INSERT INTO issues_v2 (
-            connection_id, issue_id, issue_key, name,
-            parent_key, parent_name, status, is_archived,
-            created_at, updated_at, remote_updated_at, last_synced_at
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
-         ON CONFLICT(connection_id, issue_key) DO UPDATE SET
-            issue_id          = excluded.issue_id,
-            name              = excluded.name,
-            parent_key        = excluded.parent_key,
-            parent_name       = excluded.parent_name,
-            status            = excluded.status,
-            is_archived       = excluded.is_archived,
-            updated_at        = excluded.updated_at,
-            remote_updated_at = excluded.remote_updated_at,
-            last_synced_at    = excluded.last_synced_at",
+    let mut conn = db.pool().get()?;
+    let tx = conn.transaction()?;
+
+    let updated = tx.execute(
+        "UPDATE issues_v2 SET
+            issue_key         = ?1,
+            name              = ?2,
+            parent_key        = ?3,
+            parent_name       = ?4,
+            status            = ?5,
+            is_archived       = ?6,
+            updated_at        = ?7,
+            remote_updated_at = ?8,
+            last_synced_at    = ?9
+         WHERE connection_id = ?10 AND issue_id = ?11",
         rusqlite::params![
-            issue.connection_id,
-            issue.issue_id,
             issue.issue_key,
             issue.name,
             issue.parent_key,
             issue.parent_name,
             issue.status,
             if issue.is_archived { 1 } else { 0 },
-            issue.created_at,
             issue.updated_at,
             issue.remote_updated_at,
             issue.last_synced_at,
+            issue.connection_id,
+            issue.issue_id,
         ],
     )?;
+
+    if updated == 0 {
+        tx.execute(
+            "INSERT INTO issues_v2 (
+                connection_id, issue_id, issue_key, name,
+                parent_key, parent_name, status, is_archived,
+                created_at, updated_at, remote_updated_at, last_synced_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+             ON CONFLICT(connection_id, issue_key) DO UPDATE SET
+                issue_id          = excluded.issue_id,
+                name              = excluded.name,
+                parent_key        = excluded.parent_key,
+                parent_name       = excluded.parent_name,
+                status            = excluded.status,
+                is_archived       = excluded.is_archived,
+                updated_at        = excluded.updated_at,
+                remote_updated_at = excluded.remote_updated_at,
+                last_synced_at    = excluded.last_synced_at",
+            rusqlite::params![
+                issue.connection_id,
+                issue.issue_id,
+                issue.issue_key,
+                issue.name,
+                issue.parent_key,
+                issue.parent_name,
+                issue.status,
+                if issue.is_archived { 1 } else { 0 },
+                issue.created_at,
+                issue.updated_at,
+                issue.remote_updated_at,
+                issue.last_synced_at,
+            ],
+        )?;
+    }
+
+    tx.commit()?;
     Ok(())
 }
 
@@ -222,4 +261,72 @@ fn row_to_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<IssueRow> {
         remote_updated_at: r.get(11)?,
         last_synced_at: r.get(12)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::Db;
+    use tempfile::tempdir;
+
+    fn open_db() -> Db {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        std::mem::forget(dir);
+        Db::open(&path).unwrap()
+    }
+
+    fn new_connection(db: &Db) -> i64 {
+        crate::cache::connections::insert(
+            db,
+            crate::cache::connections::NewConnection {
+                provider: "jira",
+                name: "test",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap()
+    }
+
+    // Regrese: Jira může u stejného `issue.id` změnit `issue.key`
+    // (přesun mezi projekty, project rename). Stará verze upsertu
+    // padala na UNIQUE constraint (connection_id, issue_id), protože
+    // ON CONFLICT mířil jen na (connection_id, issue_key).
+    #[test]
+    fn upsert_handles_issue_key_change_for_same_issue_id() {
+        let db = open_db();
+        let connection_id = new_connection(&db);
+
+        let original = IssueRow {
+            connection_id,
+            issue_id: "10001".into(),
+            issue_key: "OLD-1".into(),
+            name: "before".into(),
+            created_at: 100,
+            updated_at: 100,
+            ..Default::default()
+        };
+        upsert(&db, &original).unwrap();
+
+        let original_id = get_by_key(&db, "OLD-1").unwrap().unwrap().id;
+
+        let renamed = IssueRow {
+            connection_id,
+            issue_id: "10001".into(),
+            issue_key: "NEW-1".into(),
+            name: "after".into(),
+            created_at: 200,
+            updated_at: 200,
+            ..Default::default()
+        };
+        upsert(&db, &renamed).unwrap();
+
+        assert_eq!(count(&db).unwrap(), 1, "musí přepsat, ne vytvořit duplikát");
+        assert!(get_by_key(&db, "OLD-1").unwrap().is_none());
+        let found = get_by_key(&db, "NEW-1").unwrap().unwrap();
+        assert_eq!(found.id, original_id, "id se musí zachovat");
+        assert_eq!(found.created_at, 100, "created_at se musí zachovat");
+        assert_eq!(found.name, "after");
+    }
 }
