@@ -460,7 +460,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // macOS-specifický fix: klik na dock ikonu (případně otevření
             // appky když je už spuštěná) emituje `RunEvent::Reopen`. Pokud
             // všechna naše okna jsou skryta (typicky uživatel zavřel main
@@ -468,13 +468,16 @@ pub fn run() {
             // přepnulo dopředu beze změny viditelnosti — uživatel uvidí
             // ikonu v doku, ale žádné okno. Tento handler v takovém případě
             // vynutí zobrazení main okna, aby se appka "probudila".
+            // `RunEvent::Reopen` existuje jen na macOS, na ostatních
+            // platformách tahle varianta není a build by spadl.
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
-            } = event
+            } = _event
             {
                 if !has_visible_windows {
-                    let _ = crate::popover::open_main(app_handle);
+                    let _ = crate::popover::open_main(_app_handle);
                 }
             }
         });
