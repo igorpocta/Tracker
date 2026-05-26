@@ -11,8 +11,8 @@
 //! primary monitor — visually rough but still usable.
 
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime,
-    WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
 };
 
 #[cfg(target_os = "macos")]
