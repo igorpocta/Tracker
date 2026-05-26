@@ -251,10 +251,11 @@ fn resolve_client_for_issue(
     let matches: Vec<_> = conns
         .iter()
         .filter(|c| c.enabled)
-        .filter(|c| match (&c.client, want_freelo) {
-            (ProviderClient::Freelo(_), true) => true,
-            (ProviderClient::Jira(_), false) => true,
-            _ => false,
+        .filter(|c| {
+            matches!(
+                (&c.client, want_freelo),
+                (ProviderClient::Freelo(_), true) | (ProviderClient::Jira(_), false)
+            )
         })
         .collect();
 

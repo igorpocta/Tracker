@@ -104,8 +104,8 @@ async fn concurrent_pushes_of_same_row_post_only_once() {
     )
     .unwrap();
 
-    let fut_a = push_local_worklog_inner(&app.handle(), &app_state, local_id);
-    let fut_b = push_local_worklog_inner(&app.handle(), &app_state, local_id);
+    let fut_a = push_local_worklog_inner(app.handle(), &app_state, local_id);
+    let fut_b = push_local_worklog_inner(app.handle(), &app_state, local_id);
     let (res_a, res_b) = tokio::join!(fut_a, fut_b);
 
     let outcomes = [res_a, res_b];
