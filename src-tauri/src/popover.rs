@@ -11,8 +11,8 @@
 //! primary monitor — visually rough but still usable.
 
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime, WebviewWindow,
-    WindowEvent,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, Rect, Runtime,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
 #[cfg(target_os = "macos")]
@@ -31,6 +31,35 @@ const POPOVER_GAP_PX: f64 = 6.0;
 fn get_popover<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
     app.get_webview_window(POPOVER_LABEL)
         .ok_or(tauri::Error::WebviewNotFound)
+}
+
+fn ensure_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+        return Ok(win);
+    }
+
+    let cfg = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN_LABEL)
+        .cloned()
+        .ok_or(tauri::Error::WindowNotFound)?;
+
+    WebviewWindowBuilder::from_config(app, &cfg)?.build()
+}
+
+/// Ensure the main window exists, is de-minimized and focused.
+///
+/// This covers the macOS class of failures where the webview window can be
+/// gone while the process, tray and popover are still alive.
+pub fn focus_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    let win = ensure_main_window(app)?;
+    win.unminimize().ok();
+    win.show()?;
+    win.set_focus()?;
+    Ok(win)
 }
 
 /// Install a `WindowEvent::Focused(false)` listener on the popover that auto-
@@ -170,21 +199,15 @@ pub fn hide_by_app<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 /// Bring the main window forward (showing it if hidden). Used by the tray menu.
 pub fn open_main<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
-        win.show()?;
-        win.unminimize().ok();
-        win.set_focus()?;
-        let _ = win.emit("main-window:navigate", "main");
-    }
+    let win = focus_main_window(app)?;
+    let _ = win.emit("main-window:navigate", "main");
     Ok(())
 }
 
 /// Bring the main window forward and ask the frontend to navigate to setup.
 pub fn open_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    open_main(app)?;
-    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
-        let _ = win.emit("main-window:navigate", "setup");
-    }
+    let win = focus_main_window(app)?;
+    let _ = win.emit("main-window:navigate", "setup");
     Ok(())
 }
 

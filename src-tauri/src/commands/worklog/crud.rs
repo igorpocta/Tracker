@@ -212,8 +212,15 @@ fn audit_success(
 }
 
 /// Look up the active client for the connection that owns `issue_key`.
-/// Falls back to the first matching provider client if the issues table
-/// doesn't have a `connection_id` recorded (legacy rows).
+///
+/// Safety contract:
+/// - If the issues cache knows the owning `connection_id`, we MUST use that
+///   exact connection or fail loudly. Silently retargeting another tenant is
+///   unacceptable for worklog mutations.
+/// - If the issues cache has no connection signal at all, fallback is allowed
+///   only when there is exactly ONE enabled connection of the matching
+///   provider kind. With multiple plausible tenants we fail and ask the caller
+///   to refresh/sync first.
 fn resolve_client_for_issue(
     state: &AppState,
     issue_key: &str,
@@ -226,21 +233,38 @@ fn resolve_client_for_issue(
         .expect("AppState.connections RwLock poisoned");
     // If we know the connection id, prefer that.
     if let Some(cid) = conn_id {
-        if let Some(active) = conns.iter().find(|c| c.id == cid && c.enabled) {
-            return Ok((active.id, active.client.clone()));
-        }
+        return conns
+            .iter()
+            .find(|c| c.id == cid && c.enabled)
+            .map(|active| (active.id, active.client.clone()))
+            .ok_or_else(|| {
+                format!(
+                    "Připojení id={cid} pro úkol {issue_key} není aktivní — zapněte ho v nastavení a zkuste znovu"
+                )
+            });
     }
-    // Fallback: pick the first connection whose provider can plausibly
-    // handle this key (FRL- prefix → Freelo, anything else → Jira).
+
+    // No cache signal. Fallback is safe only when there is exactly one
+    // plausible provider connection; with multiple tenants we'd risk logging
+    // time to the wrong server.
     let want_freelo = freelo::is_freelo_key(issue_key);
-    for c in conns.iter().filter(|c| c.enabled) {
-        match (&c.client, want_freelo) {
-            (ProviderClient::Freelo(_), true) => return Ok((c.id, c.client.clone())),
-            (ProviderClient::Jira(_), false) => return Ok((c.id, c.client.clone())),
-            _ => {}
-        }
+    let matches: Vec<_> = conns
+        .iter()
+        .filter(|c| c.enabled)
+        .filter(|c| match (&c.client, want_freelo) {
+            (ProviderClient::Freelo(_), true) => true,
+            (ProviderClient::Jira(_), false) => true,
+            _ => false,
+        })
+        .collect();
+
+    match matches.as_slice() {
+        [single] => Ok((single.id, single.client.clone())),
+        [] => Err("Žádné aktivní připojení pro tento úkol".into()),
+        _ => Err(format!(
+            "Úkol {issue_key} není v lokální cache a existuje více možných připojení — nejprve proveďte sync a vyberte úkol z nabídky"
+        )),
     }
-    Err("Žádné aktivní připojení pro tento úkol".into())
 }
 
 /// Typed Freelo variant. Returns `(connection_id, FreeloService)` for the
@@ -1080,6 +1104,7 @@ pub async fn push_local_worklog_inner<R: tauri::Runtime>(
     state: &AppState,
     local_id: i64,
 ) -> Result<WorklogRow, String> {
+    let _push_guard = state.worklog_push_lock.lock().await;
     let before = cache::worklogs::get_by_id(&state.db, local_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;
@@ -1168,6 +1193,7 @@ pub async fn assign_worklog_issue(
     if issue_key.trim().is_empty() {
         return Err("Klíč úkolu nesmí být prázdný".into());
     }
+    let _push_guard = state.worklog_push_lock.lock().await;
     let before = cache::worklogs::get_by_id(&state.db, worklog_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Záznam nenalezen".to_string())?;

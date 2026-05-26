@@ -43,7 +43,8 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::commands::browser::VisibleTicket;
 use crate::commands::timer::{
-    get_timer_state_inner, record_local_stop, start_timer_inner, ActiveTimerState,
+    build_stop_record_plan, get_timer_state_inner, record_local_stop, start_timer_inner,
+    ActiveTimerState,
 };
 use crate::state::AppState;
 
@@ -437,16 +438,18 @@ async fn stop_timer_handler<R: Runtime>(
     };
 
     let comment = body.and_then(|Json(b)| b.comment);
+    let now = now_ms();
+    let plan = build_stop_record_plan(&app_state.db, &timer, now, comment.as_deref());
 
     // Record the local row synchronously so the extension gets an
     // immediate response.
     let row = match record_local_stop(
         &app_state.db,
         &timer,
-        now_ms(),
-        comment.as_deref(),
+        now,
+        plan.effective_comment.as_deref(),
         None,
-        None,
+        Some(plan.duration_s),
     ) {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),

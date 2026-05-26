@@ -129,22 +129,16 @@ fn upsert_legacy_jira_connection(
 /// `main-window:navigate` and reacts accordingly.
 #[tauri::command]
 pub async fn enter_setup(app: tauri::AppHandle) -> Result<(), String> {
+    crate::popover::focus_main_window(&app).map_err(|e| e.to_string())?;
     let _ = app.emit("main-window:navigate", "setup");
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
     Ok(())
 }
 
 /// Tell the main window to switch to the regular tracking UI.
 #[tauri::command]
 pub async fn enter_main_app(app: tauri::AppHandle) -> Result<(), String> {
+    crate::popover::focus_main_window(&app).map_err(|e| e.to_string())?;
     let _ = app.emit("main-window:navigate", "main");
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
     Ok(())
 }
 
@@ -152,11 +146,7 @@ pub async fn enter_main_app(app: tauri::AppHandle) -> Result<(), String> {
 /// frontend re-renders). No-op if the window doesn't exist (e.g. during tests).
 #[tauri::command]
 pub async fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        let _ = win.unminimize();
-    }
+    crate::popover::focus_main_window(&app).map_err(|e| e.to_string())?;
     Ok(())
 }
 

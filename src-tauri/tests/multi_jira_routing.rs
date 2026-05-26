@@ -186,19 +186,43 @@ async fn resolver_actually_hits_the_owning_tenants_server() {
 }
 
 #[tokio::test]
-async fn resolver_falls_back_to_first_jira_when_issue_is_unknown() {
-    // Issues table doesn't have an entry for `UNKNOWN-1`, so the resolver
-    // walks back to "first enabled Jira connection that can plausibly
-    // handle this key". With both connections enabled and Jira, that's
-    // the FIRST one (insertion order). Pre-fix this was the unconditional
-    // behaviour for ALL issues; now it's the explicit fallback path only
-    // when we genuinely have no signal.
-    let (_dir, state, server_a, _server_b, conn_a, _conn_b) = two_jira_state().await;
+async fn resolver_errors_when_issue_is_unknown_and_multiple_jiras_exist() {
+    let (_dir, state, _server_a, _server_b, _conn_a, _conn_b) = two_jira_state().await;
+
+    let err = resolve_jira_client_for_issue(&state, "UNKNOWN-1")
+        .expect_err("ambiguous fallback must be rejected");
+    assert!(
+        err.contains("více možných připojení"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn resolver_falls_back_when_exactly_one_jira_exists() {
+    let (_dir, state, server_a, _server_b, conn_a, conn_b) = two_jira_state().await;
+    {
+        let mut conns = state.connections.write().unwrap();
+        conns.retain(|c| c.id != conn_b);
+    }
 
     let (resolved, client) =
-        resolve_jira_client_for_issue(&state, "UNKNOWN-1").expect("falls back");
+        resolve_jira_client_for_issue(&state, "UNKNOWN-1").expect("single-tenant fallback");
     assert_eq!(resolved, conn_a);
     assert!(client.base_url().starts_with(&server_a.uri()));
+}
+
+#[tokio::test]
+async fn resolver_errors_when_cached_issue_points_to_disabled_connection() {
+    let (_dir, state, _server_a, _server_b, conn_a, _conn_b) = two_jira_state().await;
+    {
+        let mut conns = state.connections.write().unwrap();
+        let conn = conns.iter_mut().find(|c| c.id == conn_a).unwrap();
+        conn.enabled = false;
+    }
+
+    let err =
+        resolve_jira_client_for_issue(&state, "ACME-1").expect_err("disabled owner must error");
+    assert!(err.contains("není aktivní"), "unexpected error: {err}");
 }
 
 #[tokio::test]

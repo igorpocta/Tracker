@@ -450,6 +450,7 @@ pub fn run() {
             commands::tray::hide_tray_popover,
             commands::tray::toggle_tray_popover,
             commands::tray::set_tray_available,
+            commands::tray::quit_app,
             commands::tray::set_app_icon_accent,
             commands::misc::haptic_feedback,
             // Phase 19 — Sentry opt-in

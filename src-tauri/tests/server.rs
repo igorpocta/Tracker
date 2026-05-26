@@ -22,6 +22,9 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 use tracker_lib::cache::Db;
+use tracker_lib::commands::rounding::{
+    set_rounding_interval_minutes_inner, set_rounding_mode_inner,
+};
 use tracker_lib::commands::timer::start_timer_inner;
 use tracker_lib::config::JiraConfig;
 use tracker_lib::server::{build_router, status_body, ServerState};
@@ -230,6 +233,30 @@ async fn start_then_stop_timer_flow() {
     assert_eq!(body["issue_key"], "ACME-42");
     // No Jira client configured → jira_worklog_id is null.
     assert!(body["jira_worklog_id"].is_null());
+}
+
+#[tokio::test]
+async fn stop_timer_applies_rounding_and_comment_fallback_like_main_flow() {
+    let (app, _dir) = fresh_state();
+    {
+        let app_state = app.state::<AppState>();
+        set_rounding_mode_inner(&app_state.db, "up").unwrap();
+        set_rounding_interval_minutes_inner(&app_state.db, 15).unwrap();
+        let started_at_ms = (chrono::Utc::now().timestamp() - 14 * 60) * 1000;
+        start_timer_inner(&app_state.db, "ACME-43", started_at_ms, Some("draft note")).unwrap();
+    }
+
+    let state = fresh_server_state(&app);
+    let router = build_test_router(state);
+    let response = router
+        .oneshot(authed_post("/stop-timer", json!({})))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["duration_s"], 15 * 60);
+    assert_eq!(body["comment"], "draft note");
 }
 
 #[tokio::test]

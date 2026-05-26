@@ -39,6 +39,16 @@ pub async fn set_tray_available(app: tauri::AppHandle, available: bool) -> Resul
     Ok(())
 }
 
+/// Explicit app shutdown command used by the popover footer.
+///
+/// We avoid relying on the `process` plugin from the renderer because the
+/// popover capability set doesn't grant that plugin permission.
+#[tauri::command]
+pub async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
 /// Přebarví **app ikonu** (dock na macOS, taskbar/window na ostatních
 /// platformách) podle vybrané palety. `primary` je hlavní brand barva,
 /// `secondary` je volitelná tmavší zastávka gradientu (mono palety

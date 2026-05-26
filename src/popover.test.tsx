@@ -49,6 +49,8 @@ function setupInvoke({
         return null;
       case "open_main_window":
         return null;
+      case "quit_app":
+        return null;
       case "enter_main_app":
         return null;
       default:
@@ -138,6 +140,18 @@ describe("Popover", () => {
       expect(screen.getByRole("button", { name: /nastavení/i })).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /ukončit/i })).toBeInTheDocument();
+  });
+
+  it("invokes quit_app when 'Ukončit' is clicked", async () => {
+    setupInvoke({ timer: null, recent: [] });
+
+    render(<Popover />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /ukončit/i })).toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /ukončit/i }));
+    expect(mockInvoke).toHaveBeenCalledWith("quit_app");
   });
 
   it("subscribes to popover:opened to refetch timer state (Phase 18B Item 17)", async () => {

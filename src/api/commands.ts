@@ -74,6 +74,11 @@ export function openMainWindow(): Promise<void> {
   return invoke<void>("open_main_window");
 }
 
+/** `quit_app(): ()` — exits the native Tauri process. */
+export function quitApp(): Promise<void> {
+  return invoke<void>("quit_app");
+}
+
 // -----------------------------------------------------------------------------
 // Timer
 // -----------------------------------------------------------------------------

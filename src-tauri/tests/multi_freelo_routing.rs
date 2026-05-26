@@ -186,6 +186,18 @@ async fn resolver_with_user_returns_user_id_for_each_tenant() {
 }
 
 #[tokio::test]
+async fn resolver_errors_when_issue_is_unknown_and_multiple_freelos_exist() {
+    let (_dir, state, _server_a, _server_b, _, _) = two_freelo_state(Some(11), Some(22)).await;
+
+    let err = resolve_freelo_service_for_issue(&state, "FREELO-9999")
+        .expect_err("ambiguous fallback must be rejected");
+    assert!(
+        err.contains("více možných připojení"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 async fn resolver_with_user_errors_when_sync_user_id_is_missing() {
     // Tenant A is configured but its `sync_user_id` hasn't been
     // discovered yet (no initial sync has run). Pre-fix the timer

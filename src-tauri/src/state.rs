@@ -13,6 +13,8 @@
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+use tokio::sync::Mutex;
+
 use crate::cache::{self, activity::ActivityRecorder, Db};
 use crate::commands::connections::{FreeloConnectionConfig, JiraConnectionConfig};
 use crate::config::JiraConfig;
@@ -81,6 +83,9 @@ pub struct AppState {
     pub connections: RwLock<Vec<ActiveConnection>>,
     /// In-process state for the user-activity feature.
     pub activity_recorder: ActivityRecorder,
+    /// Serialises retry/push flows for local-only worklogs so concurrent
+    /// callers cannot POST the same row upstream twice.
+    pub worklog_push_lock: Mutex<()>,
 
     // ----- Legacy single-Jira shims (Phase 17 → 18A bridge) -------------------
     /// Last-known Jira configuration loaded from disk, if any. Phase 18A:
@@ -97,6 +102,7 @@ impl AppState {
             app_data_dir,
             connections: RwLock::new(Vec::new()),
             activity_recorder: ActivityRecorder::new(),
+            worklog_push_lock: Mutex::new(()),
             jira_config: RwLock::new(None),
             jira_client: RwLock::new(None),
         }

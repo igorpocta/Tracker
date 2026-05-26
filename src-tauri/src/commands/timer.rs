@@ -36,6 +36,14 @@ pub struct StopOutcome {
     pub rolled_over_to_next_day: bool,
 }
 
+/// Shared "what should be recorded when this timer stops?" plan used by both
+/// the main Tauri command and the local HTTP bridge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopRecordPlan {
+    pub duration_s: i64,
+    pub effective_comment: Option<String>,
+}
+
 /// Pure logic of "what does stopping the timer produce?" — no DB, no Tauri
 /// State, no I/O.
 ///
@@ -330,6 +338,32 @@ pub fn record_local_stop(
     Ok(row)
 }
 
+fn resolve_stop_comment(
+    override_comment: Option<&str>,
+    timer_comment: Option<&str>,
+) -> Option<String> {
+    match (override_comment, timer_comment) {
+        (Some(c), _) if !c.trim().is_empty() => Some(c.to_string()),
+        (_, Some(c)) if !c.trim().is_empty() => Some(c.to_string()),
+        _ => None,
+    }
+}
+
+/// Compute the final local stop-recording plan: user-configured rounding plus
+/// the shared comment fallback semantics.
+pub fn build_stop_record_plan(
+    db: &Db,
+    timer: &ActiveTimer,
+    now_ms: i64,
+    override_comment: Option<&str>,
+) -> StopRecordPlan {
+    let outcome = compute_stop_outcome(timer.started_at, now_ms / 1000, 0, 0);
+    StopRecordPlan {
+        duration_s: rounding::apply_active_rounding(db, outcome.raw_duration_s),
+        effective_comment: resolve_stop_comment(override_comment, timer.comment.as_deref()),
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Tauri commands.
 // -----------------------------------------------------------------------------
@@ -532,30 +566,14 @@ pub async fn stop_timer_inner(
     };
 
     let now = now_ms();
-    // Phase A5 — pure raw-duration math lives in `compute_stop_outcome`.
-    // We pass `rounding_minutes = 0` here because the user-configured
-    // rounding may be `down` or `none` (the pure helper only knows
-    // `up`); `apply_active_rounding` honours all three modes and is the
-    // authoritative production rounding call. The helper's other outputs
-    // (raw_duration_s, rolled_over_to_next_day) are still useful for
-    // upcoming features but don't change behavior here.
-    let outcome = compute_stop_outcome(timer.started_at, now / 1000, 0, 0);
-    let raw_duration_s = outcome.raw_duration_s;
-
-    // Phase 18A — Item 27: apply user-configured rounding.
-    let duration_s = rounding::apply_active_rounding(&state.db, raw_duration_s);
+    let plan = build_stop_record_plan(&state.db, &timer, now, comment.as_deref());
+    let duration_s = plan.duration_s;
 
     // Phase 18A — Item 4: an unassigned timer (issue_key == "") must NOT be
     // pushed to a provider; we save locally with `pending_assignment = 1`.
     let is_unassigned = timer.issue_key.is_empty();
 
-    // Phase 18B — Item 6: fall back to the timer's in-flight comment when the
-    // StopDialog didn't provide an override.
-    let effective_comment: Option<String> = match (comment.as_deref(), timer.comment.as_deref()) {
-        (Some(c), _) if !c.trim().is_empty() => Some(c.to_string()),
-        (_, Some(c)) if !c.trim().is_empty() => Some(c.to_string()),
-        _ => None,
-    };
+    let effective_comment = plan.effective_comment;
 
     // Dispatch by issue key prefix. Freelo: post a work_report and skip
     // `record_local_stop` (the freelo ops already insert the row). Jira:

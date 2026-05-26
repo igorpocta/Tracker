@@ -35,6 +35,7 @@ import {
   getTimerState,
   getWorklogsForRange,
   openMainWindow,
+  quitApp,
   startTimer,
 } from "./api/commands";
 import type { ActiveTimerState, IssueRow, ThemePref, WorklogRow } from "./api/types";
@@ -189,10 +190,7 @@ export function Popover() {
 
   const quit = useCallback(async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      // Tauri exposes `exit` via the process plugin; fall back to closing the
-      // window if it isn't available.
-      await invoke<void>("plugin:process|exit", { code: 0 }).catch(() => {});
+      await quitApp();
     } catch {
       /* ignore */
     }

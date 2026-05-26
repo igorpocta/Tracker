@@ -45,7 +45,9 @@ pub use prefs::{
 pub use timer::{
     discard_timer, get_timer_state, start_timer, stop_timer_inner, update_timer_start,
 };
-pub use tray::{hide_tray_popover, set_tray_available, show_tray_popover, toggle_tray_popover};
+pub use tray::{
+    hide_tray_popover, quit_app, set_tray_available, show_tray_popover, toggle_tray_popover,
+};
 pub use worklog::{
     create_manual_worklog, delete_worklog, get_audit_log, get_sync_errors, get_worklog_issues,
     get_worklogs_for_range, move_worklog, push_local_worklog, refresh_all, refresh_connection,
