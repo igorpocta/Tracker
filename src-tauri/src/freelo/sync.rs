@@ -203,11 +203,9 @@ mod tests {
             user_id: 1,
         };
         let row = work_report_to_row(&w, 1, 0);
-        let expected_midnight = local_midnight_timestamp(
-            &Local,
-            NaiveDate::from_ymd_opt(2026, 5, 14).unwrap(),
-        )
-        .unwrap();
+        let expected_midnight =
+            local_midnight_timestamp(&Local, NaiveDate::from_ymd_opt(2026, 5, 14).unwrap())
+                .unwrap();
         assert_eq!(row.started_at, expected_midnight);
     }
 
