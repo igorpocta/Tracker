@@ -6,12 +6,12 @@
 //! Freelo, jinak Jira). Klienti, error type i návratové hodnoty jsou
 //! ekvivalentní.
 
-use chrono::{Local, NaiveDate, TimeZone};
+use chrono::{DateTime, FixedOffset, Local, TimeZone};
 use serde_json::Value;
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
-use super::ops::{ms_to_date, seconds_to_minutes};
+use super::ops::seconds_to_minutes;
 use crate::audit_helpers;
 use crate::cache::{
     self,
@@ -78,10 +78,10 @@ pub async fn restore_deleted_worklog(
     let duration_s = before.duration_s();
     let minutes =
         seconds_to_minutes(duration_s).map_err(|e| ReconstructError::Generic(e.to_string()))?;
-    let date = date_from_started_at(before.started_at)?;
+    let started_at = started_at_from_seconds(before.started_at)?;
 
     let resp = match client
-        .create_work_report(task_id, date, minutes, before.description.as_deref())
+        .create_work_report(task_id, started_at, minutes, before.description.as_deref())
         .await
     {
         Ok(r) => r,
@@ -176,13 +176,13 @@ pub async fn revert_worklog_update(
     let duration_s = before.duration_s();
     let minutes =
         seconds_to_minutes(duration_s).map_err(|e| ReconstructError::Generic(e.to_string()))?;
-    let date = date_from_started_at(before.started_at)?;
+    let started_at = started_at_from_seconds(before.started_at)?;
 
     match client
         .update_work_report(
             work_report_id,
             Some(minutes),
-            Some(date),
+            Some(started_at),
             before.description.as_deref(),
         )
         .await
@@ -282,10 +282,10 @@ async fn retry_create(
     let duration_s = snap.duration_s();
     let minutes =
         seconds_to_minutes(duration_s).map_err(|e| ReconstructError::Generic(e.to_string()))?;
-    let date = date_from_started_at(snap.started_at)?;
+    let started_at = started_at_from_seconds(snap.started_at)?;
 
     match client
-        .create_work_report(task_id, date, minutes, snap.description.as_deref())
+        .create_work_report(task_id, started_at, minutes, snap.description.as_deref())
         .await
     {
         Ok(resp) => {
@@ -370,13 +370,13 @@ async fn retry_update(
     let duration_s = snap.duration_s();
     let minutes =
         seconds_to_minutes(duration_s).map_err(|e| ReconstructError::Generic(e.to_string()))?;
-    let date = date_from_started_at(snap.started_at)?;
+    let started_at = started_at_from_seconds(snap.started_at)?;
 
     match client
         .update_work_report(
             work_report_id,
             Some(minutes),
-            Some(date),
+            Some(started_at),
             snap.description.as_deref(),
         )
         .await
@@ -485,11 +485,10 @@ async fn retry_delete(
     }
 }
 
-fn date_from_started_at(unix_s: i64) -> Result<NaiveDate, ReconstructError> {
-    let _ = ms_to_date; // ujištění, že funkce existuje a je v scope
+fn started_at_from_seconds(unix_s: i64) -> Result<DateTime<FixedOffset>, ReconstructError> {
     Local
         .timestamp_opt(unix_s, 0)
         .single()
-        .map(|dt| dt.date_naive())
+        .map(|dt| dt.fixed_offset())
         .ok_or(ReconstructError::BadTimestamp)
 }

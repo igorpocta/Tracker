@@ -1,7 +1,7 @@
 //! Create / update / delete operations for Freelo work-reports, mapping the
 //! shared command surface onto the Freelo API.
 
-use chrono::{Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
@@ -37,22 +37,22 @@ pub fn seconds_to_minutes(seconds: i64) -> Result<i64, FreeloOpError> {
     Ok(m)
 }
 
-/// Convert a unix-milliseconds timestamp to the LOCAL calendar date the user
-/// saw on screen when they picked the time.
+/// Convert a unix-milliseconds timestamp to a `DateTime<Local>` for the Freelo
+/// API.
 ///
-/// Freelo stores only a date (`YYYY-MM-DD`), not a time-of-day. Converting via
-/// UTC would shift entries around local midnight: `2026-05-21 00:30 +02`
-/// becomes `2026-05-20` in UTC, so the work-report gets posted to the previous
-/// day. We therefore derive the date in the user's local timezone.
-fn ms_to_date_in_tz<TZ: TimeZone>(tz: &TZ, ms: i64) -> Option<NaiveDate> {
-    tz.timestamp_millis_opt(ms)
-        .single()
-        .map(|dt| dt.date_naive())
+/// Freelo bere `date_reported` jako plný RFC3339 timestamp s TZ a uloží přesně,
+/// co pošleme. Lokální TZ použijeme proto, ať se výsledný offset shoduje
+/// s časem, který uživatel viděl v UI (`2026-05-21T00:30:00+02:00`); konverze
+/// přes UTC by způsobila, že Freelo zobrazí čas posunutý do UTC.
+fn ms_to_local_datetime_in_tz<TZ: TimeZone>(tz: &TZ, ms: i64) -> Option<DateTime<TZ>> {
+    tz.timestamp_millis_opt(ms).single()
 }
 
-/// Convert a unix milliseconds timestamp to a local-date for the Freelo API.
-pub fn ms_to_date(ms: i64) -> NaiveDate {
-    ms_to_date_in_tz(&Local, ms).unwrap_or_else(|| Local::now().date_naive())
+/// Convert a unix milliseconds timestamp to a `DateTime<Local>` for the Freelo
+/// API. Falls back to "now" when the input is out of range (defensive — UI
+/// shouldn't produce such values).
+pub fn ms_to_local_datetime(ms: i64) -> DateTime<Local> {
+    ms_to_local_datetime_in_tz(&Local, ms).unwrap_or_else(Local::now)
 }
 
 /// Add a new work-report to Freelo for the given task and record it locally.
@@ -73,18 +73,18 @@ pub async fn add_work_report(
     let task_id = super::parse_task_key(issue_key)
         .ok_or_else(|| FreeloOpError::InvalidIssueKey(issue_key.to_string()))?;
     let minutes = seconds_to_minutes(duration_seconds)?;
-    let date = ms_to_date(started_at_ms);
+    let started_at = ms_to_local_datetime(started_at_ms);
 
     let resp = client
-        .create_work_report(task_id, date, minutes, comment)
+        .create_work_report(task_id, started_at.fixed_offset(), minutes, comment)
         .await?;
 
     let now = Utc::now().timestamp();
     let mut row = super::sync::work_report_to_row(&resp, connection_id, now);
-    // Freelo API ukládá jen datum (`date_reported`), ne čas. work_report_to_row
-    // proto vrací `started_at = 00:00 UTC` daného dne — což by se ve výpisu
-    // projevilo jako "0:00–0:39" místo skutečného intervalu časomíry.
-    // Zachováme proto skutečný čas, který si pamatujeme lokálně.
+    // Freelo echoes `date_reported` přesně tak, jak jsme ho poslali, takže
+    // `row.started_at` z work_report_to_row už nese reálný čas. Délku
+    // přepočítáme z minut, aby `ended_at` sedělo s tím, co Freelo uloží
+    // a vrátí na příští sync (zaokrouhleno na minuty).
     let started_at_s = started_at_ms / 1000;
     let duration_s = minutes.saturating_mul(60);
     row.started_at = started_at_s;
@@ -111,9 +111,11 @@ pub async fn update_work_report(
         Some(s) => Some(seconds_to_minutes(s)?),
         None => None,
     };
-    let date = new_started_at_ms.map(ms_to_date);
+    let started_at_param = new_started_at_ms
+        .map(ms_to_local_datetime)
+        .map(|dt| dt.fixed_offset());
     let resp = client
-        .update_work_report(work_report_id, minutes, date, new_comment)
+        .update_work_report(work_report_id, minutes, started_at_param, new_comment)
         .await?;
 
     // Reuse the local row's connection_id so we don't lose ownership during
@@ -124,10 +126,9 @@ pub async fn update_work_report(
     let connection_id = existing.connection_id.unwrap_or(0);
     let now = Utc::now().timestamp();
     let mut row = super::sync::work_report_to_row(&resp, connection_id, now);
-    // Stejný důvod jako v add_work_report: Freelo response nese jen datum,
-    // proto by row.started_at byl 00:00 UTC. Pokud nám přišel nový čas
-    // z UI, použijeme ho; jinak zachováme původní hodnotu z lokálního řádku
-    // (zachová čas, který uživatel viděl před editací).
+    // Freelo echoes plný timestamp, ale na update response někdy chybí
+    // `date_reported` úplně (echo jen toho, co jsme v PATCH poslali). Když
+    // přišel nový čas z UI, vezmeme ho; jinak držíme původní lokální hodnotu.
     let started_at_s = new_started_at_ms
         .map(|ms| ms / 1000)
         .unwrap_or(existing.started_at);
@@ -182,16 +183,18 @@ mod tests {
     }
 
     #[test]
-    fn ms_to_date_uses_local_calendar_day_not_utc() {
+    fn ms_to_local_datetime_preserves_wall_clock_in_local_tz() {
         let tz = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
         let ms = tz
-            .with_ymd_and_hms(2026, 5, 21, 0, 30, 0)
+            .with_ymd_and_hms(2026, 5, 21, 9, 0, 0)
             .single()
             .unwrap()
             .timestamp_millis();
+        let dt = ms_to_local_datetime_in_tz(&tz, ms).unwrap();
+        // RFC3339 musí nést stejný wall-clock i offset, jaký uživatel viděl.
         assert_eq!(
-            ms_to_date_in_tz(&tz, ms),
-            Some(NaiveDate::from_ymd_opt(2026, 5, 21).unwrap())
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+            "2026-05-21T09:00:00+02:00"
         );
     }
 }

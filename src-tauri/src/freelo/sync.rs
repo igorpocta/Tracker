@@ -1,7 +1,7 @@
 //! Freelo sync — pulls tasks into `issues_v2` and work-reports into
 //! `worklogs`. Mirrors the Jira sync's mark-and-sweep semantics.
 
-use chrono::{Local, NaiveDate, TimeZone, Timelike, Utc};
+use chrono::{Local, NaiveDate, TimeZone, Utc};
 use thiserror::Error;
 
 use super::client::{FreeloClient, FreeloError};
@@ -70,18 +70,7 @@ pub async fn sync_worklogs_for_range(
     let mut seen_remote_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for e in &entries {
-        let remote_id = e.id.to_string();
-        let existing = cache::worklogs::get_by_remote_id(db, connection_id, &remote_id)?;
-        let mut row = work_report_to_row(e, connection_id, now);
-        if let (Some(prev), Some(reported_date)) = (existing.as_ref(), reported_date(e)) {
-            if let Some(started_at) =
-                combine_date_with_existing_local_time(&Local, reported_date, prev.started_at)
-            {
-                let duration_s = row.duration_s();
-                row.started_at = started_at;
-                row.ended_at = started_at.saturating_add(duration_s);
-            }
-        }
+        let row = work_report_to_row(e, connection_id, now);
         cache::worklogs::upsert_from_remote(db, &row)?;
         if let Some(id) = &row.remote_id {
             seen_remote_ids.insert(id.clone());
@@ -103,11 +92,18 @@ pub async fn sync_worklogs_for_range(
     Ok(upserted)
 }
 
-fn reported_date(w: &FreeloWorkReport) -> Option<NaiveDate> {
-    chrono::DateTime::parse_from_rfc3339(&w.date_reported)
+/// Plný start okamžiku ze `date_reported`. Freelo API vrací ISO 8601 s TZ
+/// (např. `"2026-05-26T09:00:00+02:00"`); jak při POSTu, tak v listu i
+/// detailu nese reálný začátek seance (echo toho, co jsme poslali, nebo
+/// `date_add − minutes` u záznamů vytvořených ve Freelo UI). Když API
+/// výjimečně vrátí jen `YYYY-MM-DD`, padá to na lokální půlnoc.
+fn reported_started_at(w: &FreeloWorkReport) -> Option<i64> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&w.date_reported) {
+        return Some(dt.timestamp());
+    }
+    NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d")
         .ok()
-        .map(|dt| dt.date_naive())
-        .or_else(|| NaiveDate::parse_from_str(&w.date_reported, "%Y-%m-%d").ok())
+        .and_then(|d| local_midnight_timestamp(&Local, d))
 }
 
 fn local_midnight_timestamp<TZ: TimeZone>(tz: &TZ, date: NaiveDate) -> Option<i64> {
@@ -117,33 +113,13 @@ fn local_midnight_timestamp<TZ: TimeZone>(tz: &TZ, date: NaiveDate) -> Option<i6
         .map(|dt| dt.timestamp())
 }
 
-fn combine_date_with_existing_local_time<TZ: TimeZone>(
-    tz: &TZ,
-    date: NaiveDate,
-    existing_started_at: i64,
-) -> Option<i64> {
-    let existing_local = tz.timestamp_opt(existing_started_at, 0).single()?;
-    let local_dt = date.and_hms_opt(
-        existing_local.hour(),
-        existing_local.minute(),
-        existing_local.second(),
-    )?;
-    tz.from_local_datetime(&local_dt)
-        .single()
-        .map(|dt| dt.timestamp())
-}
-
 /// Convert a Freelo work-report into the multi-provider `WorklogRow`.
 pub fn work_report_to_row(w: &FreeloWorkReport, connection_id: i64, now: i64) -> WorklogRow {
-    // Freelo is date-only from Tracker's perspective: even when the API shape
-    // includes an ISO timestamp, that time-of-day is not the authoritative
-    // "work started at" clock value. We therefore normalize every report to
-    // the reported LOCAL calendar day at local midnight; sync callers that
-    // already have a cached Tracker row can re-attach the previous wall-clock
-    // time-of-day afterwards.
-    let started_at = reported_date(w)
-        .and_then(|d| local_midnight_timestamp(&Local, d))
-        .unwrap_or(now);
+    // Freelo vrací `date_reported` jako plný ISO 8601 timestamp s TZ — buď
+    // přesné echo toho, co Tracker poslal v POSTu, nebo `date_add − minutes`
+    // u záznamů založených ve Freelo UI. Bereme ho přímo jako `started_at`;
+    // pouze pokud by API vrátilo `YYYY-MM-DD`, fallback na lokální půlnoc.
+    let started_at = reported_started_at(w).unwrap_or(now);
 
     let duration_s = w.minutes.saturating_mul(60).max(0);
 
@@ -192,6 +168,49 @@ mod tests {
         assert!(row.is_synced);
     }
 
+    // Regrese pro bug: záznam z Freelo API se synchronizoval s timem 00:00
+    // místo reálného začátku 09:00, protože `work_report_to_row` zahazoval
+    // time-of-day a normalizoval na lokální půlnoc.
+    #[test]
+    fn work_report_uses_iso_timestamp_for_started_at() {
+        let w = FreeloWorkReport {
+            id: 42,
+            task_id: 7,
+            task_name: None,
+            minutes: 9,
+            date_reported: "2026-05-26T09:00:00+02:00".into(),
+            description: None,
+            user_id: 1,
+        };
+        let row = work_report_to_row(&w, 1, 0);
+        let expected_start = chrono::DateTime::parse_from_rfc3339("2026-05-26T09:00:00+02:00")
+            .unwrap()
+            .timestamp();
+        assert_eq!(row.started_at, expected_start);
+        assert_eq!(row.ended_at, expected_start + 9 * 60);
+        assert_eq!(row.logged_at, expected_start);
+    }
+
+    #[test]
+    fn work_report_date_only_falls_back_to_local_midnight() {
+        let w = FreeloWorkReport {
+            id: 5,
+            task_id: 7,
+            task_name: None,
+            minutes: 30,
+            date_reported: "2026-05-14".into(),
+            description: None,
+            user_id: 1,
+        };
+        let row = work_report_to_row(&w, 1, 0);
+        let expected_midnight = local_midnight_timestamp(
+            &Local,
+            NaiveDate::from_ymd_opt(2026, 5, 14).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(row.started_at, expected_midnight);
+    }
+
     #[test]
     fn blank_description_drops_to_none() {
         let w = FreeloWorkReport {
@@ -207,38 +226,6 @@ mod tests {
     }
 
     #[test]
-    fn reported_date_ignores_time_of_day_component() {
-        let w = FreeloWorkReport {
-            id: 4,
-            task_id: 88,
-            task_name: None,
-            minutes: 30,
-            date_reported: "2026-05-14T12:24:27+02:00".into(),
-            description: None,
-            user_id: 7,
-        };
-        assert_eq!(
-            reported_date(&w),
-            Some(NaiveDate::from_ymd_opt(2026, 5, 14).unwrap())
-        );
-    }
-
-    #[test]
-    fn work_report_with_iso_timestamp_after_local_midnight_uses_reported_local_day() {
-        let parsed = reported_date(&FreeloWorkReport {
-            id: 9,
-            task_id: 1,
-            task_name: None,
-            minutes: 10,
-            date_reported: "2026-05-14T00:30:00+02:00".into(),
-            description: None,
-            user_id: 7,
-        })
-        .unwrap();
-        assert_eq!(parsed, NaiveDate::from_ymd_opt(2026, 5, 14).unwrap());
-    }
-
-    #[test]
     fn freelo_mark_and_sweep_window_is_local_day_not_utc() {
         let cest = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
         let day = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
@@ -249,28 +236,5 @@ mod tests {
             .unwrap()
             .timestamp();
         assert!(after_midnight >= from_ts && after_midnight <= to_ts);
-    }
-
-    #[test]
-    fn combine_date_with_existing_local_time_preserves_clock_value() {
-        let tz = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
-        let existing_started_at = tz
-            .with_ymd_and_hms(2026, 5, 14, 9, 30, 0)
-            .single()
-            .unwrap()
-            .timestamp();
-        let next = combine_date_with_existing_local_time(
-            &tz,
-            NaiveDate::from_ymd_opt(2026, 5, 15).unwrap(),
-            existing_started_at,
-        )
-        .unwrap();
-        let next_local = tz.timestamp_opt(next, 0).single().unwrap();
-        assert_eq!(
-            next_local.date_naive(),
-            NaiveDate::from_ymd_opt(2026, 5, 15).unwrap()
-        );
-        assert_eq!(next_local.hour(), 9);
-        assert_eq!(next_local.minute(), 30);
     }
 }

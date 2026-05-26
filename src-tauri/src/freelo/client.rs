@@ -4,7 +4,7 @@
 //! path layout is verified at runtime; this module's job is to render a
 //! typed Rust surface that the rest of the app can call.
 
-use chrono::NaiveDate;
+use chrono::{DateTime, FixedOffset, NaiveDate, SecondsFormat};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
@@ -520,21 +520,22 @@ impl FreeloClient {
 
     /// `POST /task/{id}/work-reports` — create a new work-report on a task.
     ///
-    /// `date` is the date worked (Freelo only stores date, not time-of-day).
-    /// `minutes` must be ≥ 1 — callers are responsible for catching the
-    /// "round to 0" case before invoking.
+    /// `started_at` je plný okamžik začátku seance — Freelo `date_reported`
+    /// bere RFC3339 timestamp s TZ a uloží ho, jak ho pošleme (nezahazuje
+    /// time-of-day). `minutes` musí být ≥ 1 — volající je zodpovědný za
+    /// odchycení "round to 0".
     pub async fn create_work_report(
         &self,
         task_id: i64,
-        date: NaiveDate,
+        started_at: DateTime<FixedOffset>,
         minutes: i64,
         description: Option<&str>,
     ) -> Result<FreeloWorkReport, FreeloError> {
         let url = self.url(&format!("/task/{task_id}/work-reports"))?;
-        let date_s = date.format("%Y-%m-%d").to_string();
+        let started_s = started_at.to_rfc3339_opts(SecondsFormat::Secs, false);
         let mut body = json!({
             "minutes": minutes,
-            "date_reported": date_s,
+            "date_reported": started_s,
         });
         // Pole se na Freelo API jmenuje `note` — ne `description`. Bez tohoto
         // se uživatelská poznámka tiše ztrácela mezi naší DB a Freelem.
@@ -576,7 +577,7 @@ impl FreeloClient {
         }
         if v.get("date_reported").is_none() {
             if let Some(obj) = v.as_object_mut() {
-                obj.insert("date_reported".into(), json!(date_s));
+                obj.insert("date_reported".into(), json!(started_s));
             }
         }
         if v.get("minutes").is_none() {
@@ -605,7 +606,7 @@ impl FreeloClient {
         &self,
         work_report_id: i64,
         minutes: Option<i64>,
-        date: Option<NaiveDate>,
+        started_at: Option<DateTime<FixedOffset>>,
         description: Option<&str>,
     ) -> Result<FreeloWorkReport, FreeloError> {
         let url = self.url(&format!("/work-reports/{work_report_id}"))?;
@@ -613,10 +614,10 @@ impl FreeloClient {
         if let Some(m) = minutes {
             body.insert("minutes".into(), json!(m));
         }
-        if let Some(d) = date {
+        if let Some(dt) = started_at {
             body.insert(
                 "date_reported".into(),
-                json!(d.format("%Y-%m-%d").to_string()),
+                json!(dt.to_rfc3339_opts(SecondsFormat::Secs, false)),
             );
         }
         if let Some(d) = description {

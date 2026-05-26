@@ -4,7 +4,7 @@
 //! HTTP server with `wiremock`, point the [`FreeloClient`] at it, and assert
 //! both the outgoing request shapes and the parsing of canned responses.
 
-use chrono::NaiveDate;
+use chrono::{FixedOffset, NaiveDate, TimeZone};
 use serde_json::{json, Value};
 use tracker_lib::freelo::{FreeloClient, FreeloError};
 use wiremock::matchers::{basic_auth, body_partial_json, header, method, path, query_param};
@@ -253,14 +253,14 @@ async fn create_work_report_posts_correct_body() {
         .and(basic_auth(EMAIL, KEY))
         .and(body_partial_json(json!({
             "minutes": 30,
-            "date_reported": "2026-05-14",
+            "date_reported": "2026-05-14T09:00:00+02:00",
             "note": "did the thing"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": 555,
             "task_id": 42,
             "minutes": 30,
-            "date_reported": "2026-05-14",
+            "date_reported": "2026-05-14T09:00:00+02:00",
             "note": "did the thing",
             "user_id": 7
         })))
@@ -268,15 +268,18 @@ async fn create_work_report_posts_correct_body() {
         .mount(&server)
         .await;
 
-    let date = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    let started_at = FixedOffset::east_opt(2 * 3600)
+        .unwrap()
+        .with_ymd_and_hms(2026, 5, 14, 9, 0, 0)
+        .unwrap();
     let resp = client
-        .create_work_report(42, date, 30, Some("did the thing"))
+        .create_work_report(42, started_at, 30, Some("did the thing"))
         .await
         .expect("ok");
     assert_eq!(resp.id, 555);
     assert_eq!(resp.task_id, 42);
     assert_eq!(resp.minutes, 30);
-    assert_eq!(resp.date_reported, "2026-05-14");
+    assert_eq!(resp.date_reported, "2026-05-14T09:00:00+02:00");
     assert_eq!(resp.user_id, 7);
 }
 
@@ -297,9 +300,12 @@ async fn create_work_report_unwraps_wrapped_response() {
         .mount(&server)
         .await;
 
-    let date = NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+    let started_at = FixedOffset::east_opt(2 * 3600)
+        .unwrap()
+        .with_ymd_and_hms(2026, 5, 14, 9, 0, 0)
+        .unwrap();
     let resp = client
-        .create_work_report(42, date, 5, None)
+        .create_work_report(42, started_at, 5, None)
         .await
         .expect("ok");
     assert_eq!(resp.id, 9);
