@@ -294,19 +294,30 @@ pub async fn add_connection(
     )
     .map_err(|e| e.to_string())?;
 
-    // Persist the token under the per-connection key.
+    // Persist the token under the per-connection key. P1-6: if this fails,
+    // compensate by deleting the half-created row so we never leave a
+    // tokenless, non-functional connection behind.
     let key = cache::connections::token_key(id);
-    crate::keychain::set(
+    if let Err(e) = crate::keychain::set(
         &state.app_data_dir,
         crate::keychain::KEYCHAIN_SERVICE,
         &key,
         &args.token,
-    )
-    .map_err(|e| e.to_string())?;
+    ) {
+        let _ = cache::connections::delete(&state.db, id);
+        return Err(e.to_string());
+    }
 
     // Re-hydrate the live client list so the new connection is usable
-    // immediately (sync / commands picks it up).
-    let _ = state.hydrate_connections();
+    // immediately (sync / commands picks it up). P1-6: only report success
+    // once the runtime client actually hydrates; otherwise roll back both the
+    // token and the row so the failure leaves no change.
+    if let Err(e) = state.hydrate_connections() {
+        let _ =
+            crate::keychain::delete(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key);
+        let _ = cache::connections::delete(&state.db, id);
+        return Err(e.to_string());
+    }
 
     let row = cache::connections::get_by_id(&state.db, id)
         .map_err(|e| e.to_string())?
@@ -341,6 +352,30 @@ pub async fn update_connection(
         }
         None => None,
     };
+    // P1-6: capture the previous state so any failure below can be rolled
+    // back to "no change" instead of leaving a partially-updated connection.
+    let prev = cache::connections::get_by_id(&state.db, args.id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Connection not found".to_string())?;
+    let key = cache::connections::token_key(args.id);
+    let prev_token = if args.token.is_some() {
+        crate::keychain::get(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key)
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    // Restores the mutable fields to their pre-update values (best effort).
+    let restore_fields = |db: &crate::cache::Db| {
+        let _ = cache::connections::update_fields(
+            db,
+            args.id,
+            Some(&prev.name),
+            Some(prev.enabled),
+            Some(&prev.config_json),
+        );
+    };
+
     cache::connections::update_fields(
         &state.db,
         args.id,
@@ -351,17 +386,34 @@ pub async fn update_connection(
     .map_err(|e| e.to_string())?;
 
     if let Some(tok) = args.token.as_deref() {
-        let key = cache::connections::token_key(args.id);
-        crate::keychain::set(
+        if let Err(e) = crate::keychain::set(
             &state.app_data_dir,
             crate::keychain::KEYCHAIN_SERVICE,
             &key,
             tok,
-        )
-        .map_err(|e| e.to_string())?;
+        ) {
+            // keychain::set failed without overwriting the old token; just
+            // restore the fields we changed.
+            restore_fields(&state.db);
+            return Err(e.to_string());
+        }
     }
 
-    let _ = state.hydrate_connections();
+    // P1-6: success is only reported after a successful rehydration. On
+    // failure restore both the fields and the previous token.
+    if let Err(e) = state.hydrate_connections() {
+        restore_fields(&state.db);
+        if let (Some(_), Some(old)) = (args.token.as_ref(), prev_token.as_ref()) {
+            let _ = crate::keychain::set(
+                &state.app_data_dir,
+                crate::keychain::KEYCHAIN_SERVICE,
+                &key,
+                old,
+            );
+        }
+        let _ = state.hydrate_connections();
+        return Err(e.to_string());
+    }
 
     let row = cache::connections::get_by_id(&state.db, args.id)
         .map_err(|e| e.to_string())?
@@ -383,11 +435,14 @@ pub async fn remove_connection(
     state: tauri::State<'_, AppState>,
     id: i64,
 ) -> Result<(), String> {
-    // Token first (it would be orphaned if we crash between).
+    // P1-6: delete the DB row FIRST. If it fails, nothing changed. Deleting
+    // the token first risked leaving a tokenless (broken) connection if the
+    // row delete then failed; an orphaned token after a crash is harmless by
+    // comparison (the id is autoincrement and won't be reused).
+    cache::connections::delete(&state.db, id).map_err(|e| e.to_string())?;
     let key = cache::connections::token_key(id);
     let _ = crate::keychain::delete(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key);
-    cache::connections::delete(&state.db, id).map_err(|e| e.to_string())?;
-    let _ = state.hydrate_connections();
+    state.hydrate_connections().map_err(|e| e.to_string())?;
     let _ = app.emit("connections-changed", id);
     Ok(())
 }
@@ -399,9 +454,19 @@ pub async fn enable_connection(
     id: i64,
     enabled: bool,
 ) -> Result<ConnectionDto, String> {
+    // P1-6: remember the previous enabled flag so a failed rehydration can be
+    // rolled back instead of leaving the connection in a state the runtime
+    // can't service.
+    let prev = cache::connections::get_by_id(&state.db, id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Connection not found".to_string())?;
     cache::connections::update_fields(&state.db, id, None, Some(enabled), None)
         .map_err(|e| e.to_string())?;
-    let _ = state.hydrate_connections();
+    if let Err(e) = state.hydrate_connections() {
+        let _ = cache::connections::update_fields(&state.db, id, None, Some(prev.enabled), None);
+        let _ = state.hydrate_connections();
+        return Err(e.to_string());
+    }
     let row = cache::connections::get_by_id(&state.db, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
