@@ -179,8 +179,16 @@ pub fn start_timer_inner(
         .map(|c| c.trim())
         .filter(|c| !c.is_empty())
         .map(|c| c.to_string());
-    cache::timer::start_with_comment(db, issue_key, started_at_s, comment_norm.as_deref())
-        .map_err(|e| e.to_string())?;
+    // P1-1: refuse to overwrite a running timer. This is the single chokepoint
+    // for every start path (popover, tray, HTTP API, main window), so the guard
+    // here protects all of them. Switching tasks must go through an explicit
+    // stop first.
+    let started =
+        cache::timer::try_start_with_comment(db, issue_key, started_at_s, comment_norm.as_deref())
+            .map_err(|e| e.to_string())?;
+    if !started {
+        return Err("Časomíra už běží. Nejdřív ji zastavte.".to_string());
+    }
     Ok(ActiveTimerState {
         issue_key: issue_key.to_string(),
         started_at: started_at_s.saturating_mul(1000),

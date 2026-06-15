@@ -93,13 +93,16 @@ fn start_then_get_returns_running_timer_with_elapsed() {
 }
 
 #[test]
-fn start_timer_replaces_previous_row() {
+fn start_timer_refuses_to_overwrite_running_timer() {
+    // P1-1: a second start must be atomically rejected instead of silently
+    // overwriting the running timer. The original timer stays intact.
     let (_dir, db) = fresh_db();
     start_timer_inner(&db, "ACME-1", 1_000, None).unwrap();
-    start_timer_inner(&db, "ACME-2", 5_000, None).unwrap();
+    let err = start_timer_inner(&db, "ACME-2", 5_000, None).unwrap_err();
+    assert!(err.contains("běží"), "unexpected error: {err}");
     let t = timer::get(&db).unwrap().unwrap();
-    assert_eq!(t.issue_key, "ACME-2");
-    assert_eq!(t.started_at, 5);
+    assert_eq!(t.issue_key, "ACME-1");
+    assert_eq!(t.started_at, 1);
 }
 
 #[test]

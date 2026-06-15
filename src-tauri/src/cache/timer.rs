@@ -41,6 +41,35 @@ pub fn start_with_comment(
     Ok(())
 }
 
+/// P1-1: start a timer **only if none is running**. Returns `Ok(true)` when a
+/// new timer was started, `Ok(false)` when one was already active. Atomic —
+/// relies on the primary key on `active_timer.id` (a plain INSERT without
+/// `ON CONFLICT` fails with a constraint violation when a row already exists),
+/// so concurrent start attempts from the popover, tray and HTTP API can never
+/// silently overwrite a running timer.
+pub fn try_start_with_comment(
+    db: &Db,
+    issue_key: &str,
+    started_at: i64,
+    comment: Option<&str>,
+) -> Result<bool, DbError> {
+    let conn = db.pool().get()?;
+    let res = conn.execute(
+        "INSERT INTO active_timer (id, issue_key, started_at, comment)
+         VALUES (1, ?1, ?2, ?3)",
+        rusqlite::params![issue_key, started_at, comment],
+    );
+    match res {
+        Ok(_) => Ok(true),
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Update only the comment on the running timer (does NOT bump `started_at`).
 pub fn set_comment(db: &Db, comment: Option<&str>) -> Result<(), DbError> {
     let conn = db.pool().get()?;
