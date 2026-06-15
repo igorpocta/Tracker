@@ -287,13 +287,14 @@ export function AppShell() {
       const state = useTimerStore.getState();
       const prev = state.active;
       const issueKey = prev?.issue_key ?? "";
+      const comment = prev?.comment ?? null;
       const idleMs = idleGap.returnedAtMs - idleGap.startedAtMs;
       if (prev) {
         await state.updateStart(prev.started_at + idleMs);
       }
       await state.stop();
-      // Hned znovu nastartuj se stejným úkolem od teď.
-      await startTimer(issueKey || null, Date.now());
+      // Hned znovu nastartuj se stejným úkolem (a komentářem) od teď.
+      await startTimer(issueKey || null, Date.now(), comment);
     } catch (e) {
       pushToast(
         "error",
