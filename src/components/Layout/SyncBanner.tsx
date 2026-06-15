@@ -5,9 +5,10 @@
  * vykresluje 3-fázový indikátor: connection → issues → worklogs. Po
  * `auto-sync-complete` chvíli zobrazí souhrn a pak zmizí.
  */
-import { AlertTriangle, Check, Loader2, Link2, ListTodo, Clock } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Check, Loader2, Link2, ListTodo, Clock, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { SyncRunStatus } from "../../api/types";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 
 type Phase = "connection" | "issues" | "worklogs";
@@ -33,6 +34,8 @@ interface PhaseState {
 
 interface BannerState {
   visible: boolean;
+  /** P2-2: when true the banner stays until the user dismisses it (failures). */
+  sticky: boolean;
   finalIssues: number | null;
   finalWorklogs: number | null;
   connectionName: string | null;
@@ -46,6 +49,18 @@ const INITIAL_PHASES: Record<Phase, PhaseState> = {
   connection: { status: "pending", count: null, error: null },
   issues: { status: "pending", count: null, error: null },
   worklogs: { status: "pending", count: null, error: null },
+};
+
+const INITIAL_BANNER_STATE: BannerState = {
+  visible: false,
+  sticky: false,
+  finalIssues: null,
+  finalWorklogs: null,
+  connectionName: null,
+  provider: null,
+  current: 0,
+  total: 0,
+  phases: INITIAL_PHASES,
 };
 
 const PHASE_ORDER: Phase[] = ["connection", "issues", "worklogs"];
@@ -62,16 +77,7 @@ const PROVIDER_LABEL: Record<"jira" | "freelo", string> = {
 };
 
 export function SyncBanner() {
-  const [state, setState] = useState<BannerState>({
-    visible: false,
-    finalIssues: null,
-    finalWorklogs: null,
-    connectionName: null,
-    provider: null,
-    current: 0,
-    total: 0,
-    phases: INITIAL_PHASES,
-  });
+  const [state, setState] = useState<BannerState>(INITIAL_BANNER_STATE);
   const hideTimer = useRef<number | null>(null);
 
   useTauriEvent<ProgressPayload>("auto-sync-progress", (payload) => {
@@ -82,12 +88,24 @@ export function SyncBanner() {
     setState((prev) => applyProgress(prev, payload));
   });
 
-  useTauriEvent<{ issues?: number; worklogs?: number } | null>(
-    "auto-sync-complete",
-    (payload) => {
-      setState((prev) => ({
+  useTauriEvent<{
+    issues?: number;
+    worklogs?: number;
+    status?: SyncRunStatus;
+  } | null>("auto-sync-complete", (payload) => {
+    // P2-2: a partial/full failure must stay on screen until the user
+    // dismisses it — only a clean success auto-hides. We also fall back to
+    // the per-phase error states so an old backend without `status` still
+    // keeps failures visible.
+    const failed = payload?.status === "failed" || payload?.status === "partial";
+    setState((prev) => {
+      const hasPhaseError = PHASE_ORDER.some(
+        (p) => prev.phases[p].status === "error",
+      );
+      return {
         ...prev,
         visible: true,
+        sticky: failed || hasPhaseError,
         finalIssues: payload?.issues ?? null,
         finalWorklogs: payload?.worklogs ?? null,
         phases: {
@@ -96,27 +114,37 @@ export function SyncBanner() {
           issues: finalizePhase(prev.phases.issues),
           worklogs: finalizePhase(prev.phases.worklogs),
         },
-      }));
-      if (hideTimer.current !== null) {
-        window.clearTimeout(hideTimer.current);
-      }
+      };
+    });
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    // Don't schedule the auto-hide when the run wasn't a clean success.
+    if (failed) return;
+    hideTimer.current = window.setTimeout(() => {
+      setState((prev) => {
+        // A late per-phase error still pins the banner open.
+        if (PHASE_ORDER.some((p) => prev.phases[p].status === "error")) {
+          return { ...prev, sticky: true };
+        }
+        return { ...prev, visible: false };
+      });
       hideTimer.current = window.setTimeout(() => {
-        setState((prev) => ({ ...prev, visible: false }));
-        hideTimer.current = window.setTimeout(() => {
-          setState({
-            visible: false,
-            finalIssues: null,
-            finalWorklogs: null,
-            connectionName: null,
-            provider: null,
-            current: 0,
-            total: 0,
-            phases: INITIAL_PHASES,
-          });
-        }, 300);
-      }, 1800);
-    },
-  );
+        setState((prev) =>
+          prev.sticky ? prev : { ...INITIAL_BANNER_STATE },
+        );
+      }, 300);
+    }, 1800);
+  });
+
+  const dismiss = useCallback(() => {
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    setState({ ...INITIAL_BANNER_STATE });
+  }, []);
 
   useEffect(
     () => () => {
@@ -221,6 +249,20 @@ export function SyncBanner() {
             );
           })}
         </div>
+
+        {(state.sticky || hasError) && (
+          <button
+            type="button"
+            onClick={dismiss}
+            aria-label="Zavřít"
+            title="Zavřít"
+            className="ml-1 p-1 rounded hover:bg-[var(--bg-hover)]
+                       text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
+                       transition-colors duration-150 shrink-0"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -231,8 +273,9 @@ function applyProgress(
   p: ProgressPayload,
 ): BannerState {
   // Backwards compat: an old "starting" frame just turns the banner on.
+  // A fresh run clears any previous sticky failure (P2-2).
   if (p.phase === "starting") {
-    return { ...prev, visible: true, total: p.total };
+    return { ...prev, visible: true, sticky: false, total: p.total };
   }
   if (p.phase === "done") {
     return prev;
@@ -282,6 +325,7 @@ function applyProgress(
   return {
     ...prev,
     visible: true,
+    sticky: false,
     connectionName: p.connection_name ?? prev.connectionName,
     provider: p.provider ?? prev.provider,
     current: p.current ?? prev.current,

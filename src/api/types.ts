@@ -270,10 +270,18 @@ export type PaletteMode = "mono" | "dual";
 /** Supported currency codes. */
 export type Currency = "CZK" | "EUR" | "USD" | "GBP" | "PLN" | "CHF";
 
+/** Outcome of one connection's sync (P2-2). */
+export type SyncRunStatus = "success" | "partial" | "failed";
+
 /** Result of `refresh_all` — counts of records pulled from Jira. */
 export interface RefreshAllResult {
   issues: number;
   worklogs: number;
+  /** P2-2: per-connection outcome counts + aggregate status. */
+  succeeded: number;
+  partial: number;
+  failed: number;
+  status: SyncRunStatus;
 }
 
 /** Result of `get_cache_stats` — counts of records currently in the local cache. */

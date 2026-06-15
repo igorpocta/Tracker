@@ -11,11 +11,29 @@ use crate::jira;
 use crate::state::AppState;
 use crate::worklog_service::SyncOutcome;
 
+/// Outcome of syncing a single connection. P2-2: callers must be able to tell
+/// a clean run apart from a partial failure (some phases failed/skipped) and a
+/// full failure (the issues phase never completed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncRunStatus {
+    Success,
+    Partial,
+    Failed,
+}
+
 /// Result payload of [`refresh_all`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefreshAllResult {
     pub issues: usize,
     pub worklogs: usize,
+    /// P2-2: per-connection outcome counts + an aggregate status so the UI can
+    /// surface "vše OK" / "část selhala" / "vše selhalo" instead of always
+    /// reporting success.
+    pub succeeded: usize,
+    pub partial: usize,
+    pub failed: usize,
+    pub status: SyncRunStatus,
 }
 
 /// Co se má syncovat. `Full` stáhne dlouhou historii — typicky první
@@ -158,7 +176,7 @@ pub async fn sync_one_connection(
     idx: usize,
     total_conns: usize,
     mode: SyncMode,
-) -> (usize, usize) {
+) -> (usize, usize, SyncRunStatus) {
     let conn_id = conn.id;
     let conn_name = conn.name.clone();
     // Phase B4: dispatch through the WorklogService trait. The provider
@@ -208,10 +226,23 @@ pub async fn sync_one_connection(
             let msg = e.to_string();
             store_sync_error(db, conn_id, "issues", &msg);
             emit("issues", None, Some(&msg));
-            // Worklog phase is meaningless without a fresh issue catalog
-            // — preserve the pre-B4 short-circuit (no `sync_runs` row when
-            // we never made it past the issues phase).
-            return (0, 0);
+            // Worklog phase is meaningless without a fresh issue catalog, so
+            // we still short-circuit. P2-2: but record the failed run in
+            // `sync_runs` (it reads the persisted error) so the history and
+            // the aggregate status reflect that this connection failed —
+            // previously an issues-phase failure left no audit trail at all.
+            record_sync_run(
+                db,
+                conn_id,
+                &conn_name,
+                provider,
+                mode,
+                started_at,
+                Utc::now().timestamp(),
+                0,
+                0,
+            );
+            return (0, 0, SyncRunStatus::Failed);
         }
     }
 
@@ -262,7 +293,12 @@ pub async fn sync_one_connection(
         worklogs_n,
     );
 
-    (issues_n, worklogs_n)
+    let status = if any_error {
+        SyncRunStatus::Partial
+    } else {
+        SyncRunStatus::Success
+    };
+    (issues_n, worklogs_n, status)
 }
 
 /// Sync issues + worklogs across all enabled connections.
@@ -279,6 +315,9 @@ pub async fn refresh_all(
 
     let mut total_issues = 0usize;
     let mut total_worklogs = 0usize;
+    let mut succeeded = 0usize;
+    let mut partial = 0usize;
+    let mut failed = 0usize;
 
     // Drain the backlog of locally-recorded-but-never-pushed worklogs
     // BEFORE the pull phase. Otherwise mark-and-sweep on a fresh pull
@@ -296,9 +335,15 @@ pub async fn refresh_all(
     let total_conns = active.len();
 
     for (idx, conn) in active.into_iter().enumerate() {
-        let (i_n, w_n) = sync_one_connection(&app, &state.db, conn, idx, total_conns, mode).await;
+        let (i_n, w_n, status) =
+            sync_one_connection(&app, &state.db, conn, idx, total_conns, mode).await;
         total_issues += i_n;
         total_worklogs += w_n;
+        match status {
+            SyncRunStatus::Success => succeeded += 1,
+            SyncRunStatus::Partial => partial += 1,
+            SyncRunStatus::Failed => failed += 1,
+        }
     }
 
     // Legacy single-Jira shim: bez multi-connection rows, ale s legacy
@@ -328,15 +373,33 @@ pub async fn refresh_all(
         }
     }
 
+    // P2-2: aggregate status. Any failure with no success at all → failure;
+    // any failure/partial mixed with success → partial; otherwise success.
+    let status = if failed > 0 && succeeded == 0 && partial == 0 {
+        SyncRunStatus::Failed
+    } else if failed > 0 || partial > 0 {
+        SyncRunStatus::Partial
+    } else {
+        SyncRunStatus::Success
+    };
+
     let result = RefreshAllResult {
         issues: total_issues,
         worklogs: total_worklogs,
+        succeeded,
+        partial,
+        failed,
+        status,
     };
     let _ = app.emit(
         "auto-sync-complete",
         serde_json::json!({
             "issues": total_issues,
             "worklogs": total_worklogs,
+            "succeeded": succeeded,
+            "partial": partial,
+            "failed": failed,
+            "status": status,
         }),
     );
     let _ = app.emit("cache-refreshed", total_issues);
@@ -432,17 +495,26 @@ pub async fn refresh_connection(
             .ok_or_else(|| "Připojení nenalezeno nebo není aktivní".to_string())?
     };
 
-    let (issues_n, worklogs_n) = sync_one_connection(&app, &state.db, conn, 0, 1, mode).await;
+    let (issues_n, worklogs_n, status) =
+        sync_one_connection(&app, &state.db, conn, 0, 1, mode).await;
 
     let result = RefreshAllResult {
         issues: issues_n,
         worklogs: worklogs_n,
+        succeeded: usize::from(status == SyncRunStatus::Success),
+        partial: usize::from(status == SyncRunStatus::Partial),
+        failed: usize::from(status == SyncRunStatus::Failed),
+        status,
     };
     let _ = app.emit(
         "auto-sync-complete",
         serde_json::json!({
             "issues": issues_n,
             "worklogs": worklogs_n,
+            "succeeded": result.succeeded,
+            "partial": result.partial,
+            "failed": result.failed,
+            "status": status,
         }),
     );
     let _ = app.emit("cache-refreshed", issues_n);
