@@ -154,10 +154,17 @@ function IdleBar({
   // bere označený výsledek; jinak spustí časomíru bez úkolu. Tím se elimi-
   // nuje bug, kdy prázdný query + Start vybral první "naposledy trackováno"
   // issue, aniž by ho uživatel označil.
-  const hasQuery = debounced.length > 0;
+  //
+  // P2-3: o tom, zda je vstup neprázdný, rozhoduje ŽIVÁ hodnota `query`,
+  // ne debouncovaná `debounced`. Jinak by rychlé "napsat klíč + Enter"
+  // (do DEBOUNCE_MS) spustilo nepřiřazený timer, protože `debounced` je
+  // ještě prázdné. A startovat úkol smíme jen když je search usazený
+  // (`debounced === query`), aby se nepoužily výsledky předchozího dotazu.
+  const inputHasText = query.trim().length > 0;
+  const searchSettled = debounced === query;
   const hasResult = results.length > 0;
-  const canStartIssue = hasQuery && hasResult;
-  const canStartUnassigned = !hasQuery && !!onStartUnassigned;
+  const canStartIssue = inputHasText && searchSettled && hasResult;
+  const canStartUnassigned = !inputHasText && !!onStartUnassigned;
   const startEnabled = canStartIssue || canStartUnassigned;
   const startLabel = canStartIssue
     ? "Spustit"
