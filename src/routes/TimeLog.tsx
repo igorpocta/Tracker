@@ -408,13 +408,15 @@ export default function TimeLog() {
                 comment: null,
               });
               invalidateWorklogQueries(queryClient);
+              // P2-5: zavřít dialog jen při úspěchu. Při chybě zůstane
+              // otevřený se zachovaným vstupem, aby uživatel mohl klíč
+              // opravit a zkusit to znovu.
+              setCreateRequest(null);
             } catch (e) {
               ctx.pushToast(
                 "error",
                 typeof e === "string" ? e : "Nepodařilo se vytvořit záznam",
               );
-            } finally {
-              setCreateRequest(null);
             }
           }}
         />
@@ -550,6 +552,7 @@ export function WorklogRow({
   highlighted,
   refCallback,
 }: WorklogRowProps) {
+  const { pushToast } = useOutletContext<ShellOutletContext>();
   const started = new Date(row.started_at * 1000);
   const ended = new Date((row.started_at + row.duration_s) * 1000);
 
@@ -698,8 +701,15 @@ export function WorklogRow({
               if (row.id == null) return;
               try {
                 await pushLocalWorklog(row.id);
+                pushToast("success", "Synchronizováno s providerem.");
               } catch (err) {
                 console.error("[push_local_worklog] failed:", err);
+                pushToast(
+                  "error",
+                  typeof err === "string"
+                    ? err
+                    : "Synchronizace s providerem selhala.",
+                );
               }
             })();
           }}
@@ -991,7 +1001,7 @@ function CreateWorklogDialog({
         </h3>
         <p className="text-xs text-[var(--text-secondary)]">
           Zadej úkol — záznam bude rovnou odeslán do providera (Jira / Freelo
-          podle prefixu klíče). Pro lokální placeholder nech prázdné.
+          podle prefixu klíče).
         </p>
         <input
           type="text"
