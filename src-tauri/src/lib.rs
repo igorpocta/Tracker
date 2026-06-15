@@ -313,6 +313,16 @@ pub fn run() {
                 }
             });
 
+            // Autostart launches the app with `--minimized` (see the
+            // autostart plugin registration above). The main window is
+            // configured `visible: true`, so without this it would pop up on
+            // login. Hide it here; the tray/dock keeps the app reachable.
+            if std::env::args().any(|a| a == "--minimized") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
