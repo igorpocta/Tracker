@@ -15,7 +15,9 @@ poskytovatele.
 - Reporty s grafy a XLSX exportem.
 - Idle detekce (Toggl-style: Keep / Discard / Discard & Continue).
 - Dynamická ikona aplikace podle vybrané barevné palety.
-- České UI, lokální data v SQLite, vše šifrováno na disku.
+- České UI, lokální data v SQLite. Přístupové tokeny jsou uloženy v souboru
+  `secret.toml` v aplikačním adresáři s restriktivními oprávněními (chmod 0600
+  na Unixu); databáze ani tokeny nejsou na disku šifrované.
 
 ## Instalace
 
