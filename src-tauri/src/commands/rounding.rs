@@ -63,7 +63,18 @@ pub fn apply_rounding(duration_seconds: i64, mode: &str, interval_minutes: i64) 
             }
             ((d + step - 1) / step) * step
         }
-        RoundingMode::Down => (d / step) * step,
+        RoundingMode::Down => {
+            let rounded = (d / step) * step;
+            // P1-3: never silently turn a nonzero worked duration into zero.
+            // For sub-interval durations (0 < d < step) rounding down would
+            // yield 0, which then gets stored as an empty worklog. Keep the
+            // original duration in that case instead of discarding the time.
+            if rounded == 0 && d > 0 {
+                d
+            } else {
+                rounded
+            }
+        }
     }
 }
 
@@ -183,12 +194,22 @@ mod tests {
 
     #[test]
     fn down_mode_rounds_down_to_previous_multiple() {
-        assert_eq!(apply_rounding(59, "down", 1), 0);
         assert_eq!(apply_rounding(60, "down", 1), 60);
         assert_eq!(apply_rounding(61, "down", 1), 60);
         assert_eq!(apply_rounding(900, "down", 15), 900);
         assert_eq!(apply_rounding(1799, "down", 15), 900);
         assert_eq!(apply_rounding(1800, "down", 15), 1800);
+    }
+
+    #[test]
+    fn down_mode_never_zeroes_a_nonzero_duration() {
+        // P1-3: sub-interval durations must keep their original time instead
+        // of being silently floored to 0.
+        assert_eq!(apply_rounding(0, "down", 1), 0);
+        assert_eq!(apply_rounding(59, "down", 1), 59);
+        assert_eq!(apply_rounding(1, "down", 15), 1);
+        assert_eq!(apply_rounding(899, "down", 15), 899);
+        assert_eq!(apply_rounding(3599, "down", 60), 3599);
     }
 
     #[test]
