@@ -83,6 +83,8 @@ impl FreeloClient {
             .default_headers(headers)
             .use_rustls_tls()
             .gzip(true)
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()?;
 
         Ok(Self {
