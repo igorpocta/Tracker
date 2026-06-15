@@ -476,8 +476,27 @@ pub async fn create_manual_worklog(
     // Phase 18A — Item 27: apply rounding before talking to the provider.
     let duration_seconds = rounding::apply_active_rounding(&state.db, duration_seconds);
 
+    // P1-2: route by the OWNING connection's provider type (not the "FREELO-"
+    // text prefix) whenever we know who owns this issue — a Jira project whose
+    // key starts with FREELO must go to Jira. The prefix is only a heuristic
+    // for issues we have never cached locally.
+    let owner_is_freelo = match cache::issues::get_connection_id_by_key(&state.db, &issue_key) {
+        Ok(Some(cid)) => {
+            let conns = state
+                .connections
+                .read()
+                .expect("AppState.connections RwLock poisoned");
+            conns
+                .iter()
+                .find(|c| c.id == cid && c.enabled)
+                .map(|c| matches!(c.client, ProviderClient::Freelo(_)))
+        }
+        _ => None,
+    };
+    let route_to_freelo = owner_is_freelo.unwrap_or_else(|| freelo::is_freelo_key(&issue_key));
+
     // Dispatch by provider.
-    if freelo::is_freelo_key(&issue_key) {
+    if route_to_freelo {
         return create_freelo_worklog(
             app,
             state,

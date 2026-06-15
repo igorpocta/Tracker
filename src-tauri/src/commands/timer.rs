@@ -583,13 +583,45 @@ pub async fn stop_timer_inner(
 
     let effective_comment = plan.effective_comment;
 
-    // Dispatch by issue key prefix. Freelo: post a work_report and skip
-    // `record_local_stop` (the freelo ops already insert the row). Jira:
-    // legacy path through `state.jira_client_cloned()` for backwards compat.
+    // P1-2: determine the provider from the connection that OWNS this issue
+    // (`issues_v2.connection_id`), NOT from the "FREELO-" text prefix. A Jira
+    // project whose key happens to start with FREELO must still route to Jira.
+    // The prefix is only a fallback for issues we have never cached locally.
+    enum OwnerRoute {
+        Jira(crate::jira::JiraClient),
+        Freelo,
+    }
+    let owner: Option<OwnerRoute> = {
+        let cid = cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
+            .ok()
+            .flatten();
+        let conns = state
+            .connections
+            .read()
+            .expect("AppState.connections RwLock poisoned");
+        cid.and_then(|id| conns.iter().find(|c| c.id == id && c.enabled))
+            .map(|c| match &c.client {
+                crate::state::ProviderClient::Jira(j) => OwnerRoute::Jira(j.clone()),
+                crate::state::ProviderClient::Freelo(_) => OwnerRoute::Freelo,
+            })
+    };
+
+    // Freelo when the owning connection is Freelo, or — for an uncached issue
+    // with no known owner — when the key uses the Freelo prefix.
+    let route_to_freelo = matches!(owner, Some(OwnerRoute::Freelo))
+        || (owner.is_none() && freelo::is_freelo_key(&timer.issue_key));
+    // The Jira client to post to: ONLY the connection that owns this issue.
+    // P1-2: never fall back to "the first enabled Jira" — that could send the
+    // worklog to the wrong tenant. An unknown owner is handled below.
+    let owning_jira = match owner {
+        Some(OwnerRoute::Jira(j)) => Some(j),
+        _ => None,
+    };
+
     let mut freelo_saved: Option<WorklogRow> = None;
     let remote_id = if is_unassigned {
         None
-    } else if freelo::is_freelo_key(&timer.issue_key) {
+    } else if route_to_freelo {
         // Route by `issues_v2.connection_id` for this specific Freelo task,
         // not by "first Freelo connection in the list". The resolver also
         // verifies `sync_user_id` is set — a None there used to fall through
@@ -628,40 +660,7 @@ pub async fn stop_timer_inner(
                 None
             }
         }
-    } else if let Some(client) = {
-        // Route to the Jira connection that owns this issue (per
-        // `issues_v2.connection_id`), falling back to the first enabled
-        // Jira connection only when no row matches. Mirrors the lookup
-        // shape the Freelo branch above already uses, and replaces the
-        // legacy `state.jira_client_cloned()` shim that always picked
-        // the FIRST Jira regardless of tenant.
-        let issue_conn_id = cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
-            .ok()
-            .flatten();
-        let conns = state
-            .connections
-            .read()
-            .expect("AppState.connections RwLock poisoned");
-        issue_conn_id
-            .and_then(|cid| {
-                conns
-                    .iter()
-                    .find(|c| c.id == cid && c.enabled)
-                    .and_then(|c| match &c.client {
-                        crate::state::ProviderClient::Jira(j) => Some(j.clone()),
-                        _ => None,
-                    })
-            })
-            .or_else(|| {
-                conns
-                    .iter()
-                    .filter(|c| c.enabled)
-                    .find_map(|c| match &c.client {
-                        crate::state::ProviderClient::Jira(j) => Some(j.clone()),
-                        _ => None,
-                    })
-            })
-    } {
+    } else if let Some(client) = owning_jira {
         let started_dt = Utc
             .timestamp_opt(timer.started_at, 0)
             .single()
@@ -683,6 +682,17 @@ pub async fn stop_timer_inner(
             }
         }
     } else {
+        // P1-2: we couldn't identify which connection owns this issue and the
+        // key isn't a Freelo key, so there is no safe remote target. Save the
+        // worklog locally instead of guessing a Jira tenant, and surface a
+        // clear error so the user can assign it to the right account.
+        let _ = app.emit(
+            "worklog-error",
+            format!(
+                "Nepodařilo se určit účet pro úkol {} — záznam uložen lokálně. Přiřaďte ho k připojení.",
+                timer.issue_key
+            ),
+        );
         None
     };
 
