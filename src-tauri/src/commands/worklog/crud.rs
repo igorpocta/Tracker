@@ -518,25 +518,39 @@ pub async fn create_manual_worklog(
         .single()
         .ok_or_else(|| "Neplatný čas začátku".to_string())?;
 
-    let resp = match client
-        .add_worklog(&issue_key, started_dt, duration_seconds, comment.as_deref())
-        .await
+    let started_at_s = started_at_ms / 1000;
+
+    // P1-4: before POSTing, adopt an already-created upstream worklog from a
+    // prior attempt whose local write failed, so a retry doesn't duplicate it.
+    let remote_id = if let Some(found) = super::reconcile::find_existing_jira_worklog_id(
+        &client,
+        &issue_key,
+        started_at_s,
+        duration_seconds,
+    )
+    .await
     {
-        Ok(r) => r,
-        Err(e) => {
-            audit_failure(
-                &state.db,
-                AuditOp::Create,
-                Some(&issue_key),
-                None,
-                None,
-                &e.to_string(),
-            );
-            return Err(format!("Jira: {e}"));
+        found
+    } else {
+        match client
+            .add_worklog(&issue_key, started_dt, duration_seconds, comment.as_deref())
+            .await
+        {
+            Ok(r) => r.id,
+            Err(e) => {
+                audit_failure(
+                    &state.db,
+                    AuditOp::Create,
+                    Some(&issue_key),
+                    None,
+                    None,
+                    &e.to_string(),
+                );
+                return Err(format!("Jira: {e}"));
+            }
         }
     };
 
-    let started_at_s = started_at_ms / 1000;
     let now_s = Utc::now().timestamp();
     let row = WorklogRow {
         id: None,
@@ -549,7 +563,7 @@ pub async fn create_manual_worklog(
         updated_at: now_s,
         is_synced: true,
         synced_at: Some(now_s),
-        remote_id: Some(resp.id.clone()),
+        remote_id: Some(remote_id.clone()),
         pending_delete_at: None,
         tombstoned_at: None,
         summary: None,
@@ -563,7 +577,7 @@ pub async fn create_manual_worklog(
         &state.db,
         AuditOp::Create,
         Some(&issue_key),
-        Some(&resp.id),
+        Some(&remote_id),
         None,
         Some(&saved),
     );
@@ -596,6 +610,44 @@ async fn create_freelo_worklog(
     let user_id = cfg
         .sync_user_id
         .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+
+    // P1-4: adopt an already-created upstream report from a prior partial
+    // attempt instead of POSTing a duplicate.
+    let started_at_s = started_at_ms / 1000;
+    if let (Some(task_id), Ok(minutes)) = (
+        freelo::parse_task_key(&issue_key),
+        freelo::ops::seconds_to_minutes(duration_seconds),
+    ) {
+        if let Some(existing) = super::reconcile::find_existing_freelo_report(
+            &client,
+            task_id,
+            user_id,
+            started_at_s,
+            minutes,
+        )
+        .await
+        {
+            let now = Utc::now().timestamp();
+            let mut row = freelo::sync::work_report_to_row(&existing, conn_id, now);
+            let duration_s = minutes.saturating_mul(60);
+            row.started_at = started_at_s;
+            row.ended_at = started_at_s.saturating_add(duration_s);
+            row.logged_at = started_at_s;
+            let id =
+                cache::worklogs::upsert_from_remote(&state.db, &row).map_err(|e| e.to_string())?;
+            row.id = Some(id);
+            audit_success(
+                &state.db,
+                AuditOp::Create,
+                Some(&issue_key),
+                row.remote_id.as_deref(),
+                None,
+                Some(&row),
+            );
+            let _ = app.emit("worklog-created", &row);
+            return Ok(row);
+        }
+    }
 
     let saved = match freelo::ops::add_work_report(
         &client,
@@ -1146,6 +1198,38 @@ pub async fn push_local_worklog_inner<R: tauri::Runtime>(
         let user_id = cfg
             .sync_user_id
             .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+
+        // P1-4: if a prior attempt already created this report upstream (HTTP
+        // 201 followed by a failed local write), adopt it instead of POSTing a
+        // duplicate.
+        if let (Some(task_id), Ok(minutes)) = (
+            freelo::parse_task_key(&issue_key),
+            freelo::ops::seconds_to_minutes(before.duration_s()),
+        ) {
+            if let Some(existing) = super::reconcile::find_existing_freelo_report(
+                &client,
+                task_id,
+                user_id,
+                before.started_at,
+                minutes,
+            )
+            .await
+            {
+                let now = Utc::now().timestamp();
+                let mut row = freelo::sync::work_report_to_row(&existing, conn_id, now);
+                let duration_s = minutes.saturating_mul(60);
+                row.started_at = before.started_at;
+                row.ended_at = before.started_at.saturating_add(duration_s);
+                row.logged_at = before.started_at;
+                let id = cache::worklogs::upsert_from_remote(&state.db, &row)
+                    .map_err(|e| e.to_string())?;
+                row.id = Some(id);
+                let _ = cache::worklogs::delete_local_only(&state.db, local_id);
+                let _ = app.emit("worklog-updated", &row);
+                return Ok(row);
+            }
+        }
+
         let saved = match freelo::ops::add_work_report(
             &client,
             &state.db,
@@ -1168,19 +1252,33 @@ pub async fn push_local_worklog_inner<R: tauri::Runtime>(
 
     // Jira path — route to the connection that owns this issue.
     let (_conn_id, client) = resolve_jira_client_for_issue(state, &issue_key)?;
-    let started_dt = Utc
-        .timestamp_opt(before.started_at, 0)
-        .single()
-        .ok_or_else(|| "Neplatný čas začátku".to_string())?;
-    let resp = client
-        .add_worklog(
-            &issue_key,
-            started_dt,
-            before.duration_s(),
-            before.description.as_deref(),
-        )
-        .await
-        .map_err(|e| format!("Jira: {e}"))?;
+    // P1-4: adopt an already-created upstream worklog from a prior partial
+    // attempt instead of POSTing a duplicate.
+    let remote_id = if let Some(found) = super::reconcile::find_existing_jira_worklog_id(
+        &client,
+        &issue_key,
+        before.started_at,
+        before.duration_s(),
+    )
+    .await
+    {
+        found
+    } else {
+        let started_dt = Utc
+            .timestamp_opt(before.started_at, 0)
+            .single()
+            .ok_or_else(|| "Neplatný čas začátku".to_string())?;
+        client
+            .add_worklog(
+                &issue_key,
+                started_dt,
+                before.duration_s(),
+                before.description.as_deref(),
+            )
+            .await
+            .map_err(|e| format!("Jira: {e}"))?
+            .id
+    };
 
     let connection_id = cache::issues::get_connection_id_by_key(&state.db, &issue_key)
         .map_err(|e| e.to_string())?;
@@ -1189,7 +1287,7 @@ pub async fn push_local_worklog_inner<R: tauri::Runtime>(
         local_id,
         connection_id,
         &issue_key,
-        Some(&resp.id),
+        Some(&remote_id),
     )
     .map_err(|e| e.to_string())?;
     let after = cache::worklogs::get_by_id(&state.db, local_id)
@@ -1230,6 +1328,45 @@ pub async fn assign_worklog_issue(
         let user_id = cfg
             .sync_user_id
             .ok_or_else(|| "Freelo: chybí user id, spusťte sync".to_string())?;
+
+        // P1-4: adopt an already-created upstream report from a prior partial
+        // attempt instead of POSTing a duplicate.
+        if let (Some(task_id), Ok(minutes)) = (
+            freelo::parse_task_key(&issue_key),
+            freelo::ops::seconds_to_minutes(before.duration_s()),
+        ) {
+            if let Some(existing) = super::reconcile::find_existing_freelo_report(
+                &client,
+                task_id,
+                user_id,
+                before.started_at,
+                minutes,
+            )
+            .await
+            {
+                let now = Utc::now().timestamp();
+                let mut row = freelo::sync::work_report_to_row(&existing, conn_id, now);
+                let duration_s = minutes.saturating_mul(60);
+                row.started_at = before.started_at;
+                row.ended_at = before.started_at.saturating_add(duration_s);
+                row.logged_at = before.started_at;
+                let id = cache::worklogs::upsert_from_remote(&state.db, &row)
+                    .map_err(|e| e.to_string())?;
+                row.id = Some(id);
+                let _ = cache::worklogs::delete_local_only(&state.db, worklog_id);
+                audit_success(
+                    &state.db,
+                    AuditOp::Update,
+                    Some(&issue_key),
+                    row.remote_id.as_deref(),
+                    Some(&before),
+                    Some(&row),
+                );
+                let _ = app.emit("worklog-updated", &row);
+                return Ok(row);
+            }
+        }
+
         let saved = match freelo::ops::add_work_report(
             &client,
             &state.db,
@@ -1271,31 +1408,43 @@ pub async fn assign_worklog_issue(
     // Jira branch — route by issue connection.
     let (_conn_id, client) = resolve_jira_client_for_issue(&state, &issue_key)?;
 
-    let started_dt = Utc
-        .timestamp_opt(before.started_at, 0)
-        .single()
-        .ok_or_else(|| "Neplatný čas začátku".to_string())?;
-
-    let resp = match client
-        .add_worklog(
-            &issue_key,
-            started_dt,
-            before.duration_s(),
-            before.description.as_deref(),
-        )
-        .await
+    // P1-4: adopt an already-created upstream worklog from a prior partial
+    // attempt instead of POSTing a duplicate.
+    let remote_id = if let Some(found) = super::reconcile::find_existing_jira_worklog_id(
+        &client,
+        &issue_key,
+        before.started_at,
+        before.duration_s(),
+    )
+    .await
     {
-        Ok(r) => r,
-        Err(e) => {
-            audit_failure(
-                &state.db,
-                AuditOp::Update,
-                Some(&issue_key),
-                None,
-                Some(&before),
-                &e.to_string(),
-            );
-            return Err(format!("Jira: {e}"));
+        found
+    } else {
+        let started_dt = Utc
+            .timestamp_opt(before.started_at, 0)
+            .single()
+            .ok_or_else(|| "Neplatný čas začátku".to_string())?;
+        match client
+            .add_worklog(
+                &issue_key,
+                started_dt,
+                before.duration_s(),
+                before.description.as_deref(),
+            )
+            .await
+        {
+            Ok(r) => r.id,
+            Err(e) => {
+                audit_failure(
+                    &state.db,
+                    AuditOp::Update,
+                    Some(&issue_key),
+                    None,
+                    Some(&before),
+                    &e.to_string(),
+                );
+                return Err(format!("Jira: {e}"));
+            }
         }
     };
 
@@ -1307,7 +1456,7 @@ pub async fn assign_worklog_issue(
         worklog_id,
         connection_id,
         &issue_key,
-        Some(&resp.id),
+        Some(&remote_id),
     )
     .map_err(|e| e.to_string())?;
 
@@ -1319,7 +1468,7 @@ pub async fn assign_worklog_issue(
         &state.db,
         AuditOp::Update,
         Some(&issue_key),
-        Some(&resp.id),
+        Some(&remote_id),
         Some(&before),
         Some(&after),
     );

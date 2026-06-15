@@ -23,6 +23,7 @@
 pub mod audit;
 pub mod crud;
 pub mod flush;
+pub mod reconcile;
 pub mod sync;
 
 pub use audit::*;
