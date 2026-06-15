@@ -11,7 +11,7 @@
  * `localStorage` until we have a real need to sync them across windows.
  */
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 
 import {
   exportBackup,
@@ -41,6 +41,7 @@ import {
 } from "../../lib/validation";
 import { initSentry, shutdownSentry } from "../../lib/sentry";
 import { usePrefsStore } from "../../stores/prefsStore";
+import type { ShellOutletContext } from "../Layout/AppShell";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
 
@@ -85,6 +86,7 @@ export default function General() {
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
   const setDayTimelineVisible = usePrefsStore((s) => s.setDayTimelineVisible);
   const navigate = useNavigate();
+  const { pushToast } = useOutletContext<ShellOutletContext>();
 
   const [timeInput, setTimeInput] = useState<TimeInputStyle>("end");
   const [reindex, setReindex] = useState<ReindexInterval>("1h");
@@ -138,21 +140,39 @@ export default function General() {
   };
 
   const updateRndMode = async (m: RoundingMode) => {
+    const previous = rndMode;
     setRndMode(m);
-    await setRoundingMode(m).catch(() => {});
+    try {
+      await setRoundingMode(m);
+    } catch {
+      setRndMode(previous);
+      pushToast("error", "Nepodařilo se uložit režim zaokrouhlení.");
+    }
   };
   const updateRndInterval = async (n: number) => {
     // Validate before submit — silently clamp to the allowed enum.
     if (firstError(roundingIntervalSchema, n)) return;
+    const previous = rndInterval;
     setRndInterval(n);
-    await setRoundingIntervalMinutes(n).catch(() => {});
+    try {
+      await setRoundingIntervalMinutes(n);
+    } catch {
+      setRndInterval(previous);
+      pushToast("error", "Nepodařilo se uložit interval zaokrouhlení.");
+    }
   };
   const updateActThreshold = async (n: number) => {
     // Already clamped by the input handler, but double-check the schema in
     // case a future caller bypasses the input.
     if (firstError(activityThresholdSchema, n)) return;
+    const previous = actThreshold;
     setActThreshold(n);
-    await setActivityThresholdMin(n).catch(() => {});
+    try {
+      await setActivityThresholdMin(n);
+    } catch {
+      setActThreshold(previous);
+      pushToast("error", "Nepodařilo se uložit práh nečinnosti.");
+    }
   };
 
   // Phase 19: when the user opts in we initialise the frontend SDK

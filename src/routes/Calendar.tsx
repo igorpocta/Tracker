@@ -21,7 +21,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 
 import {
   addNonWorkingDay,
@@ -34,6 +34,7 @@ import {
   CellContextMenu,
   type NonWorkingReason,
 } from "../components/Calendar/CellContextMenu";
+import type { ShellOutletContext } from "../components/Layout/AppShell";
 import { PageContainer } from "../components/Layout/PageContainer";
 import { isWorkingDayLocal, useCalendarMask } from "../hooks/useCalendarMask";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
@@ -136,6 +137,7 @@ function MonthlyView({
   today: Date;
 }) {
   const queryClient = useQueryClient();
+  const { pushToast } = useOutletContext<ShellOutletContext>();
   const navigate = useNavigate();
   const monthStart = useMemo(
     () => startOfMonth(new Date(year, month, 1)),
@@ -178,11 +180,14 @@ function MonthlyView({
       try {
         await addNonWorkingDay(formatIsoDate(date), reason);
         refreshNonWorking();
-      } catch {
-        /* swallow — toast plumbing left to the shell-level error handler */
+      } catch (e) {
+        pushToast(
+          "error",
+          typeof e === "string" ? e : "Nepodařilo se označit den jako volný.",
+        );
       }
     },
-    [refreshNonWorking],
+    [refreshNonWorking, pushToast],
   );
 
   const handleUnmark = useCallback(
@@ -190,11 +195,14 @@ function MonthlyView({
       try {
         await removeNonWorkingDay(formatIsoDate(date));
         refreshNonWorking();
-      } catch {
-        /* swallow */
+      } catch (e) {
+        pushToast(
+          "error",
+          typeof e === "string" ? e : "Nepodařilo se zrušit volný den.",
+        );
       }
     },
-    [refreshNonWorking],
+    [refreshNonWorking, pushToast],
   );
 
   const monthDays: Date[] = [];
