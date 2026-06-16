@@ -552,7 +552,10 @@ export function WorklogRow({
   highlighted,
   refCallback,
 }: WorklogRowProps) {
-  const { pushToast } = useOutletContext<ShellOutletContext>();
+  // `useOutletContext` returns null outside a router outlet (e.g. in unit
+  // tests that render the row standalone), so treat the toast as optional.
+  const ctx = useOutletContext<ShellOutletContext | null>();
+  const pushToast = ctx?.pushToast;
   const started = new Date(row.started_at * 1000);
   const ended = new Date((row.started_at + row.duration_s) * 1000);
 
@@ -701,10 +704,10 @@ export function WorklogRow({
               if (row.id == null) return;
               try {
                 await pushLocalWorklog(row.id);
-                pushToast("success", "Synchronizováno s providerem.");
+                pushToast?.("success", "Synchronizováno s providerem.");
               } catch (err) {
                 console.error("[push_local_worklog] failed:", err);
-                pushToast(
+                pushToast?.(
                   "error",
                   typeof err === "string"
                     ? err
