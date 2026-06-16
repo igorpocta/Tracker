@@ -119,6 +119,25 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
+      # macOS code signing + notarization. Writes the App Store Connect API
+      # key (.p8) to disk and exports APPLE_API_KEY_PATH so the build step
+      # below can notarize. No-op on Windows and when the secret is absent
+      # (forks / PRs build unsigned, no behaviour change).
+      - name: Prepare Apple API key (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_KEY" ]; then
+            mkdir -p "$HOME/private_keys"
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$HOME/private_keys/AuthKey_${APPLE_API_KEY}.p8"
+            chmod 600 "$HOME/private_keys/AuthKey_${APPLE_API_KEY}.p8"
+            echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          else
+            echo "↪ Apple API key secrets not set — building unsigned."
+          fi
+
       - name: Build Tauri bundle
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
         env:
@@ -130,6 +149,43 @@ jobs:
           # vite.config.ts treats VITE_RELEASE as "this is the release
           # build → emit hidden sourcemaps for upload". Empty = no sourcemaps.
           VITE_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.SENTRY_AUTH_TOKEN != '' && format('tracker@{0}', github.ref_name) || '' }}
+          # Apple signing + notarization. Tauri imports the .p12 into an
+          # ephemeral keychain (APPLE_CERTIFICATE + …_PASSWORD), signs with
+          # hardened runtime, and notarizes + staples the .app when the
+          # App Store Connect API key vars are present. All empty on Windows
+          # and on forks/PRs → unsigned build, no failure.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          # APPLE_API_KEY_PATH is exported into $GITHUB_ENV by the step above.
+
+      # Tauri notarizes + staples the .app, but NOT the .dmg container. A
+      # downloaded un-notarized DMG still triggers a Gatekeeper warning on
+      # double-click, so notarize + staple the DMG itself. macOS only; skips
+      # cleanly when the API key secrets are absent.
+      - name: Notarize & staple DMG (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          KEY_PATH="$HOME/private_keys/AuthKey_${APPLE_API_KEY}.p8"
+          if [ -z "$APPLE_API_ISSUER" ] || [ ! -f "$KEY_PATH" ]; then
+            echo "↪ Apple notarization secrets not set — skipping DMG notarization."
+            exit 0
+          fi
+          shopt -s nullglob
+          for dmg in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do
+            echo "Notarizing $dmg"
+            xcrun notarytool submit "$dmg" --wait \
+              --key-id "$APPLE_API_KEY" \
+              --key "$KEY_PATH" \
+              --issuer "$APPLE_API_ISSUER"
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
+          done
 
       # Sentry sourcemap + Rust debug-files upload. Skipped (equivalent to
       # SKIP_SENTRY=1) when any of the required secrets is missing — that
