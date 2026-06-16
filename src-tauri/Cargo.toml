@@ -1,6 +1,6 @@
 [package]
 name = "tracker"
-version = "1.0.5"
+version = "1.0.6"
 description = "Local-first time tracker for Jira Cloud"
 authors = ["Tracker contributors"]
 edition = "2021"
