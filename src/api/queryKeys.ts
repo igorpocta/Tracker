@@ -108,6 +108,21 @@ export const queryKeys = {
     all: () => ["favorites"] as const,
     one: (issueKey: string) => ["favorite", issueKey] as const,
   },
+
+  /** Daily-goal streak badge (Reports) — derived from worklogs. */
+  streaks: {
+    all: () => ["streaks"] as const,
+  },
+
+  /** "Jako včera?" smart suggestions — derived from past worklogs. */
+  smartSuggestions: {
+    all: () => ["smart-suggestions"] as const,
+  },
+
+  /** JIRA Přehled dashboard — provider-side data refreshed on cache rebuild. */
+  jiraDashboard: {
+    all: () => ["jira-dashboard"] as const,
+  },
 } as const;
 
 /**
@@ -131,6 +146,9 @@ export function invalidateWorklogQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: queryKeys.worklogs.all() });
   qc.invalidateQueries({ queryKey: queryKeys.suggestedIssues.all() });
   qc.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
+  // Derived from worklogs — keep the streak badge + smart suggestions fresh.
+  qc.invalidateQueries({ queryKey: queryKeys.streaks.all() });
+  qc.invalidateQueries({ queryKey: queryKeys.smartSuggestions.all() });
 }
 
 /**
@@ -142,4 +160,5 @@ export function invalidateAfterCacheRefresh(qc: QueryClient): void {
   invalidateWorklogQueries(qc);
   qc.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
   qc.invalidateQueries({ queryKey: queryKeys.cacheStats.all() });
+  qc.invalidateQueries({ queryKey: queryKeys.jiraDashboard.all() });
 }

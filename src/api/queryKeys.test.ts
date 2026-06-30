@@ -44,13 +44,19 @@ describe("invalidateWorklogQueries", () => {
 
     invalidateWorklogQueries(qc);
 
-    expect(spy).toHaveBeenCalledTimes(3);
+    expect(spy).toHaveBeenCalledTimes(5);
     expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.worklogs.all() });
     expect(spy).toHaveBeenCalledWith({
       queryKey: queryKeys.suggestedIssues.all(),
     });
     expect(spy).toHaveBeenCalledWith({
       queryKey: queryKeys.recentIssues.all(),
+    });
+    // Streak + smart-suggestion data is derived from worklogs, so it must
+    // refresh after a worklog mutation too (was orphaned from the fan-out).
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.streaks.all() });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.smartSuggestions.all(),
     });
   });
 
@@ -75,13 +81,17 @@ describe("invalidateAfterCacheRefresh", () => {
 
     invalidateAfterCacheRefresh(qc);
 
-    // Superset of invalidateWorklogQueries + searchIssues + cacheStats.
-    expect(spy).toHaveBeenCalledTimes(5);
+    // Superset of invalidateWorklogQueries (5) + searchIssues + cacheStats +
+    // jiraDashboard.
+    expect(spy).toHaveBeenCalledTimes(8);
     expect(spy).toHaveBeenCalledWith({
       queryKey: queryKeys.searchIssues.all(),
     });
     expect(spy).toHaveBeenCalledWith({
       queryKey: queryKeys.cacheStats.all(),
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.jiraDashboard.all(),
     });
   });
 });
