@@ -41,8 +41,8 @@ export function Unassigned() {
 
   return (
     <PageContainer>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-lg font-semibold text-[var(--text-primary)]">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2 mb-1">
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
           Nepřiřazené
         </h1>
         {rows.length > 0 && (
