@@ -383,6 +383,60 @@ pub fn get_pending_delete_by_remote_id_any(
     }
 }
 
+/// Atomically split a worklog: shrink row `id` to `[started_at, ended_at]` and
+/// insert `second` as the tail piece, both in ONE transaction. The two writes
+/// commit together so a failure mid-split can't shrink the original while
+/// losing the tail's time. Returns the new tail row id.
+pub fn split(
+    db: &Db,
+    id: i64,
+    issue_key: Option<&str>,
+    description: Option<&str>,
+    started_at: i64,
+    ended_at: i64,
+    second: &WorklogRow,
+) -> Result<i64, DbError> {
+    let mut conn = db.pool().get()?;
+    let now = chrono::Utc::now().timestamp();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "UPDATE worklogs SET
+            issue_key   = ?2,
+            description = ?3,
+            started_at  = ?4,
+            ended_at    = ?5,
+            updated_at  = ?6
+         WHERE id = ?1",
+        rusqlite::params![id, issue_key, description, started_at, ended_at, now],
+    )?;
+    tx.execute(
+        "INSERT INTO worklogs (
+            connection_id, issue_key, description,
+            started_at, ended_at, logged_at, updated_at,
+            is_synced, synced_at, remote_id,
+            pending_delete_at, tombstoned_at
+         )
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        rusqlite::params![
+            second.connection_id,
+            second.issue_key,
+            second.description,
+            second.started_at,
+            second.ended_at,
+            second.logged_at,
+            second.updated_at,
+            if second.is_synced { 1 } else { 0 },
+            second.synced_at,
+            second.remote_id,
+            second.pending_delete_at,
+            second.tombstoned_at,
+        ],
+    )?;
+    let new_id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(new_id)
+}
+
 // -----------------------------------------------------------------------------
 // Mutations used by the two-way sync commands
 // -----------------------------------------------------------------------------
@@ -638,6 +692,38 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert!(out[0].issue_key.is_none());
         assert_eq!(out[0].started_at, 200);
+    }
+
+    #[test]
+    fn split_shrinks_original_and_inserts_tail() {
+        let db = open_db();
+        let id = record(&db, &mk(Some("DEV-1"), 1000)).unwrap(); // [1000,1060]
+        let mut tail = mk(Some("DEV-2"), 1030);
+        tail.ended_at = 1060;
+        let new_id = split(&db, id, Some("DEV-1"), None, 1000, 1030, &tail).unwrap();
+
+        let first = get_by_id(&db, id).unwrap().unwrap();
+        assert_eq!(first.ended_at, 1030, "original shrunk to split point");
+        let second = get_by_id(&db, new_id).unwrap().unwrap();
+        assert_eq!(second.issue_key.as_deref(), Some("DEV-2"));
+        assert_eq!(second.started_at, 1030);
+        assert_eq!(second.ended_at, 1060);
+    }
+
+    #[test]
+    fn split_rolls_back_when_tail_insert_fails() {
+        let db = open_db();
+        let id = record(&db, &mk(Some("DEV-1"), 1000)).unwrap();
+        let mut bad = mk(Some("DEV-2"), 1030);
+        bad.ended_at = 1060;
+        bad.connection_id = Some(99_999); // FK violation -> INSERT fails
+        let res = split(&db, id, Some("DEV-1"), None, 1000, 1030, &bad);
+        assert!(res.is_err(), "tail insert must fail on bad FK");
+        let first = get_by_id(&db, id).unwrap().unwrap();
+        assert_eq!(
+            first.ended_at, 1060,
+            "original must be untouched when the tail insert rolls back"
+        );
     }
 
     #[test]

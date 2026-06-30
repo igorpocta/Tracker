@@ -92,19 +92,8 @@ pub async fn split_worklog(
         return Err("Bod rozdělení musí být uvnitř záznamu".into());
     }
 
-    // 1) zkrátíme původní záznam.
-    cache::worklogs::update_fields(
-        &state.db,
-        local_id,
-        before.issue_key.as_deref(),
-        before.description.as_deref(),
-        before.started_at,
-        split_at_s,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
-
-    // 2) vytvoříme druhý kus.
+    // Build the tail piece, then shrink the original + insert the tail in ONE
+    // transaction so a failure can't shrink the original while losing the tail.
     let new_key = new_issue_key
         .as_deref()
         .map(str::trim)
@@ -133,7 +122,16 @@ pub async fn split_worklog(
         tombstoned_at: None,
         summary: None,
     };
-    let new_id = cache::worklogs::record(&state.db, &second).map_err(|e| e.to_string())?;
+    let new_id = cache::worklogs::split(
+        &state.db,
+        local_id,
+        before.issue_key.as_deref(),
+        before.description.as_deref(),
+        before.started_at,
+        split_at_s,
+        &second,
+    )
+    .map_err(|e| e.to_string())?;
 
     let first_after = cache::worklogs::get_by_id(&state.db, local_id)
         .map_err(|e| e.to_string())?
