@@ -58,9 +58,22 @@ pub async fn open_issue(
     // this issue (multi-Jira friendly).
     let url = jira_url_for_key(&state, &key)
         .ok_or_else(|| "no Jira connection configured for this issue".to_string())?;
+    // Guard against a tampered/mistyped base_url producing a non-web URI.
+    if !is_safe_external_url(&url) {
+        return Err(format!("Nepovolené URL schéma: {url}"));
+    }
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// Schemes safe to hand to the OS "open" handler. These commands forward
+/// frontend/config-supplied strings and the opener does not enforce a
+/// capability scope, so anything outside http(s)/mailto (file:, smb:,
+/// javascript:, custom app schemes) is rejected.
+pub(crate) fn is_safe_external_url(url: &str) -> bool {
+    let lower = url.trim_start().to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
 }
 
 /// Build a Jira `<base>/browse/<key>` URL for `key`, picking the right
@@ -91,9 +104,13 @@ fn jira_url_for_key(state: &AppState, key: &str) -> Option<String> {
     Some(format!("{base}/browse/{key}"))
 }
 
-/// Open an arbitrary URL in the user's default browser.
+/// Open an arbitrary URL in the user's default browser. Only web/mail schemes
+/// are allowed — see [`is_safe_external_url`].
 #[tauri::command]
 pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    if !is_safe_external_url(&url) {
+        return Err(format!("Nepovolené URL schéma: {url}"));
+    }
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())
@@ -104,4 +121,26 @@ pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> 
 #[tauri::command]
 pub async fn haptic_feedback(_kind: String) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_external_url;
+
+    #[test]
+    fn allows_web_and_mail_schemes() {
+        assert!(is_safe_external_url("https://example.atlassian.net/browse/DEV-1"));
+        assert!(is_safe_external_url("http://jira.local/browse/DEV-1"));
+        assert!(is_safe_external_url("mailto:a@b.com"));
+        assert!(is_safe_external_url("  HTTPS://EXAMPLE.com")); // trimmed + case-insensitive
+    }
+
+    #[test]
+    fn rejects_dangerous_schemes() {
+        assert!(!is_safe_external_url("file:///etc/passwd"));
+        assert!(!is_safe_external_url("smb://host/share"));
+        assert!(!is_safe_external_url("javascript:alert(1)"));
+        assert!(!is_safe_external_url("tracker://x"));
+        assert!(!is_safe_external_url(""));
+    }
 }
