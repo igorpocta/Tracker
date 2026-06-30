@@ -7,12 +7,18 @@
  * hook hides that boilerplate.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
- * Subscribe to a Tauri event. The `handler` is wrapped in a ref-less closure;
- * if you need it to read fresh state, prefer wrapping the body in a callback
- * that closes over state via the React closure (re-run effect on deps).
+ * Subscribe to a Tauri event for the lifetime of the component, dispatching to
+ * the LATEST `handler` on each emit.
+ *
+ * The handler is held in a ref so the listener subscribes exactly once per
+ * `eventName` — it does NOT re-subscribe when the caller passes a fresh inline
+ * handler each render. Re-subscribing was both wasteful and unsafe: `listen()`
+ * is async, so between the synchronous teardown and the new listener resolving
+ * there was a window with no live listener, and a component that re-renders
+ * every second (e.g. a running-timer tick) could drop events that fired in it.
  *
  * @param eventName  Tauri event name (e.g. `"worklog-saved"`).
  * @param handler    Called with the event payload on each emit.
@@ -21,11 +27,14 @@ export function useTauriEvent<T = unknown>(
   eventName: string,
   handler: (payload: T) => void,
 ): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
 
-    listen<T>(eventName, (event) => handler(event.payload))
+    listen<T>(eventName, (event) => handlerRef.current(event.payload))
       .then((u) => {
         if (cancelled) {
           u();
@@ -41,6 +50,5 @@ export function useTauriEvent<T = unknown>(
       cancelled = true;
       unlisten?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventName, handler]);
+  }, [eventName]);
 }
