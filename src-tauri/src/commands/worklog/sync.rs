@@ -330,7 +330,7 @@ pub async fn refresh_all(
     let active = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone();
     let total_conns = active.len();
 
@@ -351,7 +351,7 @@ pub async fn refresh_all(
     if state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .is_empty()
     {
         if let Some(client) = state.jira_client_cloned() {
@@ -487,7 +487,7 @@ pub async fn refresh_connection(
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         conns
             .iter()
             .find(|c| c.id == connection_id && c.enabled)

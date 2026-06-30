@@ -66,7 +66,7 @@ pub async fn refresh_cache(
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         conns
             .iter()
             .filter(|c| c.enabled)

@@ -67,7 +67,7 @@ pub fn run() {
                 } else if let Ok(cfg) = config::load_from_path(&cfg_path) {
                     // First-time migration path.
                     // Legacy shims (so old commands still work).
-                    *state.jira_config.write().expect("AppState.jira_config RwLock poisoned") = Some(cfg.clone());
+                    *state.jira_config.write().unwrap_or_else(|e| e.into_inner()) = Some(cfg.clone());
                     let _ = state.try_build_client();
                     let connection_cfg =
                         crate::commands::connections::JiraConnectionConfig {
@@ -247,7 +247,7 @@ pub fn run() {
                     let active = state
                         .connections
                         .read()
-                        .expect("AppState.connections RwLock poisoned")
+                        .unwrap_or_else(|e| e.into_inner())
                         .clone();
                     let total = active.len();
                     let now_unix = chrono::Utc::now().timestamp();

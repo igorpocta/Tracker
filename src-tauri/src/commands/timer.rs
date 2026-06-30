@@ -434,7 +434,7 @@ async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str) {
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         let Some(c) = conns.iter().find(|c| c.id == conn_id) else {
             return;
         };
@@ -598,7 +598,7 @@ pub async fn stop_timer_inner(
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         cid.and_then(|id| conns.iter().find(|c| c.id == id && c.enabled))
             .map(|c| match &c.client {
                 crate::state::ProviderClient::Jira(j) => OwnerRoute::Jira(j.clone()),

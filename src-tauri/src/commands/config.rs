@@ -18,12 +18,12 @@ pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, Strin
     let has_jira_legacy = state
         .jira_config
         .read()
-        .expect("AppState.jira_config RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .is_some()
         && state
             .jira_client
             .read()
-            .expect("AppState.jira_client RwLock poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .is_some();
     if has_jira_legacy {
         return Ok(true);
@@ -31,7 +31,7 @@ pub async fn has_config(state: tauri::State<'_, AppState>) -> Result<bool, Strin
     let any_connection = !state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .is_empty();
     Ok(any_connection)
 }
@@ -69,7 +69,7 @@ pub async fn save_config(
     *state
         .jira_config
         .write()
-        .expect("AppState.jira_config RwLock poisoned") = Some(args.config.clone());
+        .unwrap_or_else(|e| e.into_inner()) = Some(args.config.clone());
     state.try_build_client().map_err(|e| e.to_string())?;
 
     // Phase 18A: upsert into `connections` so the new APIs see this account.
@@ -210,7 +210,7 @@ where
     *state
         .jira_config
         .write()
-        .expect("AppState.jira_config RwLock poisoned") = Some(new_cfg);
+        .unwrap_or_else(|e| e.into_inner()) = Some(new_cfg);
     // try_build_client picks up the (possibly new) token from the secret file.
     state.try_build_client().map_err(|e| e.to_string())?;
     Ok(())
@@ -231,11 +231,11 @@ where
     *state
         .jira_config
         .write()
-        .expect("AppState.jira_config RwLock poisoned") = None;
+        .unwrap_or_else(|e| e.into_inner()) = None;
     *state
         .jira_client
         .write()
-        .expect("AppState.jira_client RwLock poisoned") = None;
+        .unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
 }
 

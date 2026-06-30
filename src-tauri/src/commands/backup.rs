@@ -175,11 +175,11 @@ pub fn apply_post_import_state_refresh(state: &AppState) {
     *state
         .jira_client
         .write()
-        .expect("AppState.jira_client RwLock poisoned") = None;
+        .unwrap_or_else(|e| e.into_inner()) = None;
     *state
         .jira_config
         .write()
-        .expect("AppState.jira_config RwLock poisoned") = None;
+        .unwrap_or_else(|e| e.into_inner()) = None;
     if let Err(e) = state.hydrate_connections() {
         tracing::warn!("import_backup: hydrate_connections after restore failed: {e}");
     }

@@ -67,7 +67,7 @@ pub async fn get_jira_dashboard_issues(
     let active = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone();
     let mut rows: Vec<JiraDashboardRow> = Vec::new();
     let mut errors: Vec<JiraDashboardError> = Vec::new();

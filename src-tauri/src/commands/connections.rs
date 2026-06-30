@@ -549,7 +549,7 @@ pub async fn list_my_issues(
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         let active = conns
             .iter()
             .find(|c| c.id == connection_id && c.enabled)
@@ -608,7 +608,7 @@ pub async fn list_jira_statuses(
         let conns = state
             .connections
             .read()
-            .expect("AppState.connections RwLock poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         let c = conns
             .iter()
             .find(|c| c.id == connection_id)

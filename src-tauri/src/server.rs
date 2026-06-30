@@ -176,7 +176,7 @@ impl<R: Runtime> ServerState<R> {
         *self
             .last_heartbeat
             .write()
-            .expect("WidgetState.last_heartbeat RwLock poisoned") = Some(now);
+            .unwrap_or_else(|e| e.into_inner()) = Some(now);
     }
 }
 
@@ -497,7 +497,7 @@ async fn get_visible_ticket_handler<R: Runtime>(State(state): State<ServerState<
     let v = state
         .visible_ticket
         .read()
-        .expect("WidgetState.visible_ticket RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone();
     Json::<Option<VisibleTicket>>(v).into_response()
 }
@@ -513,7 +513,7 @@ async fn post_visible_ticket_handler<R: Runtime>(
     *state
         .visible_ticket
         .write()
-        .expect("WidgetState.visible_ticket RwLock poisoned") = Some(ticket.clone());
+        .unwrap_or_else(|e| e.into_inner()) = Some(ticket.clone());
     Json(ticket).into_response()
 }
 

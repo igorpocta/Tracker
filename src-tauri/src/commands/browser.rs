@@ -45,7 +45,7 @@ pub async fn get_current_visible_ticket(
     Ok(state
         .visible_ticket
         .read()
-        .expect("WidgetState.visible_ticket RwLock poisoned")
+        .unwrap_or_else(|e| e.into_inner())
         .clone())
 }
 
@@ -56,7 +56,7 @@ pub async fn get_extension_last_heartbeat(
     Ok(*state
         .last_heartbeat
         .read()
-        .expect("WidgetState.last_heartbeat RwLock poisoned"))
+        .unwrap_or_else(|e| e.into_inner()))
 }
 
 /// Return the per-install bearer token the user must paste into their

@@ -119,7 +119,7 @@ fn resolve_freelo_client_for_audit(
     let conns = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned");
+        .unwrap_or_else(|e| e.into_inner());
     let find_freelo_by_id = |cid: i64| -> Option<crate::freelo::client::FreeloClient> {
         conns
             .iter()
@@ -195,7 +195,7 @@ fn resolve_jira_client_for_audit(
     let conns = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned");
+        .unwrap_or_else(|e| e.into_inner());
     let find_jira_by_id = |cid: i64| -> Option<crate::jira::JiraClient> {
         conns
             .iter()

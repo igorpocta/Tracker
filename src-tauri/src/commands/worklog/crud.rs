@@ -239,7 +239,7 @@ fn resolve_client_for_issue(
     let conns = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned");
+        .unwrap_or_else(|e| e.into_inner());
     // If we know the connection id, prefer that.
     if let Some(cid) = conn_id {
         return conns
@@ -361,7 +361,7 @@ pub fn resolve_client_for_row(
     let conns = state
         .connections
         .read()
-        .expect("AppState.connections RwLock poisoned");
+        .unwrap_or_else(|e| e.into_inner());
     resolve_client_for_row_in(&conns, row)
 }
 
@@ -494,7 +494,7 @@ pub async fn create_manual_worklog(
             let conns = state
                 .connections
                 .read()
-                .expect("AppState.connections RwLock poisoned");
+                .unwrap_or_else(|e| e.into_inner());
             conns
                 .iter()
                 .find(|c| c.id == cid && c.enabled)
