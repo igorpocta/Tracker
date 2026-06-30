@@ -23,18 +23,17 @@ pub enum FreeloOpError {
 
 /// Convert local seconds → Freelo minutes (rounding nearest, but at least 1).
 ///
-/// Returns `Err(DurationTooShort)` if `seconds == 0` so the caller can
-/// surface the same "Doba musí být alespoň minuta" message the user expects.
+/// Only `seconds <= 0` is rejected. Any positive duration yields at least 1
+/// minute: Freelo's granularity is minutes, and rounding a sub-minute entry
+/// down to 0 used to reject it — the row then saved local-only and was
+/// re-POSTed (and re-rejected) on every sync forever. Rounding up to 1 keeps
+/// it syncable (the lesser evil vs. permanently stuck, un-invoiced time).
 pub fn seconds_to_minutes(seconds: i64) -> Result<i64, FreeloOpError> {
     if seconds <= 0 {
         return Err(FreeloOpError::DurationTooShort);
     }
-    // Round to nearest minute.
-    let m = (seconds + 30) / 60;
-    if m == 0 {
-        return Err(FreeloOpError::DurationTooShort);
-    }
-    Ok(m)
+    // Round to nearest minute, never below 1.
+    Ok(((seconds + 30) / 60).max(1))
 }
 
 /// Convert a unix-milliseconds timestamp to a `DateTime<Local>` for the Freelo
@@ -180,6 +179,16 @@ mod tests {
         assert_eq!(seconds_to_minutes(60).unwrap(), 1);
         assert_eq!(seconds_to_minutes(90).unwrap(), 2);
         assert_eq!(seconds_to_minutes(89).unwrap(), 1);
+    }
+
+    #[test]
+    fn seconds_to_minutes_floors_subminute_to_one() {
+        // Regression: 1..30s rounded to 0 -> Err, so a sub-minute Freelo entry
+        // saved local-only and was re-POSTed (and re-rejected) on every sync
+        // forever. Any positive duration must yield at least 1 syncable minute.
+        assert_eq!(seconds_to_minutes(1).unwrap(), 1);
+        assert_eq!(seconds_to_minutes(20).unwrap(), 1);
+        assert_eq!(seconds_to_minutes(29).unwrap(), 1);
     }
 
     #[test]
