@@ -796,7 +796,16 @@ pub async fn update_worklog(
         }
     }
 
-    if freelo::is_freelo_key(&issue_key) {
+    // Route by the ROW's owning connection, not the issue-key text prefix: a
+    // Jira project whose key starts with "FREELO-" must still go to Jira. The
+    // row's connection_id is the source of truth for an existing remote
+    // worklog (the issue cache can lose its connection link).
+    let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
+    let row_is_freelo = matches!(
+        resolve_client_for_row(&state, &before).map(|(_, c)| c),
+        Ok(crate::state::ProviderClient::Freelo(_))
+    );
+    if row_is_freelo {
         return update_freelo_worklog(
             app,
             state,
@@ -809,10 +818,6 @@ pub async fn update_worklog(
         .await;
     }
 
-    // Route by the row's recorded connection_id (source of truth for an
-    // existing remote worklog). The issue cache can be stale; the row
-    // cannot — it was stamped at create/sync time.
-    let before = resolve_cached_worklog_for_issue_and_remote_id(&state, &issue_key, &worklog_id)?;
     let (_conn_id, client) = resolve_jira_client_for_row(&state, &before)?;
 
     let started_dt = match new_started_at_ms {
@@ -1548,8 +1553,13 @@ pub async fn commit_pending_delete(
         return; // Already committed by an earlier task.
     }
 
-    // Freelo branch.
-    if freelo::is_freelo_key(issue_key) {
+    // Branch by the row's owning connection, not the issue-key text prefix —
+    // a Jira project keyed "FREELO-*" must still take the Jira path.
+    let row_is_freelo = matches!(
+        resolve_client_for_row(state, &row).map(|(_, c)| c),
+        Ok(crate::state::ProviderClient::Freelo(_))
+    );
+    if row_is_freelo {
         let wr_id = match freelo::parse_worklog_id(worklog_id) {
             Some(id) => id,
             None => {
