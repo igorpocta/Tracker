@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { parseDurationToSeconds } from "./TimeLog";
+import { parseDurationToSeconds, retainPresentHidden } from "./TimeLog";
 
 describe("parseDurationToSeconds", () => {
   it("parses 'Xh Ym' combo strings", () => {
@@ -31,5 +31,18 @@ describe("parseDurationToSeconds", () => {
     expect(parseDurationToSeconds("")).toBeNull();
     expect(parseDurationToSeconds("nonsense")).toBeNull();
     expect(parseDurationToSeconds("hi")).toBeNull();
+  });
+});
+
+describe("retainPresentHidden", () => {
+  it("keeps hidden keys whose row is still in the data (optimistic window)", () => {
+    const hidden = new Set(["local:5", "local:6"]);
+    const present = new Set(["local:5", "local:7"]);
+    expect([...retainPresentHidden(hidden, present)]).toEqual(["local:5"]);
+  });
+
+  it("drops keys whose row is gone (committed delete) so a reused id isn't masked", () => {
+    const hidden = new Set(["local:5"]);
+    expect(retainPresentHidden(hidden, new Set()).size).toBe(0);
   });
 });

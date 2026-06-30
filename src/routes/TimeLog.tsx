@@ -20,7 +20,7 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Plus, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useOutletContext } from "react-router-dom";
 
 import { invalidateWorklogQueries, queryKeys } from "../api/queryKeys";
@@ -84,6 +84,21 @@ function worklogUiKey(row: ApiWorklogRow): string {
   if (row.id != null) return `local:${row.id}`;
   if (row.jira_worklog_id) return `remote:${row.jira_worklog_id}`;
   return `started:${row.issue_key ?? "none"}:${row.started_at}`;
+}
+
+/**
+ * Keep only the optimistically-hidden keys whose row is still present in the
+ * fetched data. Once a delete commits, the row leaves the data and its key is
+ * dropped here — otherwise `hiddenIds` would grow unbounded and a later row
+ * that reuses the same local id would be wrongly hidden. Exported for tests.
+ */
+export function retainPresentHidden(
+  hidden: Set<string>,
+  present: Set<string>,
+): Set<string> {
+  const next = new Set<string>();
+  for (const k of hidden) if (present.has(k)) next.add(k);
+  return next;
 }
 
 export default function TimeLog() {
@@ -179,6 +194,20 @@ export default function TimeLog() {
   const rows = (worklogsQ.data ?? []).filter((r) => !hiddenIds.has(worklogUiKey(r)));
   const totalSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
 
+  // Prune optimistically-hidden ids once their row leaves the data (delete
+  // committed): stops `hiddenIds` growing unbounded and prevents a stale entry
+  // from masking a row that later reuses the same local id.
+  useEffect(() => {
+    const data = worklogsQ.data;
+    if (!data) return;
+    const present = new Set(data.map(worklogUiKey));
+    setHiddenIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = retainPresentHidden(prev, present);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [worklogsQ.data]);
+
   const handleDelete = useCallback(
     async (row: ApiWorklogRow) => {
       const jiraId = row.jira_worklog_id;
@@ -227,14 +256,22 @@ export default function TimeLog() {
           action: async () => {
             try {
               await undoDeleteWorklog(jiraId);
-            } catch {
-              /* swallow */
-            } finally {
+              // Restored — reveal the row again.
               setHiddenIds((prev) => {
                 const next = new Set(prev);
                 next.delete(hiddenKey);
                 return next;
               });
+            } catch (e) {
+              // Restore failed (often: the delete already committed). Keep the
+              // row hidden and tell the user instead of falsely un-hiding a
+              // worklog that no longer exists. The prune effect reconciles
+              // `hiddenIds` against the refetched data.
+              ctx.pushToast(
+                "error",
+                typeof e === "string" ? e : "Obnovení záznamu selhalo.",
+              );
+            } finally {
               invalidateWorklogQueries(queryClient);
             }
           },
