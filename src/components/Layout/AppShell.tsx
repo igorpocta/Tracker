@@ -45,6 +45,7 @@ import {
 } from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
 import { pluralCs } from "../../lib/format";
+import { clampDiscardStartMs } from "../../lib/idleGap";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useIdleDetection } from "../../hooks/useIdleDetection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -277,9 +278,10 @@ export function AppShell() {
       const state = useTimerStore.getState();
       const active = state.active;
       if (active) {
-        const idleMs =
-          idleGap.returnedAtMs - idleGap.startedAtMs;
-        await state.updateStart(active.started_at + idleMs);
+        const idleMs = idleGap.returnedAtMs - idleGap.startedAtMs;
+        await state.updateStart(
+          clampDiscardStartMs(active.started_at, idleMs, Date.now()),
+        );
       }
       await state.stop();
     } catch (e) {
@@ -298,7 +300,9 @@ export function AppShell() {
       const comment = prev?.comment ?? null;
       const idleMs = idleGap.returnedAtMs - idleGap.startedAtMs;
       if (prev) {
-        await state.updateStart(prev.started_at + idleMs);
+        await state.updateStart(
+          clampDiscardStartMs(prev.started_at, idleMs, Date.now()),
+        );
       }
       await state.stop();
       // Hned znovu nastartuj se stejným úkolem (a komentářem) od teď.
