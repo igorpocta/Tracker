@@ -31,6 +31,13 @@ pub struct MoveWorklogArgs<'a> {
     pub started: DateTime<Utc>,
     pub time_spent_seconds: i64,
     pub comment: Option<&'a str>,
+    /// Connection the OLD worklog belongs to. Used when the new issue key
+    /// isn't in the local issue cache yet — a move stays within the same Jira
+    /// host, so the old row's connection is the correct owner for the new row.
+    /// Without it the new row would get `connection_id = None`, which
+    /// `upsert_from_remote` rejects, orphaning the move after the upstream
+    /// POST+DELETE already succeeded.
+    pub fallback_connection_id: Option<i64>,
 }
 
 /// Successful result of [`move_worklog`].
@@ -88,10 +95,13 @@ pub async fn move_worklog(
     let started_ts = args.started.timestamp();
     let now_ts = Utc::now().timestamp();
 
-    // Resolve owning connection from the issue cache. None ⇒ legacy single-
-    // Jira install, where downstream code treats `connection_id = 0` as the
-    // sentinel for "the only Jira".
-    let connection_id = cache::issues::get_connection_id_by_key(db, args.new_issue_key)?;
+    // Resolve owning connection from the issue cache; if the new issue isn't
+    // cached yet, fall back to the OLD worklog's connection (a move stays on
+    // the same Jira host). Without the fallback the new row's connection_id is
+    // None, which upsert_from_remote rejects — orphaning the move after the
+    // upstream POST+DELETE already committed.
+    let connection_id = cache::issues::get_connection_id_by_key(db, args.new_issue_key)?
+        .or(args.fallback_connection_id);
 
     let new_row = WorklogRow {
         id: None,

@@ -1069,7 +1069,7 @@ pub async fn move_worklog(
     // to live on the same host.
     let before_row =
         resolve_cached_worklog_for_issue_and_remote_id(&state, &old_issue_key, &old_worklog_id)?;
-    let (_conn_id, client) = resolve_jira_client_for_row(&state, &before_row)?;
+    let (conn_id, client) = resolve_jira_client_for_row(&state, &before_row)?;
     let before = Some(before_row);
 
     let started_dt = Utc
@@ -1084,6 +1084,7 @@ pub async fn move_worklog(
         started: started_dt,
         time_spent_seconds: duration_seconds,
         comment: comment.as_deref(),
+        fallback_connection_id: Some(conn_id),
     };
 
     match jira::worklog_ops::move_worklog(&client, &state.db, args).await {

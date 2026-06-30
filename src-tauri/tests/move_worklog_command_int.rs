@@ -123,6 +123,7 @@ async fn move_worklog_updates_sqlite_and_records_audit() {
         started,
         time_spent_seconds: 1800,
         comment: Some("Moved comment"),
+        fallback_connection_id: None,
     };
     let res = move_worklog(&client, &db, args).await.expect("move ok");
     assert_eq!(res.new_worklog_id, "6001");
@@ -191,6 +192,7 @@ async fn move_worklog_create_failure_keeps_old_row_and_audits_failure() {
         started,
         time_spent_seconds: 1800,
         comment: None,
+        fallback_connection_id: None,
     };
     let err = move_worklog(&client, &db, args).await.unwrap_err();
 

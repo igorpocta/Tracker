@@ -115,6 +115,7 @@ async fn move_worklog_happy_path() {
         started,
         time_spent_seconds: 1800,
         comment: Some("Moved"),
+        fallback_connection_id: None,
     };
 
     let res = move_worklog(&client, &db, args).await.expect("ok");
@@ -127,6 +128,65 @@ async fn move_worklog_happy_path() {
     // The old row should be gone.
     let by_old = tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001").unwrap();
     assert!(by_old.is_none(), "old row should have been hard-deleted");
+}
+
+#[tokio::test]
+async fn move_worklog_uncached_new_issue_uses_fallback_connection() {
+    // Regression: moving to an issue key not yet in issues_v2 left the new row
+    // with connection_id = None, which upsert_from_remote rejects — so after
+    // the upstream POST+DELETE both succeeded, the move errored and the old
+    // local row was never deleted (orphan/duplicate). The fallback connection
+    // (the old row's) must be used.
+    let (server, client) = server_and_client().await;
+    let (_d, db, conn_id) = fresh_db(&server.uri());
+    let _old_id = seed_old_row(&db, conn_id, "5001", "OLD-1");
+    // NOTE: "UNCACHED-9" is deliberately NOT seeded into issues_v2.
+
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/issue/UNCACHED-9/worklog"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "6002",
+            "issueId": "20009",
+            "timeSpentSeconds": 1800
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/OLD-1/worklog/5001"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let started = Utc.with_ymd_and_hms(2026, 5, 14, 9, 30, 0).unwrap();
+    let args = MoveWorklogArgs {
+        old_issue_key: "OLD-1",
+        old_worklog_id: "5001",
+        new_issue_key: "UNCACHED-9",
+        started,
+        time_spent_seconds: 1800,
+        comment: Some("Moved"),
+        fallback_connection_id: Some(conn_id),
+    };
+
+    let res = move_worklog(&client, &db, args)
+        .await
+        .expect("move should succeed despite the new issue being uncached");
+    assert_eq!(res.new_worklog_id, "6002");
+    assert_eq!(res.new_row.connection_id, Some(conn_id));
+    assert!(
+        tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "6002")
+            .unwrap()
+            .is_some(),
+        "new row persisted via fallback connection"
+    );
+    assert!(
+        tracker_lib::cache::worklogs::get_by_remote_id_any(&db, "5001")
+            .unwrap()
+            .is_none(),
+        "old row deleted"
+    );
 }
 
 #[tokio::test]
@@ -153,6 +213,7 @@ async fn move_worklog_create_failed_leaves_old_intact() {
         started,
         time_spent_seconds: 1800,
         comment: None,
+        fallback_connection_id: None,
     };
 
     let err = move_worklog(&client, &db, args).await.unwrap_err();
@@ -202,6 +263,7 @@ async fn move_worklog_delete_failed_returns_new_id_for_recovery() {
         started,
         time_spent_seconds: 900,
         comment: None,
+        fallback_connection_id: None,
     };
 
     let err = move_worklog(&client, &db, args).await.unwrap_err();
@@ -262,6 +324,7 @@ async fn move_worklog_delete_404_is_treated_as_success() {
         started,
         time_spent_seconds: 900,
         comment: None,
+        fallback_connection_id: None,
     };
 
     let res = move_worklog(&client, &db, args).await.expect("ok");
