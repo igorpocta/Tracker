@@ -56,15 +56,96 @@ pub async fn find_existing_freelo_report(
 ) -> Option<crate::freelo::models::FreeloWorkReport> {
     use chrono::{Local, TimeZone};
     let date = Local.timestamp_opt(started_at_s, 0).single()?.date_naive();
-    let date_str = date.format("%Y-%m-%d").to_string();
     let reports = client
         .list_work_reports(date, date, user_id, &[])
         .await
         .ok()?;
-    reports.into_iter().find(|r| {
-        r.task_id == task_id
-            && r.user_id == user_id
-            && r.minutes == minutes
-            && r.date_reported == date_str
-    })
+    reports
+        .into_iter()
+        .find(|r| freelo_report_matches(r, task_id, user_id, minutes, date))
+}
+
+/// Parse Freelo's `date_reported` into a calendar date. The API returns it
+/// either as a full RFC3339 timestamp (`2026-05-26T09:00:00+02:00`) or a bare
+/// `YYYY-MM-DD`; both must be accepted.
+fn freelo_report_date(date_reported: &str) -> Option<chrono::NaiveDate> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_reported) {
+        return Some(dt.date_naive());
+    }
+    chrono::NaiveDate::parse_from_str(date_reported, "%Y-%m-%d").ok()
+}
+
+/// Does an existing Freelo report match the local intent we're about to POST?
+/// Keyed on task + author + rounded minutes + the calendar day. The day is
+/// compared as a parsed date, NOT a string — Freelo returns a full timestamp,
+/// so the old `date_reported == "YYYY-MM-DD"` string compare never matched and
+/// the dedup silently re-POSTed (double-billing).
+fn freelo_report_matches(
+    r: &crate::freelo::models::FreeloWorkReport,
+    task_id: i64,
+    user_id: i64,
+    minutes: i64,
+    target_date: chrono::NaiveDate,
+) -> bool {
+    r.task_id == task_id
+        && r.user_id == user_id
+        && r.minutes == minutes
+        && freelo_report_date(&r.date_reported) == Some(target_date)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::freelo::models::FreeloWorkReport;
+    use chrono::NaiveDate;
+
+    fn report(date_reported: &str, minutes: i64) -> FreeloWorkReport {
+        FreeloWorkReport {
+            id: 1,
+            task_id: 100,
+            task_name: None,
+            minutes,
+            date_reported: date_reported.to_string(),
+            description: None,
+            user_id: 7,
+        }
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn freelo_report_date_parses_both_forms() {
+        assert_eq!(freelo_report_date("2026-05-26"), Some(day(2026, 5, 26)));
+        assert_eq!(
+            freelo_report_date("2026-05-26T09:00:00+02:00"),
+            Some(day(2026, 5, 26))
+        );
+        assert_eq!(freelo_report_date("garbage"), None);
+    }
+
+    #[test]
+    fn matches_rfc3339_timestamp_date_reported() {
+        // Regression: the API returns a full timestamp; the old string compare
+        // against "YYYY-MM-DD" never matched, so dedup re-POSTed every retry.
+        let r = report("2026-05-26T09:00:00+02:00", 30);
+        assert!(freelo_report_matches(&r, 100, 7, 30, day(2026, 5, 26)));
+    }
+
+    #[test]
+    fn matches_bare_date_reported() {
+        let r = report("2026-05-26", 30);
+        assert!(freelo_report_matches(&r, 100, 7, 30, day(2026, 5, 26)));
+    }
+
+    #[test]
+    fn rejects_on_any_key_mismatch() {
+        let r = report("2026-05-26T09:00:00+02:00", 30);
+        let d = day(2026, 5, 26);
+        assert!(!freelo_report_matches(&r, 999, 7, 30, d), "task");
+        assert!(!freelo_report_matches(&r, 100, 8, 30, d), "user");
+        assert!(!freelo_report_matches(&r, 100, 7, 45, d), "minutes");
+        assert!(!freelo_report_matches(&r, 100, 7, 30, day(2026, 5, 27)), "date");
+    }
 }
