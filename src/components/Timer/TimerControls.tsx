@@ -45,6 +45,10 @@ export function StopDialog({
   const [comment, setComment] = useState("");
   const [showStartEditor, setShowStartEditor] = useState(false);
   const [stagedStart, setStagedStart] = useState<number>(active.started_at);
+  // Synchronous in-flight guard: `busy` (from the store) only flips a tick
+  // later, so without this a fast double-click fires onConfirm twice → two
+  // stops → duplicate worklog.
+  const [submitting, setSubmitting] = useState(false);
   const now = useNow(1000);
 
   // Reset internal state whenever the dialog is (re)opened for a fresh timer.
@@ -53,6 +57,7 @@ export function StopDialog({
       setComment("");
       setShowStartEditor(false);
       setStagedStart(active.started_at);
+      setSubmitting(false);
     }
   }, [open, active.started_at]);
 
@@ -60,12 +65,19 @@ export function StopDialog({
 
   const stagedElapsed = Math.max(0, Math.floor((now - stagedStart) / 1000));
   const startChanged = stagedStart !== active.started_at;
+  const locked = busy || submitting;
 
   const handleConfirm = async () => {
-    await onConfirm({
-      comment: comment.trim(),
-      startedAtMs: startChanged ? stagedStart : null,
-    });
+    if (locked) return;
+    setSubmitting(true);
+    try {
+      await onConfirm({
+        comment: comment.trim(),
+        startedAtMs: startChanged ? stagedStart : null,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -75,7 +87,7 @@ export function StopDialog({
       aria-label="Zastavit časomíru"
       className="fixed inset-0 z-50 bg-[var(--bg-overlay)] backdrop-blur-sm flex items-center justify-center p-6"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy) onClose();
+        if (e.target === e.currentTarget && !locked) onClose();
       }}
     >
       <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-md p-5 flex flex-col gap-4">
@@ -122,7 +134,7 @@ export function StopDialog({
               onClick={async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (busy) return;
+                if (locked) return;
                 try {
                   await onDiscard();
                 } catch (err) {
@@ -130,7 +142,7 @@ export function StopDialog({
                   console.error("[StopDialog] onDiscard failed:", err);
                 }
               }}
-              disabled={busy}
+              disabled={locked}
               title="Zruší časomíru bez uložení worklogu"
               className="text-xs text-[var(--danger)] hover:underline underline-offset-2 disabled:opacity-50 px-1 py-0.5"
             >
@@ -140,11 +152,11 @@ export function StopDialog({
             <span />
           )}
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={onClose} disabled={busy}>
+            <Button variant="secondary" onClick={onClose} disabled={locked}>
               Zavřít
             </Button>
-            <Button variant="primary" onClick={handleConfirm} disabled={busy}>
-              {busy && <Spinner className="w-3.5 h-3.5" />}
+            <Button variant="primary" onClick={handleConfirm} disabled={locked}>
+              {locked && <Spinner className="w-3.5 h-3.5" />}
               Zastavit a uložit
             </Button>
           </div>
