@@ -9,19 +9,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Play, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 
 import {
   getSmartSuggestionsEnabled,
   getSuggestions,
-  startTimer,
   type Suggestion,
 } from "../../api/commands";
+import type { ShellOutletContext } from "../Layout/AppShell";
 import { formatIsoDate } from "../../lib/dates";
 import { useTimerStore } from "../../stores/timerStore";
 
 const DISMISS_KEY_PREFIX = "tracker.suggestion.dismissed:";
 
 export function SuggestionBanner() {
+  // `null` outside a router outlet (unit tests / web preview).
+  const ctx = useOutletContext<ShellOutletContext | null>();
   const active = useTimerStore((s) => s.active);
   // Backend pref: when the user toggles smart suggestions off in Settings,
   // the banner stays out of the DOM entirely (no fetch, no skeleton).
@@ -69,10 +72,16 @@ export function SuggestionBanner() {
   const top = visible[0];
 
   const handleAccept = async () => {
+    // Go through the store (not the raw command) so `active` updates even if the
+    // `timer-started` event is missed, and surface failures instead of
+    // swallowing them.
     try {
-      await startTimer(top.issue_key, Date.now());
-    } catch {
-      /* swallow */
+      await useTimerStore.getState().start(top.issue_key);
+    } catch (e) {
+      ctx?.pushToast?.(
+        "error",
+        typeof e === "string" ? e : "Nepodařilo se spustit časomíru.",
+      );
     }
   };
   const handleDismiss = () => {
