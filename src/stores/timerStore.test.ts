@@ -10,19 +10,27 @@ vi.mock("../api/commands", () => ({
   stopTimer: vi.fn(),
   updateTimerStart: vi.fn(),
   updateTimerComment: vi.fn(),
+  assignActiveTimer: vi.fn(),
 }));
 
 import * as commands from "../api/commands";
 import { elapsedSeconds, useTimerStore } from "./timerStore";
 
-const { getTimerState, startTimer, stopTimer, updateTimerStart, updateTimerComment } =
-  commands as unknown as {
-    getTimerState: ReturnType<typeof vi.fn>;
-    startTimer: ReturnType<typeof vi.fn>;
-    stopTimer: ReturnType<typeof vi.fn>;
-    updateTimerStart: ReturnType<typeof vi.fn>;
-    updateTimerComment: ReturnType<typeof vi.fn>;
-  };
+const {
+  getTimerState,
+  startTimer,
+  stopTimer,
+  updateTimerStart,
+  updateTimerComment,
+  assignActiveTimer,
+} = commands as unknown as {
+  getTimerState: ReturnType<typeof vi.fn>;
+  startTimer: ReturnType<typeof vi.fn>;
+  stopTimer: ReturnType<typeof vi.fn>;
+  updateTimerStart: ReturnType<typeof vi.fn>;
+  updateTimerComment: ReturnType<typeof vi.fn>;
+  assignActiveTimer: ReturnType<typeof vi.fn>;
+};
 
 function resetStore() {
   useTimerStore.setState({ active: null, busy: false, error: null });
@@ -36,6 +44,7 @@ describe("timerStore", () => {
     stopTimer.mockReset();
     updateTimerStart.mockReset();
     updateTimerComment.mockReset();
+    assignActiveTimer.mockReset();
   });
 
   it("hydrate writes the backend snapshot into the store", async () => {
@@ -126,6 +135,41 @@ describe("timerStore", () => {
   it("setComment no-ops when no timer is running", async () => {
     await useTimerStore.getState().setComment("hello");
     expect(updateTimerComment).not.toHaveBeenCalled();
+  });
+
+  it("assign reassigns the running timer and keeps it running", async () => {
+    useTimerStore.setState({
+      active: { issue_key: "A-1", started_at: 1000, elapsed_seconds: 42 },
+    });
+    assignActiveTimer.mockResolvedValueOnce({
+      issue_key: "B-2",
+      started_at: 1000,
+      elapsed_seconds: 42,
+    });
+    await useTimerStore.getState().assign("B-2");
+    expect(assignActiveTimer).toHaveBeenCalledWith("B-2");
+    // Reassigned to the new issue, but the original start time (and thus the
+    // elapsed clock) is preserved by the backend.
+    expect(useTimerStore.getState().active?.issue_key).toBe("B-2");
+    expect(useTimerStore.getState().active?.started_at).toBe(1000);
+    expect(useTimerStore.getState().busy).toBe(false);
+  });
+
+  it("assign records error and rethrows on failure", async () => {
+    useTimerStore.setState({
+      active: { issue_key: "A-1", started_at: 0, elapsed_seconds: 10 },
+    });
+    assignActiveTimer.mockRejectedValueOnce("nope");
+    await expect(useTimerStore.getState().assign("B-2")).rejects.toBe("nope");
+    expect(useTimerStore.getState().error).toBe("nope");
+    expect(useTimerStore.getState().busy).toBe(false);
+    // The original timer is left intact when the reassignment fails.
+    expect(useTimerStore.getState().active?.issue_key).toBe("A-1");
+  });
+
+  it("assign no-ops when no timer is running", async () => {
+    await useTimerStore.getState().assign("B-2");
+    expect(assignActiveTimer).not.toHaveBeenCalled();
   });
 });
 

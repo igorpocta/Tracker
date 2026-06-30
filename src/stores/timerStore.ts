@@ -16,6 +16,7 @@
 import { create } from "zustand";
 
 import {
+  assignActiveTimer as invokeAssign,
   getTimerState,
   startTimer as invokeStart,
   stopTimer as invokeStop,
@@ -44,6 +45,12 @@ export interface TimerStoreActions {
   start: (issueKey: string, comment?: string | null) => Promise<void>;
   /** Update the in-flight comment on the running timer. */
   setComment: (comment: string | null) => Promise<void>;
+  /**
+   * Reassign the running timer to a different issue without stopping it. The
+   * backend preserves `started_at` and the in-flight comment, so the elapsed
+   * clock keeps running — used to fix a wrong/blank task mid-tracking.
+   */
+  assign: (issueKey: string) => Promise<void>;
   /** Stop the active timer with an optional comment. */
   stop: (comment?: string) => Promise<WorklogRow | null>;
   /** Adjust the start time of the running timer (ms since epoch). */
@@ -88,6 +95,18 @@ export const useTimerStore = create<TimerStore>((set, get) => ({
       set({ active: next });
     } catch (e) {
       set({ error: errMessage(e) });
+    }
+  },
+
+  assign: async (issueKey) => {
+    if (!get().active) return;
+    set({ busy: true, error: null });
+    try {
+      const next = await invokeAssign(issueKey);
+      set({ active: next, busy: false });
+    } catch (e) {
+      set({ busy: false, error: errMessage(e) });
+      throw e;
     }
   },
 

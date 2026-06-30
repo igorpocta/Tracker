@@ -266,6 +266,22 @@ pub fn for_date_range(
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+/// All unassigned worklogs (`issue_key IS NULL`) that still need a task before
+/// they can go on an invoice. Tombstoned and pending-delete rows are excluded.
+/// Ordered most recent first. Powers the "Nepřiřazené" screen + sidebar badge.
+pub fn list_unassigned(db: &Db) -> Result<Vec<WorklogRow>, DbError> {
+    let conn = db.pool().get()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SELECT_COLS} {FROM_JOIN}
+         WHERE w.issue_key IS NULL
+           AND w.tombstoned_at IS NULL
+           AND w.pending_delete_at IS NULL
+         ORDER BY w.started_at DESC"
+    ))?;
+    let rows = stmt.query_map([], row_to_worklog)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 /// Diagnostic variant that includes tombstoned rows. Used by the
 /// mark-and-sweep logic and audit views.
 pub fn for_date_range_including_tombstoned(
@@ -579,4 +595,74 @@ fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
         // been synced into the issues cache yet.
         summary: r.get(13)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::Db;
+    use tempfile::tempdir;
+
+    fn open_db() -> Db {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("wl.db");
+        std::mem::forget(dir);
+        Db::open(&path).unwrap()
+    }
+
+    fn mk(issue_key: Option<&str>, started_at: i64) -> WorklogRow {
+        WorklogRow {
+            id: None,
+            connection_id: None,
+            issue_key: issue_key.map(|s| s.to_string()),
+            description: None,
+            started_at,
+            ended_at: started_at + 60,
+            logged_at: started_at,
+            updated_at: started_at,
+            is_synced: false,
+            synced_at: None,
+            remote_id: None,
+            pending_delete_at: None,
+            tombstoned_at: None,
+            summary: None,
+        }
+    }
+
+    #[test]
+    fn list_unassigned_returns_only_keyless_rows() {
+        let db = open_db();
+        record(&db, &mk(Some("DEV-1"), 100)).unwrap();
+        record(&db, &mk(None, 200)).unwrap();
+        let out = list_unassigned(&db).unwrap();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].issue_key.is_none());
+        assert_eq!(out[0].started_at, 200);
+    }
+
+    #[test]
+    fn list_unassigned_orders_newest_first() {
+        let db = open_db();
+        record(&db, &mk(None, 100)).unwrap();
+        record(&db, &mk(None, 300)).unwrap();
+        record(&db, &mk(None, 200)).unwrap();
+        let out = list_unassigned(&db).unwrap();
+        let starts: Vec<i64> = out.iter().map(|w| w.started_at).collect();
+        assert_eq!(starts, vec![300, 200, 100]);
+    }
+
+    #[test]
+    fn list_unassigned_excludes_tombstoned_and_pending_delete() {
+        let db = open_db();
+        let mut tomb = mk(None, 100);
+        tomb.tombstoned_at = Some(1);
+        record(&db, &tomb).unwrap();
+        let mut pend = mk(None, 200);
+        pend.pending_delete_at = Some(1);
+        record(&db, &pend).unwrap();
+        record(&db, &mk(None, 300)).unwrap();
+        let out = list_unassigned(&db).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].started_at, 300);
+    }
 }

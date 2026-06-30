@@ -11,6 +11,7 @@
  * StartTrackingBar, so behaviour is consistent.
  */
 import { Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
 
 import { useClickOutside } from "../../hooks/useClickOutside";
@@ -19,12 +20,35 @@ import { useIssueSearch } from "../../hooks/useIssueSearch";
 
 const LIMIT = 12;
 
+export interface IssuePickerTriggerArgs {
+  /** Whether the popover is currently open. */
+  open: boolean;
+  /** Toggle the popover open/closed. */
+  toggle: () => void;
+  /** True while an `onPick` call is in-flight. */
+  busy: boolean;
+}
+
 export interface IssuePickerProps {
   onPick: (issueKey: string) => Promise<void> | void;
   disabled?: boolean;
+  /**
+   * Custom trigger renderer. When omitted, the default dashed
+   * "Přiřadit úkol" button is used (worklog-row variant). Supply this to
+   * reuse the picker behind a different control — e.g. the running-timer
+   * issue chip in `StartTrackingBar`.
+   */
+  renderTrigger?: (args: IssuePickerTriggerArgs) => ReactNode;
+  /** Wrapper class — defaults to `relative shrink-0`. */
+  className?: string;
 }
 
-export function IssuePicker({ onPick, disabled = false }: IssuePickerProps) {
+export function IssuePicker({
+  onPick,
+  disabled = false,
+  renderTrigger,
+  className = "relative shrink-0",
+}: IssuePickerProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -50,24 +74,30 @@ export function IssuePicker({ onPick, disabled = false }: IssuePickerProps) {
     }
   };
 
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+
   return (
-    <div ref={containerRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled || busy}
-        title="Přiřadit úkol k záznamu"
-        className="inline-flex items-center gap-1 px-2 h-6 rounded-full
-                   font-mono text-[10px] uppercase tracking-[0.08em]
-                   border border-dashed text-[var(--text-tertiary)]
-                   hover:text-[var(--accent)] hover:border-[var(--accent)]
-                   disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-colors duration-150"
-        style={{ borderColor: "var(--border-default)" }}
-      >
-        <Plus className="w-3 h-3" aria-hidden />
-        Přiřadit úkol
-      </button>
+    <div ref={containerRef} className={className}>
+      {renderTrigger ? (
+        renderTrigger({ open, toggle, busy })
+      ) : (
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={disabled || busy}
+          title="Přiřadit úkol k záznamu"
+          className="inline-flex items-center gap-1 px-2 h-6 rounded-full
+                     font-mono text-[10px] uppercase tracking-[0.08em]
+                     border border-dashed text-[var(--text-tertiary)]
+                     hover:text-[var(--accent)] hover:border-[var(--accent)]
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors duration-150"
+          style={{ borderColor: "var(--border-default)" }}
+        >
+          <Plus className="w-3 h-3" aria-hidden />
+          Přiřadit úkol
+        </button>
+      )}
 
       {open && (
         <div

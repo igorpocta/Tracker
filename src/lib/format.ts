@@ -40,6 +40,23 @@ export function formatDurationShort(seconds: number): string {
   return `${s}s`;
 }
 
+/**
+ * Pick the correct Czech plural form for a count. Czech has three forms:
+ *   - `one`  → exactly 1            (1 záznam)
+ *   - `few`  → 2, 3, 4             (2 záznamy)
+ *   - `many` → 0 and 5+            (5 záznamů)
+ * Pass the forms as `[one, few, many]`.
+ */
+export function pluralCs(
+  n: number,
+  [one, few, many]: [string, string, string],
+): string {
+  const abs = Math.abs(Math.trunc(n));
+  if (abs === 1) return one;
+  if (abs >= 2 && abs <= 4) return few;
+  return many;
+}
+
 /** Format hours like `7.5h` with one decimal, trimming trailing zero. */
 export function formatHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return "0h";

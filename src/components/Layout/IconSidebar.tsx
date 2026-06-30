@@ -24,6 +24,7 @@ import {
   CalendarDays,
   Clock,
   History,
+  Inbox,
   LayoutDashboard,
   Loader2,
   Settings as SettingsIcon,
@@ -37,6 +38,7 @@ import {
   getCacheStats,
   getSyncErrors,
   listConnections,
+  listUnassignedWorklogs,
   refreshAll,
 } from "../../api/commands";
 import { useNow } from "../../hooks/useNow";
@@ -49,10 +51,17 @@ export interface IconSidebarItem {
   label: string;
   icon: ReactNode;
   end?: boolean;
+  /** Optional count badge (e.g. unassigned worklogs). Hidden when falsy/0. */
+  badge?: number;
 }
 
 const PRIMARY_NAV_BASE: IconSidebarItem[] = [
   { to: "/", label: "Časový záznam", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
+  {
+    to: "/unassigned",
+    label: "Nepřiřazené",
+    icon: <Inbox className="w-5 h-5" aria-hidden />,
+  },
   { to: "/reports", label: "Reporty", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
   { to: "/calendar", label: "Kalendář", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
   { to: "/goals", label: "Cíle", icon: <Target className="w-5 h-5" aria-hidden /> },
@@ -96,9 +105,23 @@ export function IconSidebar() {
       c.enabled &&
       (c.config as Record<string, unknown>)?.["dashboard_enabled"] === true,
   );
-  const primaryNav: IconSidebarItem[] = hasDashboardConnection
+
+  // Unassigned-worklog count → badge on the "Nepřiřazené" item. Shares the
+  // query key with the screen, so assigning a row refreshes both. The badge
+  // is the passive nag that stops worklogs slipping off the invoice.
+  const unassignedQ = useQuery({
+    queryKey: queryKeys.worklogs.unassigned(),
+    queryFn: listUnassignedWorklogs,
+    staleTime: 10_000,
+  });
+  const unassignedCount = unassignedQ.data?.length ?? 0;
+
+  const baseNav = hasDashboardConnection
     ? [...PRIMARY_NAV_BASE, JIRA_DASHBOARD_NAV]
     : PRIMARY_NAV_BASE;
+  const primaryNav: IconSidebarItem[] = baseNav.map((it) =>
+    it.to === "/unassigned" ? { ...it, badge: unassignedCount } : it,
+  );
 
   // Persistovaný stav posledně neúspěšného syncu — pokud je seznam neprázdný,
   // ring se přebarví červeně a v tooltipu vidíš co padlo. Vyčistí se hned, jak
@@ -262,6 +285,18 @@ function SidebarLink({ item }: { item: IconSidebarItem }) {
       }
     >
       <span className="pointer-events-none">{item.icon}</span>
+      {item.badge != null && item.badge > 0 && (
+        <span
+          aria-label={`${item.badge} nepřiřazených`}
+          className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1
+                     flex items-center justify-center rounded-full
+                     text-[10px] font-mono font-semibold leading-none
+                     text-white pointer-events-none"
+          style={{ background: "var(--danger)" }}
+        >
+          {item.badge > 99 ? "99+" : item.badge}
+        </span>
+      )}
       <SidebarTooltip label={item.label} />
     </NavLink>
   );

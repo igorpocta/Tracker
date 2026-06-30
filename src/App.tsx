@@ -22,6 +22,7 @@ import Reports from "./routes/Reports";
 import Settings from "./routes/Settings";
 import Setup from "./routes/Setup";
 import TimeLog from "./routes/TimeLog";
+import Unassigned from "./routes/Unassigned";
 
 /**
  * Shared QueryClient instance. Sensible defaults for a desktop app:
@@ -106,6 +107,7 @@ export default function App() {
             {/* Everything else lives inside the shell. */}
             <Route element={<AppShell />}>
               <Route index element={<TimeLog />} />
+              <Route path="/unassigned" element={<Unassigned />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/goals" element={<Goals />} />

@@ -25,7 +25,6 @@ import { useLocation, useOutletContext } from "react-router-dom";
 
 import { invalidateWorklogQueries, queryKeys } from "../api/queryKeys";
 import {
-  assignWorklogIssue,
   createManualWorklog,
   deleteWorklog,
   deleteLocalOnlyWorklog,
@@ -53,11 +52,33 @@ import {
   startOfDay,
   startOfWeek,
 } from "../lib/dates";
-import { formatDateCs, formatDurationShort } from "../lib/format";
+import { formatDateCs, formatDurationShort, formatWeekdayCs } from "../lib/format";
+import { useAssignWorklog } from "../hooks/useAssignWorklog";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import { usePrefsStore } from "../stores/prefsStore";
 
 type Mode = "day" | "week";
+
+/**
+ * Day-mode header label: Czech weekday name + date, with a relative prefix
+ * for adjacent days. Plain days lead with the capitalised weekday
+ * ("Čtvrtek · 14. 5. 2026"); relative days keep the prefix and lowercase the
+ * weekday after it ("Dnes · čtvrtek · 14. 5. 2026"). Exported for unit tests.
+ */
+export function dayHeaderLabel(selectedDate: Date, todayStart: Date): string {
+  const diffDays = Math.round(
+    (selectedDate.getTime() - todayStart.getTime()) / (24 * 3600 * 1000),
+  );
+  let prefix: string | null = null;
+  if (diffDays === 0) prefix = "Dnes";
+  else if (diffDays === -1) prefix = "Včera";
+  else if (diffDays === 1) prefix = "Zítra";
+  const weekday = formatWeekdayCs(selectedDate);
+  const fmt = formatDateCs(selectedDate);
+  return prefix
+    ? `${prefix} · ${weekday.toLowerCase()} · ${fmt}`
+    : `${weekday} · ${fmt}`;
+}
 
 function worklogUiKey(row: ApiWorklogRow): string {
   if (row.id != null) return `local:${row.id}`;
@@ -138,20 +159,13 @@ export default function TimeLog() {
     setSelectedDate(todayStart);
   }, [todayStart]);
 
-  /** Label shown in the header (e.g. "Dnes · čt 14.5." or "po 12.5. – ne 18.5."). */
+  /** Label shown in the header (e.g. "Dnes · čtvrtek · 14. 5. 2026" or
+   *  "12. 5. 2026 – 18. 5. 2026"). */
   const headerLabel = useMemo(() => {
     if (mode === "week") {
       return `${formatDateCs(from)} – ${formatDateCs(to)}`;
     }
-    const diffDays = Math.round(
-      (selectedDate.getTime() - todayStart.getTime()) / (24 * 3600 * 1000),
-    );
-    let prefix: string | null = null;
-    if (diffDays === 0) prefix = "Dnes";
-    else if (diffDays === -1) prefix = "Včera";
-    else if (diffDays === 1) prefix = "Zítra";
-    const fmt = formatDateCs(selectedDate);
-    return prefix ? `${prefix} · ${fmt}` : fmt;
+    return dayHeaderLabel(selectedDate, todayStart);
   }, [mode, selectedDate, todayStart, from, to]);
 
   const fromUnix = dayStartUnixS(from);
@@ -279,28 +293,11 @@ export default function TimeLog() {
   );
 
   // Assign an issue to a worklog that was created without one (timer stopped
-  // unassigned, or manual entry with empty issue). Calls the backend
-  // `assign_worklog_issue` command which:
-  //   - sets the row's issue_key
-  //   - clears pending_assignment
-  //   - if a Jira/Freelo client is configured, POSTs the worklog upstream
-  //     too so it stops being a "local only" record.
-  const handleAssign = useCallback(
-    async (row: ApiWorklogRow, issueKey: string) => {
-      if (row.id == null) return;
-      try {
-        await assignWorklogIssue(row.id, issueKey);
-        invalidateWorklogQueries(queryClient);
-        ctx.pushToast?.("success", `Záznam přiřazen na ${issueKey}.`);
-      } catch (e) {
-        ctx.pushToast?.(
-          "error",
-          typeof e === "string" ? e : "Přiřazení úkolu selhalo.",
-        );
-      }
-    },
-    [ctx, queryClient],
-  );
+  // unassigned, or manual entry with empty issue). Shared with the Nepřiřazené
+  // screen via `useAssignWorklog` — sets the issue_key, clears
+  // pending_assignment, POSTs upstream when a client is configured, and
+  // refreshes the worklog queries + unassigned badge.
+  const handleAssign = useAssignWorklog(ctx.pushToast);
 
   return (
     <PageContainer>

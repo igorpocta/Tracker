@@ -24,6 +24,7 @@ import { listFavorites } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import type { ActiveTimerState } from "../../api/types";
 import { FavoriteStar } from "../Favorites/FavoriteStar";
+import { IssuePicker } from "../Worklog/IssuePicker";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useIssueSearch } from "../../hooks/useIssueSearch";
 import { useNow } from "../../hooks/useNow";
@@ -42,6 +43,13 @@ export interface StartTrackingBarProps {
    * key). When omitted, the "Bez úkolu" button is hidden.
    */
   onStartUnassigned?: (comment: string) => void;
+  /**
+   * Reassign the running timer to a different issue. The parent owns the
+   * error handling (toast) — RunningBar must route through this rather than
+   * calling the rethrowing `timerStore.assign` directly, otherwise a failed
+   * reassign becomes an unhandled rejection with no user feedback.
+   */
+  onReassign?: (issueKey: string) => Promise<void> | void;
 }
 
 const LIMIT = 20;
@@ -52,12 +60,20 @@ export function StartTrackingBar({
   onPickIssue,
   onStop,
   onStartUnassigned,
+  onReassign,
 }: StartTrackingBarProps) {
   const active = useTimerStore((s) => s.active);
   const busy = useTimerStore((s) => s.busy);
 
   if (active) {
-    return <RunningBar active={active} busy={busy} onStop={onStop} />;
+    return (
+      <RunningBar
+        active={active}
+        busy={busy}
+        onStop={onStop}
+        onReassign={onReassign}
+      />
+    );
   }
 
   return <IdleBar onPickIssue={onPickIssue} onStartUnassigned={onStartUnassigned} />;
@@ -408,10 +424,12 @@ function RunningBar({
   active,
   busy,
   onStop,
+  onReassign,
 }: {
   active: ActiveTimerState;
   busy: boolean;
   onStop?: () => void;
+  onReassign?: (issueKey: string) => Promise<void> | void;
 }) {
   const now = useNow(1000);
   const elapsed = elapsedSeconds(active, now);
@@ -455,32 +473,49 @@ function RunningBar({
             unassigned ? "bg-red-500" : "bg-[var(--accent)]",
           )}
         />
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span
-            className={clsx(
-              "font-mono text-[11px] uppercase tracking-[0.08em] shrink-0",
-              unassigned ? "text-red-500" : "text-[var(--accent)]",
-            )}
-          >
-            {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
-          </span>
-          {!unassigned && active.summary && active.summary.trim().length > 0 && (
-            <>
+        <IssuePicker
+          className="relative min-w-0 flex-1"
+          onPick={(key) => onReassign?.(key)}
+          renderTrigger={({ toggle, busy: picking }) => (
+            <button
+              type="button"
+              onClick={toggle}
+              disabled={picking}
+              title="Změnit úkol běžící časomíry"
+              className="group flex items-center gap-2 min-w-0 w-full text-left
+                         rounded-[var(--radius-sm)] -mx-1 px-1 py-0.5
+                         hover:bg-[var(--bg-hover)] transition-colors duration-150
+                         disabled:opacity-60 disabled:cursor-progress"
+            >
               <span
-                aria-hidden
-                className="text-[var(--text-tertiary)] text-xs shrink-0"
+                className={clsx(
+                  "font-mono text-[11px] uppercase tracking-[0.08em] shrink-0",
+                  unassigned ? "text-red-500" : "text-[var(--accent)]",
+                )}
               >
-                ·
+                {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
               </span>
-              <span
-                className="text-sm text-[var(--text-primary)] truncate"
-                title={active.summary}
-              >
-                {active.summary}
-              </span>
-            </>
+              {!unassigned &&
+                active.summary &&
+                active.summary.trim().length > 0 && (
+                  <>
+                    <span
+                      aria-hidden
+                      className="text-[var(--text-tertiary)] text-xs shrink-0"
+                    >
+                      ·
+                    </span>
+                    <span
+                      className="text-sm text-[var(--text-primary)] truncate"
+                      title={active.summary}
+                    >
+                      {active.summary}
+                    </span>
+                  </>
+                )}
+            </button>
           )}
-        </div>
+        />
         {editingComment ? (
           <input
             type="text"

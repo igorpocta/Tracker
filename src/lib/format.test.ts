@@ -8,6 +8,7 @@ import {
   formatMoney,
   formatRelativeTime,
   isToday,
+  pluralCs,
 } from "./format";
 
 describe("formatDuration", () => {
@@ -139,5 +140,26 @@ describe("isToday", () => {
     const now = new Date(2024, 4, 14, 0, 0, 0);
     const yesterday = new Date(2024, 4, 13, 23, 30, 0).getTime() / 1000;
     expect(isToday(yesterday, now)).toBe(false);
+  });
+});
+
+describe("pluralCs", () => {
+  const forms: [string, string, string] = ["záznam", "záznamy", "záznamů"];
+
+  it("uses the singular form for exactly 1", () => {
+    expect(pluralCs(1, forms)).toBe("záznam");
+  });
+
+  it("uses the 2–4 form for 2, 3 and 4", () => {
+    expect(pluralCs(2, forms)).toBe("záznamy");
+    expect(pluralCs(3, forms)).toBe("záznamy");
+    expect(pluralCs(4, forms)).toBe("záznamy");
+  });
+
+  it("uses the genitive-plural form for 0 and 5+", () => {
+    expect(pluralCs(0, forms)).toBe("záznamů");
+    expect(pluralCs(5, forms)).toBe("záznamů");
+    expect(pluralCs(11, forms)).toBe("záznamů");
+    expect(pluralCs(25, forms)).toBe("záznamů");
   });
 });

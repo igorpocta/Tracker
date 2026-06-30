@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorklogRow } from "../../api/types";
-import { bucketize, canvasXToTimeMs } from "./DayTimeline";
+import { bucketize, canvasXToTimeMs, formatRangeLabel } from "./DayTimeline";
 
 function mkRow(startISO: string, durationSeconds: number): WorklogRow {
   return {
@@ -102,5 +102,26 @@ describe("canvasXToTimeMs", () => {
     const ms = canvasXToTimeMs(-50, 1000, day);
     const expected = new Date("2026-05-14T06:00:00").getTime();
     expect(ms).toBe(expected);
+  });
+});
+
+describe("formatRangeLabel", () => {
+  const at = (h: number, m: number) =>
+    new Date(2026, 4, 14, h, m, 0, 0).getTime();
+
+  it("shows start, end and duration for a drag range", () => {
+    expect(formatRangeLabel(at(15, 10), at(15, 40))).toBe(
+      "15:10 – 15:40 · 30m",
+    );
+  });
+
+  it("formats multi-hour durations", () => {
+    expect(formatRangeLabel(at(9, 0), at(10, 30))).toBe("09:00 – 10:30 · 1h 30m");
+  });
+
+  it("normalises reversed bounds (drag right-to-left)", () => {
+    expect(formatRangeLabel(at(15, 40), at(15, 10))).toBe(
+      "15:10 – 15:40 · 30m",
+    );
   });
 });

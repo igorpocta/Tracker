@@ -57,6 +57,15 @@ pub async fn get_worklogs_for_range(
     cache::worklogs::for_date_range(&state.db, from_unix_s, to_unix_s).map_err(|e| e.to_string())
 }
 
+/// Return all unassigned worklogs (no issue key yet) so the user can review and
+/// assign them before invoicing. Backs the "Nepřiřazené" screen + sidebar badge.
+#[tauri::command]
+pub async fn list_unassigned_worklogs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<WorklogRow>, String> {
+    cache::worklogs::list_unassigned(&state.db).map_err(|e| e.to_string())
+}
+
 /// Split worklog: existující záznam rozdělit na dvě části — první kus
 /// zůstane na původním úkolu, druhý kus dostane nový `new_issue_key`.
 ///

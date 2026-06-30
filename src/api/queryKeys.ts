@@ -50,6 +50,9 @@ export const queryKeys = {
     history: () => ["worklogs", "history"] as const,
     range: (fromUnix: number, toUnix: number) =>
       ["worklogs", "range", fromUnix, toUnix] as const,
+    /** Unassigned worklogs (no issue key) — "Nepřiřazené" screen + badge.
+     *  Under the `worklogs` prefix so `invalidateWorklogQueries` refreshes it. */
+    unassigned: () => ["worklogs", "unassigned"] as const,
   },
 
   /** "Recently changed" issues (provider-side) shown in the sidebar. */

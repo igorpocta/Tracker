@@ -552,6 +552,14 @@ export function getWorklogsForRange(
   });
 }
 
+/**
+ * All unassigned worklogs (no issue key yet). Backs the "Nepřiřazené" review
+ * screen and the sidebar badge so worklogs don't get missed at invoice time.
+ */
+export function listUnassignedWorklogs(): Promise<WorklogRow[]> {
+  return invoke<WorklogRow[]>("list_unassigned_worklogs");
+}
+
 // -----------------------------------------------------------------------------
 // Worklog mutations (Phase 15)
 // -----------------------------------------------------------------------------

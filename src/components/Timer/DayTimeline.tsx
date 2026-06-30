@@ -16,9 +16,11 @@
  *   06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22
  *           [DEV-792==========][DEV-304========][DEV-926=]
  */
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { WorklogRow } from "../../api/types";
+import { formatHHMM } from "../../lib/dates";
 import { formatDurationShort } from "../../lib/format";
 
 /** First hour shown on the axis. */
@@ -89,9 +91,23 @@ export function DayTimeline({
   const segmentsRef = useRef<Segment[]>([]);
   const [hover, setHover] = useState<Hover | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Kurzor nad prázdným místem osy → čas v daném bodě (kde by nový záznam
+  // začal). `null` když je kurzor mimo track / nad segmentem / při tažení.
+  const [cursor, setCursor] = useState<{ x: number; timeMs: number } | null>(
+    null,
+  );
+  // Poslední změřená CSS šířka canvasu — pro převod drag px → čas v overlay
+  // popiscích bez nutnosti znovu sahat na DOM při renderu.
+  const cssWidthRef = useRef(0);
 
   // Segmenty se přepočítají při změně rows / day.
   segmentsRef.current = buildSegments(rows, day);
+
+  // Canvas highlight depends only on WHICH segment is hovered, not the cursor's
+  // x within it. Deriving the index keeps `draw` from being rebuilt (and the
+  // canvas from being repainted) on every pixel of mouse movement — the tooltip
+  // position lives in the DOM overlay, which can move without a repaint.
+  const hoveredSeg = hover?.segIdx ?? -1;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -99,6 +115,7 @@ export function DayTimeline({
     if (!canvas || !host) return;
     const dpr = window.devicePixelRatio || 1;
     const cssWidth = host.clientWidth;
+    cssWidthRef.current = cssWidth;
     const cssHeight = AXIS_HEIGHT + ROW_HEIGHT;
     canvas.width = Math.round(cssWidth * dpr);
     canvas.height = Math.round(cssHeight * dpr);
@@ -157,7 +174,7 @@ export function DayTimeline({
       const seg = segmentsRef.current[idx];
       const x = (seg.leftFrac / totalHours) * cssWidth;
       const w = Math.max((seg.widthFrac / totalHours) * cssWidth, 1);
-      const isHovered = hover?.segIdx === idx;
+      const isHovered = hoveredSeg === idx;
       ctx.fillStyle = isHovered ? accentHover : accent;
       roundRect(ctx, x, trackY + 2, w, ROW_HEIGHT - 4, SEGMENT_RADIUS);
       ctx.fill();
@@ -199,7 +216,7 @@ export function DayTimeline({
         ctx.fillRect(x2 - 0.5, trackY, 1, ROW_HEIGHT);
       }
     }
-  }, [drag, hover]);
+  }, [drag, hoveredSeg]);
 
   // Redraw při změně props i okenní velikosti.
   useEffect(() => {
@@ -249,14 +266,27 @@ export function DayTimeline({
             const idx = segAtPoint(x, y);
             if (drag) {
               setDrag({ ...drag, currentCanvasX: x });
-            } else if (idx !== hover?.segIdx) {
-              setHover(idx >= 0 ? { segIdx: idx, canvasX: x } : null);
-            } else if (idx >= 0) {
+              return;
+            }
+            const inTrack = y >= AXIS_HEIGHT && y <= AXIS_HEIGHT + ROW_HEIGHT;
+            if (idx >= 0) {
+              // Nad segmentem → tooltip se záznamem, žádná časová bublina.
               setHover({ segIdx: idx, canvasX: x });
+              if (cursor) setCursor(null);
+            } else {
+              if (hover) setHover(null);
+              // Prázdné místo v tracku → ukaž čas pod kurzorem (jen když lze
+              // zakládat nové záznamy).
+              if (inTrack && onCreateRequest) {
+                setCursor({ x, timeMs: canvasXToTimeMs(x, rect.width, day) });
+              } else if (cursor) {
+                setCursor(null);
+              }
             }
           }}
           onMouseLeave={() => {
             setHover(null);
+            setCursor(null);
             // Don't clear drag — uživatel může cursor vyjet ven a vrátit zpět.
           }}
           onMouseDown={(e) => {
@@ -264,6 +294,7 @@ export function DayTimeline({
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             const idx = segAtPoint(x, y);
+            setCursor(null);
             if (idx >= 0) {
               const seg = segmentsRef.current[idx];
               // Drag-to-split jen u lokálních (nesyncovaných) záznamů.
@@ -335,11 +366,56 @@ export function DayTimeline({
             x={hover.canvasX}
           />
         )}
+        {cursor && !drag && (
+          <CursorTime x={cursor.x} timeMs={cursor.timeMs} />
+        )}
+        {drag?.kind === "create" && (
+          <CreateDragLabel drag={drag} day={day} cssWidth={cssWidthRef.current} />
+        )}
       </div>
       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
-        Klikni pro zvýraznění. U lokálních záznamů můžeš tažením rozdělit
-        blok na dva úkoly.
+        Klikni pro zvýraznění. Tažením přes prázdné místo založíš nový záznam
+        — čas u kurzoru ukazuje začátek, konec a dobu trvání. U lokálních
+        záznamů můžeš tažením rozdělit blok na dva úkoly.
       </div>
+    </div>
+  );
+}
+
+/**
+ * Floating label box anchored above a timeline x-position. Shared chrome for
+ * the segment tooltip, the cursor-time bubble and the create-drag range label
+ * so the look (bg/border/shadow/offset) lives in one place. `gap` is the px
+ * lift above the anchor; `top` is the anchor's y (0 = canvas top).
+ */
+function TimelineBubble({
+  x,
+  top = 0,
+  gap = 6,
+  className = "",
+  children,
+}: {
+  x: number;
+  top?: number;
+  gap?: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="tooltip"
+      className={`absolute pointer-events-none z-20 rounded-[var(--radius-sm)] whitespace-nowrap ${className}`}
+      style={{
+        left: `${x}px`,
+        top: `${top}px`,
+        transform: `translate(-50%, calc(-100% - ${gap}px))`,
+        background: "var(--bg-elevated)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-default)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -353,19 +429,7 @@ function CanvasTooltip({
 }) {
   if (!row) return null;
   return (
-    <div
-      role="tooltip"
-      className="absolute pointer-events-none z-20 px-2 py-1.5
-                 rounded-[var(--radius-sm)] text-[11px] whitespace-nowrap"
-      style={{
-        left: `${x}px`,
-        transform: "translate(-50%, calc(-100% - 6px))",
-        background: "var(--bg-elevated)",
-        color: "var(--text-primary)",
-        border: "1px solid var(--border-default)",
-        boxShadow: "var(--shadow-sm)",
-      }}
-    >
+    <TimelineBubble x={x} gap={6} className="px-2 py-1.5 text-[11px]">
       <div className="font-medium">{row.issue_key ?? "(bez úkolu)"}</div>
       {row.summary && (
         <div className="text-[var(--text-tertiary)] max-w-[260px] truncate">
@@ -375,7 +439,67 @@ function CanvasTooltip({
       <div className="text-[var(--accent)] font-mono tabular-nums">
         {formatDurationShort(row.duration_s)}
       </div>
-    </div>
+    </TimelineBubble>
+  );
+}
+
+/**
+ * Malá časová bublina nad kurzorem na prázdném místě osy + tenké svislé
+ * vodítko. Říká uživateli, v kolik hodin by nový záznam začal, kdyby v tom
+ * bodě začal táhnout.
+ */
+function CursorTime({ x, timeMs }: { x: number; timeMs: number }) {
+  return (
+    <>
+      <div
+        aria-hidden
+        className="absolute top-0 pointer-events-none z-10"
+        style={{
+          left: `${x}px`,
+          width: "1px",
+          height: `${AXIS_HEIGHT + ROW_HEIGHT}px`,
+          background: "var(--accent)",
+          opacity: 0.5,
+        }}
+      />
+      <TimelineBubble
+        x={x}
+        top={AXIS_HEIGHT}
+        gap={2}
+        className="px-1.5 py-0.5 text-[11px] font-mono tabular-nums"
+      >
+        {formatHHMM(new Date(timeMs))}
+      </TimelineBubble>
+    </>
+  );
+}
+
+/**
+ * Popisek nad taženým výběrem při zakládání nového záznamu — začátek, konec
+ * a doba trvání (např. `15:10 – 15:40 · 30m`), vystředěný nad obdélníkem.
+ */
+function CreateDragLabel({
+  drag,
+  day,
+  cssWidth,
+}: {
+  drag: CreateDragState;
+  day: Date;
+  cssWidth: number;
+}) {
+  if (cssWidth <= 0) return null;
+  const startMs = canvasXToTimeMs(drag.startCanvasX, cssWidth, day);
+  const endMs = canvasXToTimeMs(drag.currentCanvasX, cssWidth, day);
+  const centerX = (drag.startCanvasX + drag.currentCanvasX) / 2;
+  return (
+    <TimelineBubble
+      x={centerX}
+      top={AXIS_HEIGHT}
+      gap={4}
+      className="px-2 py-1 text-[11px] font-mono tabular-nums"
+    >
+      {formatRangeLabel(startMs, endMs)}
+    </TimelineBubble>
   );
 }
 
@@ -469,6 +593,17 @@ export function canvasXToTimeMs(
   return Math.round(
     dayStart.getTime() + (START_HOUR + frac * totalHours) * 3_600_000,
   );
+}
+
+/**
+ * Human-readable label for a drag range: `15:10 – 15:40 · 30m`. Bounds are
+ * normalised so a right-to-left drag reads the same as left-to-right.
+ */
+export function formatRangeLabel(startMs: number, endMs: number): string {
+  const a = Math.min(startMs, endMs);
+  const b = Math.max(startMs, endMs);
+  const dur = formatDurationShort((b - a) / 1000);
+  return `${formatHHMM(new Date(a))} – ${formatHHMM(new Date(b))} · ${dur}`;
 }
 
 export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {

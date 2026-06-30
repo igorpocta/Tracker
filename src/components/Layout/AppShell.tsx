@@ -365,6 +365,24 @@ export function AppShell() {
     [navigate, pushToast],
   );
 
+  // Reassign the running timer to a different issue (RunningBar chip → picker).
+  // Owns the error handling so a failed reassign surfaces a toast instead of
+  // an unhandled rejection — `timerStore.assign` rethrows on failure.
+  const handleReassign = useCallback(
+    async (issueKey: string) => {
+      try {
+        await useTimerStore.getState().assign(issueKey);
+        pushToast("success", `Časomíra přepnuta na ${issueKey}.`);
+      } catch (e) {
+        pushToast(
+          "error",
+          typeof e === "string" ? e : "Přepnutí úkolu selhalo.",
+        );
+      }
+    },
+    [pushToast],
+  );
+
   // ---- Add entry panel -----------------------------------------------------
   const [addEntryOpen, setAddEntryOpen] = useState(false);
 
@@ -428,6 +446,7 @@ export function AppShell() {
                 onPickIssue={handlePickIssue}
                 onStop={active ? () => setStopOpen(true) : undefined}
                 onStartUnassigned={handleStartUnassigned}
+                onReassign={handleReassign}
               />
             </div>
           )}

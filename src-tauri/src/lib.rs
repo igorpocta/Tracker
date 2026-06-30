@@ -373,6 +373,7 @@ pub fn run() {
             // Worklog
             commands::worklog::get_worklog_issues,
             commands::worklog::get_worklogs_for_range,
+            commands::worklog::list_unassigned_worklogs,
             commands::worklog::refresh_all,
             commands::worklog::refresh_connection,
             commands::worklog::get_sync_errors,
