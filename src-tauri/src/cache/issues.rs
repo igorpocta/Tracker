@@ -153,8 +153,12 @@ pub fn upsert(db: &Db, issue: &IssueRow) -> Result<(), DbError> {
 /// wins.
 pub fn get_by_key(db: &Db, key: &str) -> Result<Option<IssueRow>, DbError> {
     let conn = db.pool().get()?;
+    // Deterministic pick when a key exists in several connections.
     let row = conn.query_row(
-        &format!("SELECT {SELECT_COLS} FROM issues_v2 WHERE issue_key = ?1 LIMIT 1"),
+        &format!(
+            "SELECT {SELECT_COLS} FROM issues_v2 WHERE issue_key = ?1 \
+             ORDER BY connection_id ASC LIMIT 1"
+        ),
         [key],
         row_to_issue,
     );
@@ -212,11 +216,19 @@ pub fn count(db: &Db) -> Result<i64, DbError> {
     Ok(n)
 }
 
-/// Look up the connection that owns an issue key.
+/// Look up the connection that owns an issue key. When the same key exists in
+/// more than one connection (two tenants sharing a project key), prefer an
+/// ENABLED connection and otherwise pick deterministically by id — never an
+/// arbitrary row, which could route a worklog to the wrong / disabled tenant.
 pub fn get_connection_id_by_key(db: &Db, key: &str) -> Result<Option<i64>, DbError> {
     let conn = db.pool().get()?;
     let r = conn.query_row(
-        "SELECT connection_id FROM issues_v2 WHERE issue_key = ?1 LIMIT 1",
+        "SELECT i.connection_id
+         FROM issues_v2 i
+         LEFT JOIN connections c ON c.id = i.connection_id
+         WHERE i.issue_key = ?1
+         ORDER BY c.enabled DESC, i.connection_id ASC
+         LIMIT 1",
         [key],
         |r| r.get::<_, i64>(0),
     );
@@ -328,5 +340,51 @@ mod tests {
         assert_eq!(found.id, original_id, "id se musí zachovat");
         assert_eq!(found.created_at, 100, "created_at se musí zachovat");
         assert_eq!(found.name, "after");
+    }
+
+    #[test]
+    fn get_connection_id_by_key_prefers_enabled_connection() {
+        use crate::cache::connections::{insert as insert_conn, NewConnection};
+        let db = open_db();
+        // Disabled connection inserted first (lower id) — without an
+        // enabled-preference + ORDER BY, the arbitrary LIMIT 1 would return it.
+        let disabled = insert_conn(
+            &db,
+            NewConnection {
+                provider: "jira",
+                name: "old",
+                enabled: false,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+        let enabled = insert_conn(
+            &db,
+            NewConnection {
+                provider: "jira",
+                name: "new",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+        for cid in [disabled, enabled] {
+            upsert(
+                &db,
+                &IssueRow {
+                    connection_id: cid,
+                    issue_id: format!("id-{cid}"),
+                    issue_key: "SHARED-1".into(),
+                    name: "x".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            get_connection_id_by_key(&db, "SHARED-1").unwrap(),
+            Some(enabled),
+            "must route to the enabled connection, not an arbitrary one"
+        );
     }
 }
