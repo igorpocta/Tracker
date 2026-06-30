@@ -618,6 +618,13 @@ pub async fn stop_timer_inner(
         _ => None,
     };
 
+    // Serialize the POST+record with the flush task (which also takes this
+    // lock per row): without it, a stop racing flush_unsynced_worklogs could
+    // both push the same logical worklog. Held until the timer row is stopped
+    // and the local row written. stop_timer_inner does not call any other
+    // push-lock holder, so there is no re-entrant deadlock.
+    let _push_guard = state.worklog_push_lock.lock().await;
+
     let mut freelo_saved: Option<WorklogRow> = None;
     let remote_id = if is_unassigned {
         None
