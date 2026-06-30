@@ -44,6 +44,7 @@ import {
   queryKeys,
 } from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
+import { pluralCs } from "../../lib/format";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
 import { useIdleDetection } from "../../hooks/useIdleDetection";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -138,16 +139,6 @@ export function AppShell() {
     }
   }, [queryClient]);
 
-  const reindex = useCallback(async () => {
-    try {
-      await refreshCache();
-      queryClient.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
-    } catch {
-      /* swallow */
-    }
-  }, [queryClient]);
-
   // ---- toast notifications -------------------------------------------------
   const toastIdRef = useRef(1);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -168,6 +159,23 @@ export function AppShell() {
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Manual reindex (CommandBar / Cmd-Ctrl+I): pull the latest issues from the
+  // provider, refresh the search/recent caches, and toast the outcome — a
+  // silent no-op (the old behaviour) read as "the button doesn't work".
+  const reindex = useCallback(async () => {
+    try {
+      const n = await refreshCache();
+      queryClient.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
+      pushToast(
+        "success",
+        `Reindexováno ${n} ${pluralCs(n, ["úkol", "úkoly", "úkolů"])}.`,
+      );
+    } catch (e) {
+      pushToast("error", typeof e === "string" ? e : "Reindexace selhala.");
+    }
+  }, [queryClient, pushToast]);
 
   // ---- backend events ------------------------------------------------------
   const onWorklogSaved = useCallback(
