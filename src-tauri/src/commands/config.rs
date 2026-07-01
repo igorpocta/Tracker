@@ -66,10 +66,7 @@ pub async fn save_config(
     crate::keychain::save_jira_token(&state.app_data_dir, &args.token)
         .map_err(|e| e.to_string())?;
 
-    *state
-        .jira_config
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = Some(args.config.clone());
+    *state.jira_config.write().unwrap_or_else(|e| e.into_inner()) = Some(args.config.clone());
     state.try_build_client().map_err(|e| e.to_string())?;
 
     // Phase 18A: upsert into `connections` so the new APIs see this account.
@@ -207,10 +204,7 @@ where
     if let Some(tok) = new_token.as_deref() {
         save_token(tok)?;
     }
-    *state
-        .jira_config
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = Some(new_cfg);
+    *state.jira_config.write().unwrap_or_else(|e| e.into_inner()) = Some(new_cfg);
     // try_build_client picks up the (possibly new) token from the secret file.
     state.try_build_client().map_err(|e| e.to_string())?;
     Ok(())
@@ -228,14 +222,8 @@ where
         std::fs::remove_file(config_path).map_err(|e| e.to_string())?;
     }
     clear_token()?;
-    *state
-        .jira_config
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = None;
-    *state
-        .jira_client
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = None;
+    *state.jira_config.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *state.jira_client.write().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
 }
 

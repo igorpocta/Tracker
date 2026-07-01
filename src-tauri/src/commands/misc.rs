@@ -129,7 +129,9 @@ mod tests {
 
     #[test]
     fn allows_web_and_mail_schemes() {
-        assert!(is_safe_external_url("https://example.atlassian.net/browse/DEV-1"));
+        assert!(is_safe_external_url(
+            "https://example.atlassian.net/browse/DEV-1"
+        ));
         assert!(is_safe_external_url("http://jira.local/browse/DEV-1"));
         assert!(is_safe_external_url("mailto:a@b.com"));
         assert!(is_safe_external_url("  HTTPS://EXAMPLE.com")); // trimmed + case-insensitive

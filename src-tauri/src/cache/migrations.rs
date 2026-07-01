@@ -107,7 +107,10 @@ mod tests {
             )
             .unwrap();
         assert!(!probe_exists, "partial DDL must be rolled back");
-        assert!(!is_applied(&conn, 9001).unwrap(), "version must not be recorded");
+        assert!(
+            !is_applied(&conn, 9001).unwrap(),
+            "version must not be recorded"
+        );
     }
 
     #[test]

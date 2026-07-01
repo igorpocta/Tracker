@@ -63,10 +63,7 @@ pub async fn refresh_cache(
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
     let jiras: Vec<(i64, crate::jira::JiraClient)> = {
-        let conns = state
-            .connections
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         conns
             .iter()
             .filter(|c| c.enabled)

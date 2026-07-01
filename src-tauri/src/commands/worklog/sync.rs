@@ -484,10 +484,7 @@ pub async fn refresh_connection(
     let mode = SyncMode::from_optional_str(mode.as_deref());
 
     let conn = {
-        let conns = state
-            .connections
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         conns
             .iter()
             .find(|c| c.id == connection_id && c.enabled)

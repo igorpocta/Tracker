@@ -181,36 +181,21 @@ impl AppState {
                 // Should be unreachable because we filter on `kind == "jira"`.
                 _ => unreachable!("first_jira filter broken"),
             };
-            *self
-                .jira_client
-                .write()
-                .unwrap_or_else(|e| e.into_inner()) = Some(client);
+            *self.jira_client.write().unwrap_or_else(|e| e.into_inner()) = Some(client);
             // Best-effort derive a JiraConfig from the persisted JSON.
             let row = cache::connections::get_by_id(&self.db, c.id)?.unwrap();
             if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(&row.config_json) {
-                *self
-                    .jira_config
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(JiraConfig {
+                *self.jira_config.write().unwrap_or_else(|e| e.into_inner()) = Some(JiraConfig {
                     base_url: cfg.base_url,
                     email: cfg.email,
                 });
             }
         } else {
-            *self
-                .jira_client
-                .write()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            *self
-                .jira_config
-                .write()
-                .unwrap_or_else(|e| e.into_inner()) = None;
+            *self.jira_client.write().unwrap_or_else(|e| e.into_inner()) = None;
+            *self.jira_config.write().unwrap_or_else(|e| e.into_inner()) = None;
         }
 
-        *self
-            .connections
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = built;
+        *self.connections.write().unwrap_or_else(|e| e.into_inner()) = built;
         Ok(())
     }
 
@@ -228,17 +213,11 @@ impl AppState {
         match (cfg, token) {
             (Some(c), Some(token)) => {
                 let client = JiraClient::new(c.base_url.clone(), c.email.clone(), token)?;
-                *self
-                    .jira_client
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(client);
+                *self.jira_client.write().unwrap_or_else(|e| e.into_inner()) = Some(client);
                 Ok(true)
             }
             _ => {
-                *self
-                    .jira_client
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self.jira_client.write().unwrap_or_else(|e| e.into_inner()) = None;
                 Ok(false)
             }
         }

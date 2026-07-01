@@ -234,10 +234,7 @@ fn resolve_client_for_issue(
 ) -> Result<(i64, ProviderClient), String> {
     let conn_id =
         cache::issues::get_connection_id_by_key(&state.db, issue_key).map_err(|e| e.to_string())?;
-    let conns = state
-        .connections
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
     // If we know the connection id, prefer that.
     if let Some(cid) = conn_id {
         return conns
@@ -356,10 +353,7 @@ pub fn resolve_client_for_row(
     state: &AppState,
     row: &WorklogRow,
 ) -> Result<(i64, ProviderClient), String> {
-    let conns = state
-        .connections
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
     resolve_client_for_row_in(&conns, row)
 }
 
@@ -489,10 +483,7 @@ pub async fn create_manual_worklog(
     // for issues we have never cached locally.
     let owner_is_freelo = match cache::issues::get_connection_id_by_key(&state.db, &issue_key) {
         Ok(Some(cid)) => {
-            let conns = state
-                .connections
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
+            let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
             conns
                 .iter()
                 .find(|c| c.id == cid && c.enabled)

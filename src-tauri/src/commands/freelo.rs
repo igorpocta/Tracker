@@ -32,10 +32,7 @@ fn freelo_config_for(
     state: &AppState,
     connection_id: i64,
 ) -> Result<(crate::freelo::FreeloClient, FreeloConnectionConfig), String> {
-    let conns = state
-        .connections
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
     let active = conns
         .iter()
         .find(|c| c.id == connection_id && c.enabled)

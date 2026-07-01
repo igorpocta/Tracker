@@ -146,6 +146,9 @@ mod tests {
         assert!(!freelo_report_matches(&r, 999, 7, 30, d), "task");
         assert!(!freelo_report_matches(&r, 100, 8, 30, d), "user");
         assert!(!freelo_report_matches(&r, 100, 7, 45, d), "minutes");
-        assert!(!freelo_report_matches(&r, 100, 7, 30, day(2026, 5, 27)), "date");
+        assert!(
+            !freelo_report_matches(&r, 100, 7, 30, day(2026, 5, 27)),
+            "date"
+        );
     }
 }

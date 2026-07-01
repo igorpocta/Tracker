@@ -431,10 +431,7 @@ async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str) {
         _ => return,
     };
     let (client, cfg_json) = {
-        let conns = state
-            .connections
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         let Some(c) = conns.iter().find(|c| c.id == conn_id) else {
             return;
         };
@@ -595,10 +592,7 @@ pub async fn stop_timer_inner(
         let cid = cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
             .ok()
             .flatten();
-        let conns = state
-            .connections
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
+        let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         cid.and_then(|id| conns.iter().find(|c| c.id == id && c.enabled))
             .map(|c| match &c.client {
                 crate::state::ProviderClient::Jira(j) => OwnerRoute::Jira(j.clone()),

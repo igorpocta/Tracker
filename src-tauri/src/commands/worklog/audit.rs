@@ -116,10 +116,7 @@ fn resolve_freelo_client_for_audit(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Audit záznam nenalezen".to_string())?;
 
-    let conns = state
-        .connections
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
     let find_freelo_by_id = |cid: i64| -> Option<crate::freelo::client::FreeloClient> {
         conns
             .iter()
@@ -192,10 +189,7 @@ fn resolve_jira_client_for_audit(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Audit záznam nenalezen".to_string())?;
 
-    let conns = state
-        .connections
-        .read()
-        .unwrap_or_else(|e| e.into_inner());
+    let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
     let find_jira_by_id = |cid: i64| -> Option<crate::jira::JiraClient> {
         conns
             .iter()

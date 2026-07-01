@@ -172,14 +172,8 @@ pub async fn import_backup(
 ///    state; the worst case is the user has to restart the app to pick
 ///    up the new clients.
 pub fn apply_post_import_state_refresh(state: &AppState) {
-    *state
-        .jira_client
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = None;
-    *state
-        .jira_config
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = None;
+    *state.jira_client.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *state.jira_config.write().unwrap_or_else(|e| e.into_inner()) = None;
     if let Err(e) = state.hydrate_connections() {
         tracing::warn!("import_backup: hydrate_connections after restore failed: {e}");
     }
