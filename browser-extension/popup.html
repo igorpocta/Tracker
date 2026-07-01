@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Tracker Bridge</title>
+  </head>
+  <body>
+    <header class="row">
+      <strong>Tracker Bridge</strong>
+      <span id="status" class="badge badge-idle">…</span>
+    </header>
+
+    <section id="ticket" class="card">
+      <div class="muted">Aktuální úkol</div>
+      <div id="ticket-key" class="key">—</div>
+      <div id="ticket-summary" class="summary"></div>
+    </section>
+
+    <section class="actions">
+      <button id="start" class="btn btn-primary" disabled>▶ Spustit</button>
+      <button id="stop" class="btn" disabled>■ Zastavit</button>
+    </section>
+
+    <details id="settings">
+      <summary>Nastavení</summary>
+      <label class="muted" for="token">Bridge token (z Trackeru)</label>
+      <input id="token" type="password" placeholder="vlož token…" autocomplete="off" spellcheck="false" />
+      <button id="save" class="btn btn-primary">Uložit token</button>
+      <p class="hint">
+        Token najdeš v aplikaci Tracker — je uložený v souboru
+        <code>browser-bridge-token</code> v datovém adresáři aplikace.
+      </p>
+    </details>
+
+    <p id="msg" class="msg"></p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
