@@ -3,6 +3,8 @@ export const common = {
   cs: {
     // Toast
     "common.toast.close": "Zavřít",
+    // IssuePill
+    "common.issue.openInBrowser": "Otevřít {issueKey} v prohlížeči",
     // ErrorBoundary
     "common.error.title": "Něco se nepovedlo",
     "common.error.body":
@@ -43,6 +45,8 @@ export const common = {
   en: {
     // Toast
     "common.toast.close": "Close",
+    // IssuePill
+    "common.issue.openInBrowser": "Open {issueKey} in browser",
     // ErrorBoundary
     "common.error.title": "Something went wrong",
     "common.error.body":

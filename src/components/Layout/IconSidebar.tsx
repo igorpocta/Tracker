@@ -361,6 +361,7 @@ function CacheRing({
   syncErrors: import("../../api/commands").SyncErrorEntry[];
   onRefresh: () => void;
 }) {
+  const t = useT();
   let label: string;
   if (running) {
     const mins = Math.floor(elapsedSeconds / 60);
@@ -382,15 +383,15 @@ function CacheRing({
         .join("\n")
     : null;
   const headline = hasOnlySkips
-    ? "Worklog sync byl přeskočen"
-    : "Poslední sync selhal";
+    ? t("nav.ring.syncSkipped")
+    : t("nav.ring.syncFailed");
   const title = syncing
-    ? "Synchronizace probíhá…"
+    ? t("nav.ring.syncing")
     : hasError
-      ? `${headline} · klikni pro nový pokus\n\n${errorTitle}`
+      ? t("nav.ring.error", { headline, details: errorTitle ?? "" })
       : running
-        ? `Sledování běží · klikni pro sync (${cachedIssues} úkolů v cache)`
-        : `${cachedIssues} úkolů v cache · klikni pro sync`;
+        ? t("nav.ring.running", { count: cachedIssues })
+        : t("nav.ring.idle", { count: cachedIssues });
   const ringColor = hasError
     ? hasOnlySkips
       ? "var(--warning, var(--text-tertiary))"

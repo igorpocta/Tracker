@@ -13,6 +13,7 @@
 import { clsx } from "clsx";
 
 import { openIssue } from "../../api/commands";
+import { useT } from "../../i18n";
 
 export interface IssuePillProps {
   issueKey: string;
@@ -32,6 +33,7 @@ export function IssuePill({
   onClick,
   linkable = true,
 }: IssuePillProps) {
+  const t = useT();
   const color = secondary ? "var(--accent-2)" : "var(--accent)";
 
   // Default behaviour: open the issue in the user's default browser. The
@@ -51,7 +53,9 @@ export function IssuePill({
     <Component
       type={handleClick ? "button" : undefined}
       onClick={handleClick}
-      title={handleClick ? `Otevřít ${issueKey} v prohlížeči` : undefined}
+      title={
+        handleClick ? t("common.issue.openInBrowser", { issueKey }) : undefined
+      }
       className={clsx(
         "inline-flex items-center justify-center px-2 h-6 rounded-full",
         "font-mono text-[10px] uppercase tracking-[0.08em] tabular-nums",
