@@ -103,11 +103,13 @@ export function startTimer(
   issueKey?: string | null,
   startedAtMs?: number,
   comment?: string | null,
+  connectionId?: number | null,
 ): Promise<ActiveTimerState> {
   return invoke<ActiveTimerState>("start_timer", {
     issueKey: issueKey ?? null,
     startedAtMs: startedAtMs ?? null,
     comment: comment ?? null,
+    connectionId: connectionId ?? null,
   });
 }
 
@@ -649,9 +651,15 @@ export function deleteWorklog(
   return invoke<void>("delete_worklog", { worklogId, issueKey });
 }
 
-/** Cancel a pending delete within the 5s grace window. */
-export function undoDeleteWorklog(worklogId: string): Promise<void> {
-  return invoke<void>("undo_delete_worklog", { worklogId });
+/**
+ * Cancel a pending delete within the 5s grace window.
+ *
+ * Takes the **local** row id (not the remote/Jira worklog id): remote ids are
+ * only unique within a connection, so two tenants sharing one could restore the
+ * wrong row. The local id is unambiguous.
+ */
+export function undoDeleteWorklog(localId: number): Promise<void> {
+  return invoke<void>("undo_delete_worklog", { worklogId: localId });
 }
 
 /**
@@ -835,12 +843,24 @@ export function addFavorite(
   });
 }
 
-export function removeFavorite(issueKey: string): Promise<void> {
-  return invoke<void>("remove_favorite", { issueKey });
+export function removeFavorite(
+  issueKey: string,
+  connectionId?: number | null,
+): Promise<void> {
+  return invoke<void>("remove_favorite", {
+    issueKey,
+    connectionId: connectionId ?? null,
+  });
 }
 
-export function isFavorite(issueKey: string): Promise<boolean> {
-  return invoke<boolean>("is_favorite", { issueKey });
+export function isFavorite(
+  issueKey: string,
+  connectionId?: number | null,
+): Promise<boolean> {
+  return invoke<boolean>("is_favorite", {
+    issueKey,
+    connectionId: connectionId ?? null,
+  });
 }
 
 // -----------------------------------------------------------------------------

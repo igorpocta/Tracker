@@ -169,7 +169,7 @@ async fn timer_state_returns_running_timer() {
     let (app, _dir) = fresh_state();
     {
         let app_state = app.state::<AppState>();
-        start_timer_inner(&app_state.db, "ACME-7", 1_000, None).unwrap();
+        start_timer_inner(&app_state.db, "ACME-7", 1_000, None, None).unwrap();
     }
 
     let state = fresh_server_state(&app);
@@ -187,7 +187,7 @@ async fn active_ticket_returns_issue_key() {
     let (app, _dir) = fresh_state();
     {
         let app_state = app.state::<AppState>();
-        start_timer_inner(&app_state.db, "ACME-9", 1_000, None).unwrap();
+        start_timer_inner(&app_state.db, "ACME-9", 1_000, None, None).unwrap();
     }
 
     let state = fresh_server_state(&app);
@@ -243,7 +243,14 @@ async fn stop_timer_applies_rounding_and_comment_fallback_like_main_flow() {
         set_rounding_mode_inner(&app_state.db, "up").unwrap();
         set_rounding_interval_minutes_inner(&app_state.db, 15).unwrap();
         let started_at_ms = (chrono::Utc::now().timestamp() - 14 * 60) * 1000;
-        start_timer_inner(&app_state.db, "ACME-43", started_at_ms, Some("draft note")).unwrap();
+        start_timer_inner(
+            &app_state.db,
+            "ACME-43",
+            started_at_ms,
+            Some("draft note"),
+            None,
+        )
+        .unwrap();
     }
 
     let state = fresh_server_state(&app);

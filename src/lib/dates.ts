@@ -40,6 +40,23 @@ export function dayRangeUnixS(date: Date): [number, number] {
   return [dayStartUnixS(date), dayEndUnixS(date)];
 }
 
+/**
+ * Seconds of the worklog `[startedAtS, endedAtS]` overlapping the half-open day
+ * window `[dayStartS, dayEndS)`. Mirrors the backend `day_overlap_seconds`
+ * (feedback #2, variant B): a worklog crossing local midnight contributes only
+ * its in-window slice to a given day, never its whole length to the start day.
+ */
+export function dayOverlapSeconds(
+  startedAtS: number,
+  endedAtS: number,
+  dayStartS: number,
+  dayEndS: number,
+): number {
+  const start = Math.max(startedAtS, dayStartS);
+  const end = Math.min(endedAtS, dayEndS);
+  return Math.max(0, end - start);
+}
+
 /** Unix-seconds value for today's start. */
 export function todayStartUnixS(now: Date = new Date()): number {
   return dayStartUnixS(now);

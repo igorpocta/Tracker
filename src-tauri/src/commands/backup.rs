@@ -71,7 +71,7 @@ fn export_inner(db: &Db) -> Result<BackupBundle, rusqlite::Error> {
         )?,
         favorite_issues: dump_table(
             &conn,
-            "SELECT issue_key, connection_id, created_at FROM favorite_issues",
+            "SELECT issue_key, connection_id, added_at FROM favorite_issues",
         )
         // favorite_issues může neexistovat v starší DB — tolerujeme.
         .unwrap_or_default(),
@@ -207,9 +207,14 @@ fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, rusqlite:
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     }
 
-    let n_worklogs = insert_rows(&tx, "worklogs", &bundle.tables.worklogs)?;
-    let n_issues = insert_rows(&tx, "issues_v2", &bundle.tables.issues_v2)?;
+    // Vkládáme rodiče před potomky, ať sedí per-connection FK:
+    // `issues_v2.connection_id` je NOT NULL → connections(id), `worklogs` a
+    // `favorite_issues` na connections také referují. `connections` proto MUSÍ
+    // první; `issues_v2` a `worklogs` jsou mezi sebou nezávislé (žádný FK
+    // worklogs→issues_v2). Truncate výše běží v opačném pořadí (potomci první).
     let n_conns = insert_rows(&tx, "connections", &bundle.tables.connections)?;
+    let n_issues = insert_rows(&tx, "issues_v2", &bundle.tables.issues_v2)?;
+    let n_worklogs = insert_rows(&tx, "worklogs", &bundle.tables.worklogs)?;
     let n_audit = insert_rows(&tx, "audit_log", &bundle.tables.audit_log)?;
     let n_settings = insert_rows(&tx, "app_settings", &bundle.tables.app_settings)?;
     let _ = insert_rows(&tx, "favorite_issues", &bundle.tables.favorite_issues);
@@ -346,5 +351,113 @@ mod tests {
         assert!(matches!(json_to_sqlite(&json!(1.5)), Sv::Real(_)));
         assert!(matches!(json_to_sqlite(&json!("hi")), Sv::Text(_)));
         assert!(matches!(json_to_sqlite(&json!(true)), Sv::Integer(1)));
+    }
+
+    /// Seed one connection + one issue + one worklog that references it.
+    /// Returns the connection id.
+    fn seed_connection_issue_worklog(db: &Db) -> i64 {
+        let conn_id = crate::cache::connections::insert(
+            db,
+            crate::cache::connections::NewConnection {
+                provider: "jira",
+                name: "Tenant A",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+        crate::cache::issues::upsert(
+            db,
+            &crate::cache::issues::IssueRow {
+                connection_id: conn_id,
+                issue_id: "10001".into(),
+                issue_key: "ACME-1".into(),
+                name: "Test issue".into(),
+                created_at: 1,
+                updated_at: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::cache::worklogs::record(
+            db,
+            &crate::cache::worklogs::WorklogRow {
+                connection_id: Some(conn_id),
+                issue_key: Some("ACME-1".into()),
+                description: Some("work".into()),
+                started_at: 1_700_000_000,
+                ended_at: 1_700_003_600,
+                logged_at: 1_700_000_000,
+                is_synced: true,
+                remote_id: Some("w1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        conn_id
+    }
+
+    #[test]
+    fn restore_roundtrips_connection_issue_worklog() {
+        // AK1.1 / AK1.3: real data with FK relations must survive export→import
+        // into a clean DB. Pre-fix this fails: import inserts worklogs/issues_v2
+        // before connections, tripping the connections FK.
+        let src = open_db();
+        seed_connection_issue_worklog(&src);
+        let bundle = export_inner(&src).unwrap();
+
+        let dst = open_db();
+        import_inner(&dst, &bundle).expect("import of real FK-linked data must not fail");
+
+        assert_eq!(crate::cache::connections::list(&dst).unwrap().len(), 1);
+        assert_eq!(crate::cache::issues::count(&dst).unwrap(), 1);
+        let worklogs = crate::cache::worklogs::for_date_range(&dst, 0, i64::MAX).unwrap();
+        assert_eq!(worklogs.len(), 1);
+        assert_eq!(worklogs[0].connection_id, Some(1));
+        assert_eq!(worklogs[0].issue_key.as_deref(), Some("ACME-1"));
+    }
+
+    #[test]
+    fn restore_preserves_favorites_with_connection() {
+        // AK1.2: a favorite bound to a connection survives the round-trip.
+        // Pre-fix this fails twice over: the import FK error, and the export
+        // SELECT reading a non-existent `created_at` column (real col: added_at).
+        let src = open_db();
+        let conn_id = seed_connection_issue_worklog(&src);
+        crate::cache::favorites::add(&src, "ACME-1", Some(conn_id)).unwrap();
+        let bundle = export_inner(&src).unwrap();
+
+        let dst = open_db();
+        import_inner(&dst, &bundle).unwrap();
+
+        assert_eq!(crate::cache::favorites::list(&dst).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn restore_legacy_null_connection_worklog() {
+        // AK1.4: a legacy single-Jira worklog with NULL connection_id imports fine.
+        let src = open_db();
+        crate::cache::worklogs::record(
+            &src,
+            &crate::cache::worklogs::WorklogRow {
+                connection_id: None,
+                issue_key: None,
+                started_at: 1_700_000_000,
+                ended_at: 1_700_000_600,
+                logged_at: 1_700_000_000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let bundle = export_inner(&src).unwrap();
+
+        let dst = open_db();
+        import_inner(&dst, &bundle).unwrap();
+        assert_eq!(
+            crate::cache::worklogs::for_date_range(&dst, 0, i64::MAX)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

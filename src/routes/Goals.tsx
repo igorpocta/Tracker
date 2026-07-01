@@ -38,9 +38,9 @@ import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
   addDays,
   dayEndUnixS,
+  dayOverlapSeconds,
   dayStartUnixS,
   endOfMonth,
-  isSameDay,
   startOfDay,
   startOfMonth,
 } from "../lib/dates";
@@ -92,10 +92,34 @@ export default function Goals() {
   });
 
   const rows = q.data ?? [];
-  const monthSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
-  const todaySeconds = rows
-    .filter((r) => isSameDay(new Date(r.started_at * 1000), today))
-    .reduce((a, r) => a + r.duration_s, 0);
+  // Overlap-based fetch (variant B): clip each worklog to the month window so a
+  // worklog straddling the month boundary doesn't over-count.
+  const monthSeconds = rows.reduce(
+    (a, r) =>
+      a +
+      dayOverlapSeconds(
+        r.started_at,
+        r.ended_at ?? r.started_at + r.duration_s,
+        fromUnix,
+        toUnix + 1,
+      ),
+    0,
+  );
+  // Variant B (feedback #2): a worklog crossing local midnight counts only its
+  // in-day slice toward today's total — matches the backend daily-goal check.
+  const todayStartS = dayStartUnixS(today);
+  const todayEndS = dayStartUnixS(addDays(today, 1));
+  const todaySeconds = rows.reduce(
+    (a, r) =>
+      a +
+      dayOverlapSeconds(
+        r.started_at,
+        r.ended_at ?? r.started_at + r.duration_s,
+        todayStartS,
+        todayEndS,
+      ),
+    0,
+  );
 
   // Phase 18B — Item 3: prefer the user-configured working-week mask +
   // non-working-day calendar when counting working days. Falls back to the

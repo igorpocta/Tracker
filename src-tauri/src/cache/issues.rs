@@ -169,6 +169,27 @@ pub fn get_by_key(db: &Db, key: &str) -> Result<Option<IssueRow>, DbError> {
     }
 }
 
+/// Look up by the exact `(connection_id, issue_key)` pair — the tenant-safe
+/// lookup used once the caller already knows which connection owns the issue
+/// (e.g. a favorite row). Unlike [`get_by_key`], never crosses tenants.
+pub fn get_by_conn_key(
+    db: &Db,
+    connection_id: i64,
+    key: &str,
+) -> Result<Option<IssueRow>, DbError> {
+    let conn = db.pool().get()?;
+    let row = conn.query_row(
+        &format!("SELECT {SELECT_COLS} FROM issues_v2 WHERE connection_id = ?1 AND issue_key = ?2"),
+        rusqlite::params![connection_id, key],
+        row_to_issue,
+    );
+    match row {
+        Ok(i) => Ok(Some(i)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Issues that were updated most recently upstream, excluding archived and
 /// Freelo project pseudo-issues. Used by the empty-state task picker.
 pub fn recent(db: &Db, limit: u32) -> Result<Vec<IssueRow>, DbError> {

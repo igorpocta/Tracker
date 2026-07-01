@@ -69,12 +69,28 @@ fn compute_streaks_inner(
     let rows = cache::worklogs::for_date_range(db, from_ts, to_ts)?;
     let mut per_day: std::collections::HashMap<NaiveDate, i64> = std::collections::HashMap::new();
     for r in rows {
-        let dt = Local
+        // Variant B (feedback #2): distribute a worklog across every local day
+        // it touches, clipped to each day's bounds — a 23:30→00:30 entry adds
+        // 30 min to each of the two days, not 60 min to the start day.
+        let start_day = Local
             .timestamp_opt(r.started_at, 0)
             .single()
             .map(|d| d.date_naive());
-        if let Some(d) = dt {
-            *per_day.entry(d).or_insert(0) += r.duration_s();
+        let end_day = Local
+            .timestamp_opt(r.ended_at, 0)
+            .single()
+            .map(|d| d.date_naive());
+        if let (Some(sd), Some(ed)) = (start_day, end_day) {
+            let mut day = sd;
+            while day <= ed {
+                if let Some((ds, de)) = crate::commands::timer::local_day_bounds(&Local, day) {
+                    let ov = cache::worklogs::day_overlap_seconds(r.started_at, r.ended_at, ds, de);
+                    if ov > 0 {
+                        *per_day.entry(day).or_insert(0) += ov;
+                    }
+                }
+                day += Duration::days(1);
+            }
         }
     }
 

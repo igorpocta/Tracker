@@ -2,9 +2,12 @@
  * Zod schemas used across forms.
  *
  * The setup wizard and Settings panes feed user-typed values through these
- * before invoking IPC commands. The Rust side re-validates so this layer is
- * "fast feedback, never authoritative", but keeping the two in lockstep means
- * the UI never reaches a state where a backend rejection surprises the user.
+ * before invoking IPC commands. This layer is "fast feedback, never
+ * authoritative": the Rust side re-validates on add/update_connection and again
+ * in the provider client constructors. For the provider base URL specifically
+ * the backend enforces https, no embedded credentials, no private/loopback IPs,
+ * and a per-provider host allow-list (see `validation::validate_provider_base_url`);
+ * this Zod check is only the first, friendly line of defense.
  *
  * Phase 18C — Item 23: extended with numeric range schemas matching the
  * backend `*_inner` validators. All messages are Czech (matching the rest of

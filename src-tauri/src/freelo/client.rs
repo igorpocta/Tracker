@@ -19,6 +19,8 @@ use crate::http_base::{self, HttpError, RateLimitInfo};
 pub enum FreeloError {
     #[error("invalid url: {0}")]
     InvalidUrl(#[from] url::ParseError),
+    #[error("unsafe base url: {0}")]
+    InsecureUrl(String),
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
     #[error("serde: {0}")]
@@ -74,6 +76,9 @@ impl FreeloClient {
         } else {
             base_url
         };
+        // Defense-in-depth: reject unsafe targets even for hydrated / imported
+        // configs (see JiraClient::new). The default base url is safe.
+        crate::validation::validate_base_url_safety(&url).map_err(FreeloError::InsecureUrl)?;
         let base_url = Url::parse(&url)?;
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));

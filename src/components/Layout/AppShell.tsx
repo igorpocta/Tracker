@@ -341,13 +341,20 @@ export function AppShell() {
 
   // ---- Start tracking handler ---------------------------------------------
   const handlePickIssue = useCallback(
-    async (issueKey: string, comment: string) => {
+    async (
+      issueKey: string,
+      comment: string,
+      connectionId?: number | null,
+    ) => {
       try {
         // Phase 18B — Item 6: in-flight comment threaded into start_timer.
+        // connectionId (from the favorite / picked row) pins the tenant so the
+        // worklog + auto-transition hit the right account when a key collides.
         await startTimer(
           issueKey,
           undefined,
           comment.length > 0 ? comment : null,
+          connectionId,
         );
         navigate("/");
       } catch (e) {

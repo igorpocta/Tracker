@@ -42,7 +42,7 @@ import type { ActiveTimerState, IssueRow, ThemePref, WorklogRow } from "./api/ty
 import { useNow } from "./hooks/useNow";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { applyPalette } from "./lib/accent";
-import { todayEndUnixS, todayStartUnixS } from "./lib/dates";
+import { dayOverlapSeconds, todayEndUnixS, todayStartUnixS } from "./lib/dates";
 import { formatDuration } from "./lib/format";
 import { elapsedSeconds } from "./stores/timerStore";
 
@@ -152,12 +152,14 @@ export function Popover() {
   useTauriEvent("prefs-changed", onPrefsChanged);
 
   const startForIssue = useCallback(
-    async (issueKey: string) => {
+    async (issueKey: string, connectionId?: number | null) => {
       if (busy) return;
       setBusy(true);
       setError(null);
       try {
-        const next = await startTimer(issueKey);
+        // Carry the tenant so a key shared across connections starts the right
+        // issue (feedback #4).
+        const next = await startTimer(issueKey, undefined, null, connectionId);
         setActive(next);
       } catch (e) {
         setError(errMessage(e));
@@ -237,11 +239,34 @@ function Header({
   active: ActiveTimerState | null;
 }) {
   const now = useNow(active ? 1000 : 60_000);
+  // Variant B (feedback #2): clip each worklog — and the running timer — to
+  // today's window, so a cross-midnight entry counts only its in-day slice
+  // toward the daily goal. `[todayStart, todayEnd)` half-open (next midnight).
+  const todayStart = todayStartUnixS();
+  const todayEnd = todayEndUnixS() + 1;
   const baseSeconds = useMemo(
-    () => todayRows.reduce((a, r) => a + r.duration_s, 0),
-    [todayRows],
+    () =>
+      todayRows.reduce(
+        (a, r) =>
+          a +
+          dayOverlapSeconds(
+            r.started_at,
+            r.ended_at ?? r.started_at + r.duration_s,
+            todayStart,
+            todayEnd,
+          ),
+        0,
+      ),
+    [todayRows, todayStart, todayEnd],
   );
-  const liveSeconds = active ? elapsedSeconds(active, now) : 0;
+  const liveSeconds = active
+    ? dayOverlapSeconds(
+        Math.floor(active.started_at / 1000),
+        Math.floor(now / 1000),
+        todayStart,
+        todayEnd,
+      )
+    : 0;
   const loggedSeconds = baseSeconds + liveSeconds;
 
   const pct = Math.min(100, (loggedSeconds / Math.max(1, dailyGoalSeconds)) * 100);
@@ -333,7 +358,7 @@ function RecentList({
 }: {
   recent: IssueRow[];
   busy: boolean;
-  onPick: (key: string) => void;
+  onPick: (key: string, connectionId?: number | null) => void;
 }) {
   return (
     <div className="px-4 flex-1 min-h-0 flex flex-col">
@@ -348,11 +373,11 @@ function RecentList({
         ) : (
           <ul className="flex flex-col gap-1">
             {recent.map((iss) => (
-              <li key={iss.issue_key}>
+              <li key={`${iss.connection_id ?? ""} ${iss.issue_key}`}>
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => onPick(iss.issue_key)}
+                  onClick={() => onPick(iss.issue_key, iss.connection_id)}
                   className="w-full text-left rounded-[var(--radius-sm)] px-2 py-1.5
                              hover:bg-[var(--bg-hover)]
                              disabled:opacity-50 disabled:cursor-not-allowed

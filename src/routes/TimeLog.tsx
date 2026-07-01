@@ -255,7 +255,9 @@ export default function TimeLog() {
           label: "Vrátit",
           action: async () => {
             try {
-              await undoDeleteWorklog(jiraId);
+              // Undo by local row id — remote ids aren't unique across tenants.
+              if (row.id == null) throw "Chybí lokální id záznamu";
+              await undoDeleteWorklog(row.id);
               // Restored — reveal the row again.
               setHiddenIds((prev) => {
                 const next = new Set(prev);

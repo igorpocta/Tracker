@@ -168,12 +168,20 @@ pub fn start_timer_inner(
     issue_key: &str,
     started_at_ms: i64,
     comment: Option<&str>,
+    connection_id: Option<i64>,
 ) -> Result<ActiveTimerState, String> {
     // Normalise: trim whitespace; truly empty key is allowed (unassigned).
     let issue_key = issue_key.trim();
     if !issue_key.is_empty() {
         crate::validation::validate_issue_key(issue_key)?;
     }
+    // An unassigned timer has no issue and therefore no tenant — never persist
+    // a stray connection_id against an empty key.
+    let connection_id = if issue_key.is_empty() {
+        None
+    } else {
+        connection_id
+    };
     let started_at_s = started_at_ms / 1000;
     let comment_norm = comment
         .map(|c| c.trim())
@@ -183,9 +191,14 @@ pub fn start_timer_inner(
     // for every start path (popover, tray, HTTP API, main window), so the guard
     // here protects all of them. Switching tasks must go through an explicit
     // stop first.
-    let started =
-        cache::timer::try_start_with_comment(db, issue_key, started_at_s, comment_norm.as_deref())
-            .map_err(|e| e.to_string())?;
+    let started = cache::timer::try_start_with_comment(
+        db,
+        issue_key,
+        started_at_s,
+        comment_norm.as_deref(),
+        connection_id,
+    )
+    .map_err(|e| e.to_string())?;
     if !started {
         return Err("Časomíra už běží. Nejdřív ji zastavte.".to_string());
     }
@@ -210,12 +223,17 @@ pub fn assign_active_timer_inner(
     let current = cache::timer::get(db)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no active timer".to_string())?;
+    // Assigning an issue to a previously-unassigned timer: resolve the tenant
+    // from the newly-picked key (assign has no explicit connection choice).
+    let connection_id =
+        cache::issues::get_connection_id_by_key(db, issue_key).map_err(|e| e.to_string())?;
     // Preserve the in-flight comment when assigning an issue.
     cache::timer::start_with_comment(
         db,
         issue_key,
         current.started_at,
         current.comment.as_deref(),
+        connection_id,
     )
     .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
@@ -224,6 +242,7 @@ pub fn assign_active_timer_inner(
             issue_key: issue_key.to_string(),
             started_at: current.started_at,
             comment: current.comment,
+            connection_id,
         },
         now_ms,
     ))
@@ -250,6 +269,7 @@ pub fn update_timer_comment_inner(
             issue_key: current.issue_key,
             started_at: current.started_at,
             comment: comment_norm,
+            connection_id: current.connection_id,
         },
         now_ms,
     ))
@@ -270,6 +290,7 @@ pub fn update_timer_start_inner(
         &current.issue_key,
         started_at_s,
         current.comment.as_deref(),
+        current.connection_id,
     )
     .map_err(|e| e.to_string())?;
     Ok(ActiveTimerState::from_timer(
@@ -278,6 +299,7 @@ pub fn update_timer_start_inner(
             issue_key: current.issue_key,
             started_at: started_at_s,
             comment: current.comment,
+            connection_id: current.connection_id,
         },
         now_ms,
     ))
@@ -311,10 +333,14 @@ pub fn record_local_stop(
     let duration_s = override_duration_s.unwrap_or(raw_duration_s);
     let ended_at_s = started_at_s.saturating_add(duration_s);
 
-    // Resolve the connection that owns this issue, if any. Lookup uses the
-    // issues cache populated by the sync jobs.
+    // Attribute the worklog to the tenant the timer was started against. If the
+    // start carried an explicit connection_id (favorite / picked row) prefer it;
+    // otherwise fall back to resolving from the issue key (legacy / assigned
+    // timers). This is what fixes routing when two enabled tenants share a key.
     let connection_id = if timer.issue_key.is_empty() {
         None
+    } else if let Some(cid) = timer.connection_id {
+        Some(cid)
     } else {
         cache::issues::get_connection_id_by_key(db, &timer.issue_key).map_err(|e| e.to_string())?
     };
@@ -394,6 +420,7 @@ pub async fn start_timer(
     issue_key: Option<String>,
     started_at_ms: Option<i64>,
     comment: Option<String>,
+    connection_id: Option<i64>,
 ) -> Result<ActiveTimerState, String> {
     // Phase 18A — Item 10: ALWAYS use server-side now() as the timer start
     // unless the user explicitly passed an override (e.g. backdating via
@@ -402,17 +429,24 @@ pub async fn start_timer(
     // every minute — producing a ~58s drift between wall clock and timer.
     let started = started_at_ms.unwrap_or_else(now_ms);
     let issue_key = issue_key.unwrap_or_default();
-    let res = start_timer_inner(&state.db, &issue_key, started, comment.as_deref())?;
+    let res = start_timer_inner(
+        &state.db,
+        &issue_key,
+        started,
+        comment.as_deref(),
+        connection_id,
+    )?;
     let _ = app.emit("timer-started", &res);
 
     // Best-effort Jira auto-transition. Volá se na pozadí — selhání nikdy
     // nesmí přerušit start timeru. Pro Freelo úkoly přeskočí, protože
-    // `resolve_jira_pair_for_issue` vrátí None.
+    // `resolve_jira_pair_for_issue` vrátí None. Předáme vybraný `connection_id`,
+    // ať přechod trefí správného tenanta i při kolizi klíče mezi účty.
     if !issue_key.is_empty() && !crate::freelo::is_freelo_key(&issue_key) {
         let key = issue_key.clone();
         let handle = app.clone();
         tauri::async_runtime::spawn(async move {
-            try_auto_transition(&handle, &key).await;
+            try_auto_transition(&handle, &key, connection_id).await;
         });
     }
 
@@ -422,13 +456,16 @@ pub async fn start_timer(
 /// Pokusí se přejít issue do nakonfigurovaného stavu po startu timeru.
 /// Tichý fallback — všechny chyby se logují přes tracing a nezvedají se
 /// ven do UI.
-async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str) {
+async fn try_auto_transition(app: &tauri::AppHandle, issue_key: &str, connection_id: Option<i64>) {
     use tauri::Manager;
     let state = app.state::<AppState>();
-    // Najít Jira connection, která ten issue vlastní (pokud žádná → end).
-    let conn_id = match crate::cache::issues::get_connection_id_by_key(&state.db, issue_key) {
-        Ok(Some(id)) => id,
-        _ => return,
+    // Preferuj tenanta vybraného při startu; jinak dohledej z klíče (legacy).
+    let conn_id = match connection_id {
+        Some(id) => id,
+        None => match crate::cache::issues::get_connection_id_by_key(&state.db, issue_key) {
+            Ok(Some(id)) => id,
+            _ => return,
+        },
     };
     let (client, cfg_json) = {
         let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
@@ -589,9 +626,13 @@ pub async fn stop_timer_inner(
         Freelo,
     }
     let owner: Option<OwnerRoute> = {
-        let cid = cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
-            .ok()
-            .flatten();
+        // Prefer the tenant the timer was pinned to at start (favorite / picked
+        // row); fall back to key-based resolution for legacy / assigned timers.
+        let cid = timer.connection_id.or_else(|| {
+            cache::issues::get_connection_id_by_key(&state.db, &timer.issue_key)
+                .ok()
+                .flatten()
+        });
         let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         cid.and_then(|id| conns.iter().find(|c| c.id == id && c.enabled))
             .map(|c| match &c.client {
@@ -738,7 +779,10 @@ pub async fn stop_timer_inner(
 /// `chrono::Utc` (no DST) without pulling in `chrono-tz`. The real DST
 /// guarantee comes from the underlying `chrono::Local`
 /// implementation — we don't ship a TZ database of our own.
-fn local_day_bounds<TZ: chrono::TimeZone>(tz: &TZ, today: chrono::NaiveDate) -> Option<(i64, i64)> {
+pub(crate) fn local_day_bounds<TZ: chrono::TimeZone>(
+    tz: &TZ,
+    today: chrono::NaiveDate,
+) -> Option<(i64, i64)> {
     let start_local = today.and_hms_opt(0, 0, 0)?;
     let from = tz.from_local_datetime(&start_local).single()?.timestamp();
     let tomorrow = today.succ_opt()?;
@@ -764,7 +808,10 @@ fn maybe_notify_daily_goal_reached(app: &tauri::AppHandle, db: &Db) {
         None => return,
     };
 
-    let total = match cache::worklogs::total_seconds_for_range(db, from, to - 1) {
+    // Variant B: clip each worklog to today's window so a cross-midnight entry
+    // counts only its in-day slice toward the daily goal (not wholesale on the
+    // start day). `[from, to)` is half-open.
+    let total = match cache::worklogs::overlap_seconds_for_range(db, from, to) {
         Ok(t) => t,
         Err(_) => return,
     };
@@ -831,5 +878,59 @@ mod tests {
         assert_eq!(from_dt.naive_utc().time(), chrono::NaiveTime::MIN);
         assert_eq!(to_dt.naive_utc().time(), chrono::NaiveTime::MIN);
         assert_eq!(to_dt.naive_utc().date(), today.succ_opt().unwrap());
+    }
+
+    #[test]
+    fn stop_attributes_worklog_to_timer_connection() {
+        // AK4.3 (backend): when the timer was started against an explicit tenant,
+        // the recorded worklog must carry THAT connection_id — even when the same
+        // issue key exists in another enabled tenant (key-based resolution would
+        // otherwise pick the deterministic-but-wrong one).
+        use crate::cache::timer::ActiveTimer;
+        use crate::cache::{self, Db};
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let db = Db::open(&dir.path().join("t.db")).unwrap();
+
+        let mk = |name: &str| {
+            cache::connections::insert(
+                &db,
+                cache::connections::NewConnection {
+                    provider: "jira",
+                    name,
+                    enabled: true,
+                    config_json: "{}",
+                },
+            )
+            .unwrap()
+        };
+        let c1 = mk("Tenant A");
+        let c2 = mk("Tenant B");
+        for cid in [c1, c2] {
+            cache::issues::upsert(
+                &db,
+                &cache::issues::IssueRow {
+                    connection_id: cid,
+                    issue_id: format!("{cid}-1"),
+                    issue_key: "PROJ-1".into(),
+                    name: "x".into(),
+                    created_at: 1,
+                    updated_at: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let timer = ActiveTimer {
+            issue_key: "PROJ-1".into(),
+            started_at: 1_700_000_000,
+            comment: None,
+            connection_id: Some(c2),
+        };
+        let row =
+            super::record_local_stop(&db, &timer, 1_700_003_600_000, None, None, None).unwrap();
+        assert_eq!(row.connection_id, Some(c2));
     }
 }

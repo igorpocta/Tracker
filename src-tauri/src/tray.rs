@@ -223,7 +223,7 @@ fn spawn_quick_start_unassigned<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<crate::state::AppState>();
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let res = crate::commands::timer::start_timer_inner(&state.db, "", now_ms, None);
+        let res = crate::commands::timer::start_timer_inner(&state.db, "", now_ms, None, None);
         if let Ok(active) = res {
             use tauri::Emitter;
             let _ = app.emit("timer-started", &active);

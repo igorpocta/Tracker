@@ -41,6 +41,7 @@ import { SummaryCards } from "../components/Reports/SummaryCards";
 import {
   addDays,
   dayEndUnixS,
+  dayOverlapSeconds,
   dayStartUnixS,
   endOfMonth,
   endOfPreviousMonth,
@@ -93,8 +94,25 @@ export default function Reports() {
   });
 
   const rows = q.data ?? [];
-  const totalSeconds = rows.reduce((a, r) => a + r.duration_s, 0);
-  const daysWorked = useMemo(() => uniqueDays(rows), [rows]);
+  // The fetch returns worklogs OVERLAPPING [fromUnix, toUnix] (variant B), so
+  // clip each row to the period before summing — otherwise a worklog straddling
+  // the period boundary would over-count its out-of-period slice.
+  const toUnixExcl = toUnix + 1;
+  const totalSeconds = rows.reduce(
+    (a, r) =>
+      a +
+      dayOverlapSeconds(
+        r.started_at,
+        r.ended_at ?? r.started_at + r.duration_s,
+        fromUnix,
+        toUnixExcl,
+      ),
+    0,
+  );
+  const daysWorked = useMemo(
+    () => uniqueDays(rows, fromUnix, toUnix),
+    [rows, fromUnix, toUnix],
+  );
   const issuesTouched = useMemo(
     () => new Set(rows.map((r) => r.issue_key)).size,
     [rows],
@@ -144,7 +162,7 @@ export default function Reports() {
         dailyGoalHours={dailyGoalHours}
       />
 
-      <IssuesBreakdown rows={rows} />
+      <IssuesBreakdown rows={rows} fromUnix={fromUnix} toUnixExcl={toUnixExcl} />
     </PageContainer>
   );
 }
@@ -233,8 +251,19 @@ function StreakBadge({
   );
 }
 
-function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
-  const aggregated = useMemo(() => aggregateByIssue(rows), [rows]);
+function IssuesBreakdown({
+  rows,
+  fromUnix,
+  toUnixExcl,
+}: {
+  rows: WorklogRow[];
+  fromUnix: number;
+  toUnixExcl: number;
+}) {
+  const aggregated = useMemo(
+    () => aggregateByIssue(rows, fromUnix, toUnixExcl),
+    [rows, fromUnix, toUnixExcl],
+  );
   const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   return (
@@ -307,11 +336,24 @@ function IssuesBreakdown({ rows }: { rows: WorklogRow[] }) {
 // Helpers
 // -----------------------------------------------------------------------------
 
-function uniqueDays(rows: WorklogRow[]): number {
+function uniqueDays(rows: WorklogRow[], fromUnix: number, toUnix: number): number {
   const s = new Set<string>();
+  const toExcl = toUnix + 1;
   for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    s.add(formatKey(d));
+    // Count every local day the worklog actually overlaps WITHIN the period —
+    // half-open, variant B. A cross-midnight entry counts both days; a row that
+    // only overflowed in from an earlier day counts just the in-period day(s).
+    const endedAt = r.ended_at ?? r.started_at + r.duration_s;
+    let dayDate = startOfDay(new Date(r.started_at * 1000));
+    const lastDay = startOfDay(new Date(endedAt * 1000));
+    while (dayDate.getTime() <= lastDay.getTime()) {
+      const dayStart = Math.max(dayStartUnixS(dayDate), fromUnix);
+      const dayEnd = Math.min(dayStartUnixS(addDays(dayDate, 1)), toExcl);
+      if (dayOverlapSeconds(r.started_at, endedAt, dayStart, dayEnd) > 0) {
+        s.add(formatKey(dayDate));
+      }
+      dayDate = addDays(dayDate, 1);
+    }
   }
   return s.size;
 }
@@ -323,9 +365,22 @@ interface Aggregated {
   lastLoggedUnixS: number;
 }
 
-function aggregateByIssue(rows: WorklogRow[]): Aggregated[] {
+function aggregateByIssue(
+  rows: WorklogRow[],
+  fromUnix: number,
+  toUnixExcl: number,
+): Aggregated[] {
   const map = new Map<string, Aggregated>();
   for (const r of rows) {
+    // Clip to the period (overlap-based fetch — variant B) so an edge worklog
+    // contributes only its in-period seconds to the issue total.
+    const secs = dayOverlapSeconds(
+      r.started_at,
+      r.ended_at ?? r.started_at + r.duration_s,
+      fromUnix,
+      toUnixExcl,
+    );
+    if (secs === 0) continue;
     // Local-only worklogy bez přiřazeného úkolu drží `null`. Zařadíme je
     // pod sentinelový klíč, aby se nesloučily s jinými.
     const key = r.issue_key ?? "(bez úkolu)";
@@ -334,11 +389,11 @@ function aggregateByIssue(rows: WorklogRow[]): Aggregated[] {
       map.set(key, {
         issueKey: key,
         summary: r.summary,
-        totalSeconds: r.duration_s,
+        totalSeconds: secs,
         lastLoggedUnixS: r.started_at,
       });
     } else {
-      cur.totalSeconds += r.duration_s;
+      cur.totalSeconds += secs;
       if (r.started_at > cur.lastLoggedUnixS) {
         cur.lastLoggedUnixS = r.started_at;
         cur.summary = r.summary ?? cur.summary;

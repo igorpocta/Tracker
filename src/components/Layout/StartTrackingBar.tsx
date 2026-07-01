@@ -31,12 +31,26 @@ import { useNow } from "../../hooks/useNow";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
+/**
+ * Tenant-safe identity for a result / favorite row. The same issue key can
+ * exist in two connections; deduping by key alone collapses them and can
+ * surface the wrong tenant. Space separator is unambiguous here — the id is
+ * numeric and issue keys never contain spaces.
+ */
+function rowKey(r: { connection_id?: number | null; issue_key: string }): string {
+  return `${r.connection_id ?? ""} ${r.issue_key}`;
+}
+
 export interface StartTrackingBarProps {
   /**
    * Called when the user clicks Start. `comment` is the optional in-flight
    * note from the comment input (empty string when blank).
    */
-  onPickIssue: (issueKey: string, comment: string) => void;
+  onPickIssue: (
+    issueKey: string,
+    comment: string,
+    connectionId?: number | null,
+  ) => void;
   onStop?: () => void;
   /**
    * Phase 18A — Item 4: callback to start an unassigned timer (empty issue
@@ -87,7 +101,11 @@ function IdleBar({
   onPickIssue,
   onStartUnassigned,
 }: {
-  onPickIssue: (issueKey: string, comment: string) => void;
+  onPickIssue: (
+    issueKey: string,
+    comment: string,
+    connectionId?: number | null,
+  ) => void;
   onStartUnassigned?: (comment: string) => void;
 }) {
   const [comment, setComment] = useState("");
@@ -119,7 +137,7 @@ function IdleBar({
     staleTime: 30_000,
   });
   const favorites = favoritesQ.data ?? [];
-  const favoriteKeys = new Set(favorites.map((f) => f.issue_key));
+  const favoriteKeys = new Set(favorites.map(rowKey));
 
   // Build the result list. Favorites always go first; the rest comes
   // from `baseResults` (search or recent feed via the hook),
@@ -133,7 +151,7 @@ function IdleBar({
     : favorites;
   const results = [
     ...filteredFavorites,
-    ...baseResults.filter((r) => !favoriteKeys.has(r.issue_key)),
+    ...baseResults.filter((r) => !favoriteKeys.has(rowKey(r))),
   ];
 
   // Close the dropdown on outside click. Escape closing lives on the
@@ -145,17 +163,18 @@ function IdleBar({
     open,
   );
 
-  const handlePick = (issueKey: string) => {
+  const handlePick = (issueKey: string, connectionId?: number | null) => {
     setQuery("");
     setOpen(false);
     const c = comment.trim();
     setComment("");
-    onPickIssue(issueKey, c);
+    onPickIssue(issueKey, c, connectionId);
   };
 
   const onSubmit = () => {
-    if (results[highlight]) {
-      handlePick(results[highlight].issue_key);
+    const sel = results[highlight];
+    if (sel) {
+      handlePick(sel.issue_key, sel.connection_id);
     }
   };
 
@@ -318,7 +337,7 @@ export interface SearchDropdownProps {
   results: import("../../api/types").IssueRow[];
   favoriteKeys: Set<string>;
   highlight: number;
-  onPick: (key: string) => void;
+  onPick: (key: string, connectionId?: number | null) => void;
   onHover: (idx: number) => void;
   loading: boolean;
   emptyQuery: boolean;
@@ -338,7 +357,7 @@ export function SearchDropdown({
   // the favourite rows, "Naposledy trackováno" above the recently-tracked
   // rows. With a non-empty query we render one flat list (favorites that
   // match the search just float to the top).
-  const firstNonFavIdx = results.findIndex((r) => !favoriteKeys.has(r.issue_key));
+  const firstNonFavIdx = results.findIndex((r) => !favoriteKeys.has(rowKey(r)));
   const favCount =
     firstNonFavIdx < 0 ? results.length : firstNonFavIdx;
   const restCount = results.length - favCount;
@@ -369,13 +388,13 @@ export function SearchDropdown({
         </div>
       )}
       {results.map((iss, idx) => {
-        const isFav = favoriteKeys.has(iss.issue_key);
+        const isFav = favoriteKeys.has(rowKey(iss));
         const showRestHeader =
           emptyQuery && idx === favCount && restCount > 0 && favCount > 0;
         const showFirstRestHeader =
           emptyQuery && idx === 0 && favCount === 0 && restCount > 0;
         return (
-          <Fragment key={iss.issue_key}>
+          <Fragment key={rowKey(iss)}>
             {(showRestHeader || showFirstRestHeader) && (
               <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
                 Naposledy trackováno
@@ -392,12 +411,17 @@ export function SearchDropdown({
                   : "text-[var(--text-secondary)]",
               )}
             >
-              <FavoriteStar issueKey={iss.issue_key} initial={isFav} size={12} />
+              <FavoriteStar
+                issueKey={iss.issue_key}
+                connectionId={iss.connection_id}
+                initial={isFav}
+                size={12}
+              />
               <button
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  onPick(iss.issue_key);
+                  onPick(iss.issue_key, iss.connection_id);
                 }}
                 className="flex-1 min-w-0 text-left flex items-center gap-2"
               >

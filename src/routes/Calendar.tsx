@@ -41,6 +41,7 @@ import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import {
   addDays,
   dayEndUnixS,
+  dayOverlapSeconds,
   dayStartUnixS,
   endOfMonth,
   formatIsoDate,
@@ -160,7 +161,19 @@ function MonthlyView({
 
   const rows = q.data ?? [];
   const dayTotals = useMemo(() => totalsByDay(rows), [rows]);
-  const monthTotal = rows.reduce((a, r) => a + r.duration_s, 0);
+  // Overlap-based fetch (variant B): clip to the month window so an edge
+  // worklog doesn't over-count its out-of-month slice.
+  const monthTotal = rows.reduce(
+    (a, r) =>
+      a +
+      dayOverlapSeconds(
+        r.started_at,
+        r.ended_at ?? r.started_at + r.duration_s,
+        fromUnix,
+        toUnix + 1,
+      ),
+    0,
+  );
 
   // Phase 18C — right-click context menu state. We only need a single menu
   // instance for the whole grid.
@@ -311,7 +324,17 @@ function YearlyView({
 
   const rows = q.data ?? [];
   const dayTotals = useMemo(() => totalsByDay(rows), [rows]);
-  const yearTotal = rows.reduce((a, r) => a + r.duration_s, 0);
+  const yearTotal = rows.reduce(
+    (a, r) =>
+      a +
+      dayOverlapSeconds(
+        r.started_at,
+        r.ended_at ?? r.started_at + r.duration_s,
+        fromUnix,
+        toUnix + 1,
+      ),
+    0,
+  );
 
   return (
     <>
@@ -621,9 +644,21 @@ function YearMonthPickers({
 function totalsByDay(rows: WorklogRow[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    const k = formatKey(d);
-    map.set(k, (map.get(k) ?? 0) + r.duration_s);
+    // Variant B (feedback #2): split a cross-midnight worklog across the days
+    // it touches, crediting each day only its overlapping slice.
+    const endedAt = r.ended_at ?? r.started_at + r.duration_s;
+    let dayDate = startOfDay(new Date(r.started_at * 1000));
+    const lastDay = startOfDay(new Date(endedAt * 1000));
+    while (dayDate.getTime() <= lastDay.getTime()) {
+      const dayStart = dayStartUnixS(dayDate);
+      const dayEnd = dayStartUnixS(addDays(dayDate, 1));
+      const secs = dayOverlapSeconds(r.started_at, endedAt, dayStart, dayEnd);
+      if (secs > 0) {
+        const k = formatKey(dayDate);
+        map.set(k, (map.get(k) ?? 0) + secs);
+      }
+      dayDate = addDays(dayDate, 1);
+    }
   }
   return map;
 }

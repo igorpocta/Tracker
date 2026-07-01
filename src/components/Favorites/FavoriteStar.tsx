@@ -19,6 +19,12 @@ import { queryKeys } from "../../api/queryKeys";
 export interface FavoriteStarProps {
   issueKey: string;
   /**
+   * Connection that owns this issue. Favorites are keyed by
+   * `(connectionId, issueKey)` so the same key in two tenants toggles
+   * independently. `null`/`undefined` means "connection unknown" (legacy).
+   */
+  connectionId?: number | null;
+  /**
    * Source-of-truth override. When provided, the component renders in
    * "controlled" mode: it trusts the parent and does NOT issue its own
    * `isFavorite` IPC call. The parent is expected to keep this value in
@@ -37,6 +43,7 @@ export interface FavoriteStarProps {
 
 export function FavoriteStar({
   issueKey,
+  connectionId,
   initial,
   size = 14,
   className,
@@ -51,8 +58,8 @@ export function FavoriteStar({
   // somewhere else in the tree still updates this component's view.
   const isControlled = initial !== undefined;
   const q = useQuery({
-    queryKey: queryKeys.favorites.one(issueKey),
-    queryFn: () => isFavoriteCmd(issueKey),
+    queryKey: queryKeys.favorites.one(issueKey, connectionId),
+    queryFn: () => isFavoriteCmd(issueKey, connectionId),
     staleTime: 60_000,
     enabled: !isControlled && issueKey.length > 0,
   });
@@ -63,12 +70,14 @@ export function FavoriteStar({
     e.preventDefault();
     try {
       if (isFav) {
-        await removeFavorite(issueKey);
+        await removeFavorite(issueKey, connectionId);
       } else {
-        await addFavorite(issueKey);
+        await addFavorite(issueKey, connectionId);
       }
     } finally {
-      queryClient.invalidateQueries({ queryKey: queryKeys.favorites.one(issueKey) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.favorites.one(issueKey, connectionId),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.favorites.all() });
     }
   };

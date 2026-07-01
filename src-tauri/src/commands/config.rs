@@ -62,6 +62,9 @@ pub async fn save_config(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("config.toml");
+    // Authoritative host allow-list — reject before persisting so a legacy IPC
+    // can't route the token to an unapproved host either.
+    crate::validation::validate_provider_base_url("jira", &args.config.base_url, false)?;
     config::save_to_path(&path, &args.config).map_err(|e| e.to_string())?;
     crate::keychain::save_jira_token(&state.app_data_dir, &args.token)
         .map_err(|e| e.to_string())?;
@@ -156,6 +159,10 @@ pub async fn test_jira_connection_inner(
     email: &str,
     token: &str,
 ) -> Result<JiraUser, JiraError> {
+    // Legacy single-Jira probe still sends the token to `base_url`, so gate it
+    // on the same host allow-list (cloud `*.atlassian.net`, or loopback in dev).
+    crate::validation::validate_provider_base_url("jira", base_url, false)
+        .map_err(JiraError::InsecureUrl)?;
     let client = JiraClient::new(base_url.to_string(), email.to_string(), token.to_string())?;
     client.myself().await
 }
@@ -200,6 +207,7 @@ pub fn update_config_inner<F>(
 where
     F: FnOnce(&str) -> Result<(), String>,
 {
+    crate::validation::validate_provider_base_url("jira", &new_cfg.base_url, false)?;
     config::save_to_path(config_path, &new_cfg).map_err(|e| e.to_string())?;
     if let Some(tok) = new_token.as_deref() {
         save_token(tok)?;

@@ -56,6 +56,12 @@ pub struct JiraConnectionConfig {
     pub auto_transition_from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_transition_to_name: Option<String>,
+    /// Vědomý opt-in pro self-hosted Jira: povolí `base_url` mimo
+    /// `*.atlassian.net`. Bez něj backend cizí host odmítne (ochrana proti
+    /// odeslání tokenu na neznámý host). Vždy se ale vyžaduje HTTPS a
+    /// neprivátní IP — viz `validation::validate_provider_base_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_custom_host: Option<bool>,
     /// Volitelný hex barvy (`#RRGGBB`), kterou Reporty použijí místo
     /// defaultní per-provider palety. Sdílí se s `FreeloConnectionConfig.color`
     /// — má stejnou sémantiku, jen je per provider.
@@ -205,6 +211,39 @@ fn validate_jira_config(cfg: &JiraConnectionConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Authoritative backend check that a connection's `base_url` is safe to send
+/// an API token to. Enforced on add/update; the client constructors re-check
+/// the provider-agnostic safety core so imported / hydrated configs can't slip
+/// a token to an arbitrary host either.
+///
+/// Best-effort on deserialization: a config that doesn't parse for its provider
+/// is left to fail later at client-build time (which also validates). An empty
+/// base_url is fine — Freelo falls back to its default, Jira has no client yet.
+fn validate_config_url(provider: &str, config_json: &str) -> Result<(), String> {
+    match provider {
+        "jira" => {
+            if let Ok(cfg) = serde_json::from_str::<JiraConnectionConfig>(config_json) {
+                if !cfg.base_url.trim().is_empty() {
+                    crate::validation::validate_provider_base_url(
+                        "jira",
+                        &cfg.base_url,
+                        cfg.allow_custom_host.unwrap_or(false),
+                    )?;
+                }
+            }
+        }
+        "freelo" => {
+            if let Ok(cfg) = serde_json::from_str::<FreeloConnectionConfig>(config_json) {
+                if !cfg.base_url.trim().is_empty() {
+                    crate::validation::validate_provider_base_url("freelo", &cfg.base_url, false)?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn is_valid_hex(s: &str) -> bool {
     let bytes = s.as_bytes();
     if bytes.len() != 7 || bytes[0] != b'#' {
@@ -282,6 +321,9 @@ pub async fn add_connection(
     }
     let config_json =
         serde_json::to_string(&args.config).map_err(|e| format!("invalid config JSON: {e}"))?;
+    // Authoritative URL check — never trust the renderer's client-side https
+    // validation alone.
+    validate_config_url(&args.provider, &config_json)?;
 
     let id = cache::connections::insert(
         &state.db,
@@ -357,6 +399,10 @@ pub async fn update_connection(
     let prev = cache::connections::get_by_id(&state.db, args.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Connection not found".to_string())?;
+    // Authoritative URL check against the connection's actual provider.
+    if let Some(ref cfg_json) = cfg_str {
+        validate_config_url(&prev.provider, cfg_json)?;
+    }
     let key = cache::connections::token_key(args.id);
     let prev_token = if args.token.is_some() {
         crate::keychain::get(&state.app_data_dir, crate::keychain::KEYCHAIN_SERVICE, &key)
@@ -496,6 +542,13 @@ pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<Prov
         "jira" => {
             let cfg: JiraConnectionConfig =
                 serde_json::from_value(args.config).map_err(|e| format!("invalid config: {e}"))?;
+            // Never send the token to a disallowed host — this command hits the
+            // provider with the credentials, so validate before building.
+            crate::validation::validate_provider_base_url(
+                "jira",
+                &cfg.base_url,
+                cfg.allow_custom_host.unwrap_or(false),
+            )?;
             let client =
                 JiraClient::new(cfg.base_url, cfg.email, args.token).map_err(|e| e.to_string())?;
             let u: JiraUser = client.myself().await.map_err(|e| e.to_string())?;
@@ -514,6 +567,7 @@ pub async fn test_connection_for_provider(args: TestProviderArgs) -> Result<Prov
             } else {
                 cfg.base_url
             };
+            crate::validation::validate_provider_base_url("freelo", &base_url, false)?;
             let client = FreeloClient::new(base_url, cfg.email.clone(), args.token)
                 .map_err(|e| e.to_string())?;
             let u = client.me().await.map_err(|e| e.to_string())?;

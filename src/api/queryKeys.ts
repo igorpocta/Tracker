@@ -106,7 +106,11 @@ export const queryKeys = {
   /** Favourite-issues set + per-issue toggle state. */
   favorites: {
     all: () => ["favorites"] as const,
-    one: (issueKey: string) => ["favorite", issueKey] as const,
+    // Keyed by (connectionId, issueKey): the same issue key in two tenants is
+    // two independent favorites, so their toggle state must not share a cache
+    // entry. `null` covers the uncontrolled / connection-less lookup.
+    one: (issueKey: string, connectionId?: number | null) =>
+      ["favorite", connectionId ?? null, issueKey] as const,
   },
 
   /** Daily-goal streak badge (Reports) — derived from worklogs. */

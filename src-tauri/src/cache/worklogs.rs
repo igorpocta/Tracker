@@ -256,9 +256,18 @@ pub fn for_date_range(
     to_unix_s: i64,
 ) -> Result<Vec<WorklogRow>, DbError> {
     let conn = db.pool().get()?;
+    // Overlap, not `started_at BETWEEN`: a worklog crossing local midnight must
+    // surface for BOTH days it touches so per-day/period aggregation (which
+    // clips each row to its window) doesn't drop the overflowing slice
+    // (feedback #2, variant B). Callers that want per-day totals clip with
+    // `day_overlap_seconds`.
+    //
+    // Half-open in `from` (`ended_at > ?1`, `to` still inclusive): a worklog
+    // ending exactly at the window start has zero overlap with it and must NOT
+    // surface there — otherwise it'd show as a phantom zero-second row.
     let mut stmt = conn.prepare(&format!(
         "SELECT {SELECT_COLS} {FROM_JOIN}
-         WHERE w.started_at BETWEEN ?1 AND ?2
+         WHERE w.ended_at > ?1 AND w.started_at <= ?2
            AND w.tombstoned_at IS NULL
          ORDER BY w.started_at DESC"
     ))?;
@@ -651,6 +660,42 @@ fn row_to_worklog(r: &rusqlite::Row<'_>) -> rusqlite::Result<WorklogRow> {
     })
 }
 
+/// Seconds of the worklog `[started_at, ended_at]` that fall inside the
+/// half-open day window `[day_start, day_end)`. All values are Unix seconds.
+///
+/// This is the canonical "clip a worklog to a day" primitive: a worklog that
+/// crosses local midnight (e.g. 23:30→00:30) contributes only its overlapping
+/// slice to each day it touches, instead of being attributed wholesale to the
+/// start day. Used by streak/daily-goal aggregation (feedback #2, variant B).
+pub fn day_overlap_seconds(started_at: i64, ended_at: i64, day_start: i64, day_end: i64) -> i64 {
+    let start = started_at.max(day_start);
+    let end = ended_at.min(day_end);
+    (end - start).max(0)
+}
+
+/// Sum of every non-tombstoned worklog's overlap with the half-open range
+/// `[from_unix_s, to_unix_s)`. Unlike [`total_seconds_for_range`] (which buckets
+/// a worklog wholesale by `started_at`), this clips each worklog to the window
+/// so a cross-midnight entry counts only its in-window slice.
+pub fn overlap_seconds_for_range(
+    db: &Db,
+    from_unix_s: i64,
+    to_unix_s: i64,
+) -> Result<i64, DbError> {
+    let conn = db.pool().get()?;
+    let total: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(MIN(ended_at, ?2) - MAX(started_at, ?1)), 0)
+         FROM worklogs
+         WHERE ended_at > ?1
+           AND started_at < ?2
+           AND ended_at > started_at
+           AND tombstoned_at IS NULL",
+        rusqlite::params![from_unix_s, to_unix_s],
+        |r| r.get(0),
+    )?;
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -708,6 +753,67 @@ mod tests {
         assert_eq!(second.issue_key.as_deref(), Some("DEV-2"));
         assert_eq!(second.started_at, 1030);
         assert_eq!(second.ended_at, 1060);
+    }
+
+    #[test]
+    fn for_date_range_includes_worklogs_overlapping_the_window() {
+        // A worklog [100, 300] must be returned by any range it OVERLAPS, not
+        // only the one its `started_at` falls in — otherwise a cross-midnight
+        // entry is missing from the next day's totals (feedback #2).
+        let db = open_db();
+        let mut w = mk(Some("DEV-1"), 100);
+        w.ended_at = 300;
+        record(&db, &w).unwrap();
+
+        // Window that starts AFTER started_at but before ended_at: overlaps.
+        let rows = for_date_range(&db, 200, 400).unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "worklog overlapping [200,400] must be returned"
+        );
+        // Window entirely after the worklog: not returned.
+        assert!(for_date_range(&db, 400, 500).unwrap().is_empty());
+        // Window entirely before: not returned.
+        assert!(for_date_range(&db, 0, 50).unwrap().is_empty());
+        // Half-open in `from`: a window starting exactly where the worklog ENDS
+        // has zero overlap → excluded (no phantom zero-second row).
+        assert!(for_date_range(&db, 300, 400).unwrap().is_empty());
+    }
+
+    #[test]
+    fn day_overlap_clips_cross_midnight_worklog() {
+        // Day window [1000, 2000). A worklog fully inside → its whole length.
+        assert_eq!(day_overlap_seconds(1200, 1500, 1000, 2000), 300);
+        // Starts before the window → only the in-window slice.
+        assert_eq!(day_overlap_seconds(800, 1300, 1000, 2000), 300);
+        // Ends after the window → only the in-window slice.
+        assert_eq!(day_overlap_seconds(1800, 2500, 1000, 2000), 200);
+        // Entirely outside → zero, never negative.
+        assert_eq!(day_overlap_seconds(2100, 2200, 1000, 2000), 0);
+        assert_eq!(day_overlap_seconds(100, 200, 1000, 2000), 0);
+    }
+
+    #[test]
+    fn overlap_seconds_for_range_clips_each_worklog() {
+        let db = open_db();
+        // Worklog A: [1200, 1500] fully inside the window → 300.
+        let mut a = mk(Some("DEV-1"), 1200);
+        a.ended_at = 1500;
+        record(&db, &a).unwrap();
+        // Worklog B: [1800, 2500] straddles the window end → 200 in-window.
+        let mut b = mk(Some("DEV-2"), 1800);
+        b.ended_at = 2500;
+        record(&db, &b).unwrap();
+        // Worklog C: entirely after the window → 0.
+        let mut c = mk(Some("DEV-3"), 3000);
+        c.ended_at = 3100;
+        record(&db, &c).unwrap();
+
+        // Window [1000, 2000): A=300 + B=200 (clipped) + C=0 = 500.
+        assert_eq!(overlap_seconds_for_range(&db, 1000, 2000).unwrap(), 500);
+        // The old wholesale-by-started_at sum would have counted B fully (700),
+        // over-reporting the window by B's post-boundary slice.
     }
 
     #[test]

@@ -80,7 +80,7 @@ fn start_then_get_returns_running_timer_with_elapsed() {
     let (_dir, db) = fresh_db();
 
     // Start at t=100_000 ms (100 s).
-    let state = start_timer_inner(&db, "ACME-1", 100_000, None).unwrap();
+    let state = start_timer_inner(&db, "ACME-1", 100_000, None, None).unwrap();
     assert_eq!(state.issue_key, "ACME-1");
     assert_eq!(state.started_at, 100_000);
     assert_eq!(state.elapsed_seconds, 0);
@@ -97,8 +97,8 @@ fn start_timer_refuses_to_overwrite_running_timer() {
     // P1-1: a second start must be atomically rejected instead of silently
     // overwriting the running timer. The original timer stays intact.
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 1_000, None).unwrap();
-    let err = start_timer_inner(&db, "ACME-2", 5_000, None).unwrap_err();
+    start_timer_inner(&db, "ACME-1", 1_000, None, None).unwrap();
+    let err = start_timer_inner(&db, "ACME-2", 5_000, None, None).unwrap_err();
     assert!(err.contains("běží"), "unexpected error: {err}");
     let t = timer::get(&db).unwrap().unwrap();
     assert_eq!(t.issue_key, "ACME-1");
@@ -108,7 +108,7 @@ fn start_timer_refuses_to_overwrite_running_timer() {
 #[test]
 fn start_timer_persists_initial_comment() {
     let (_dir, db) = fresh_db();
-    let state = start_timer_inner(&db, "ACME-1", 1_000, Some("draft note")).unwrap();
+    let state = start_timer_inner(&db, "ACME-1", 1_000, Some("draft note"), None).unwrap();
     assert_eq!(state.comment.as_deref(), Some("draft note"));
     let snap = get_timer_state_inner(&db, 2_000).unwrap().unwrap();
     assert_eq!(snap.comment.as_deref(), Some("draft note"));
@@ -117,7 +117,7 @@ fn start_timer_persists_initial_comment() {
 #[test]
 fn update_timer_comment_changes_only_the_comment() {
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 1_000, Some("first")).unwrap();
+    start_timer_inner(&db, "ACME-1", 1_000, Some("first"), None).unwrap();
     let snap = update_timer_comment_inner(&db, Some("second"), 2_000).unwrap();
     assert_eq!(snap.comment.as_deref(), Some("second"));
     assert_eq!(snap.issue_key, "ACME-1");
@@ -128,7 +128,7 @@ fn update_timer_comment_changes_only_the_comment() {
 #[test]
 fn update_timer_comment_clears_when_blank() {
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 0, Some("hello")).unwrap();
+    start_timer_inner(&db, "ACME-1", 0, Some("hello"), None).unwrap();
     let cleared = update_timer_comment_inner(&db, Some("   "), 1_000).unwrap();
     assert!(cleared.comment.is_none());
     let null_cleared = update_timer_comment_inner(&db, None, 2_000).unwrap();
@@ -138,7 +138,7 @@ fn update_timer_comment_clears_when_blank() {
 #[test]
 fn update_timer_start_changes_the_started_at_in_place() {
     let (_dir, db) = fresh_db();
-    start_timer_inner(&db, "ACME-1", 1_000, None).unwrap();
+    start_timer_inner(&db, "ACME-1", 1_000, None, None).unwrap();
     let updated = update_timer_start_inner(&db, 500, 1_500).unwrap();
     assert_eq!(updated.issue_key, "ACME-1");
     assert_eq!(updated.started_at, 0);
@@ -156,11 +156,12 @@ fn update_timer_start_errors_when_no_timer_running() {
 fn record_local_stop_writes_worklog_and_clears_timer() {
     let (_dir, db) = fresh_db();
     issue_upsert(&db, &issue("ACME-1", "fix the bug", 0)).unwrap();
-    start_timer_inner(&db, "ACME-1", 0, None).unwrap();
+    start_timer_inner(&db, "ACME-1", 0, None, None).unwrap();
     let timer_state = ActiveTimer {
         issue_key: "ACME-1".into(),
         started_at: 0,
         comment: None,
+        connection_id: None,
     };
 
     let row =
@@ -193,6 +194,7 @@ fn record_local_stop_clamps_negative_duration_to_zero() {
         issue_key: "ACME-1".into(),
         started_at: 100,
         comment: None,
+        connection_id: None,
     };
     // now < started_at → duration would be negative; we expect 0.
     let row = record_local_stop(&db, &timer_state, 0, None, None, None).unwrap();
@@ -367,6 +369,7 @@ fn suggested_issues_returns_only_issues_with_worklogs() {
         issue_key: "A-1".into(),
         started_at: 0,
         comment: None,
+        connection_id: None,
     };
     record_local_stop(&db, &timer_state, 60_000, None, None, None).unwrap();
 
@@ -431,7 +434,13 @@ async fn test_jira_connection_inner_rejects_bogus_url() {
     let err = test_jira_connection_inner("not a url", "a@b.c", "t")
         .await
         .unwrap_err();
-    assert!(matches!(err, JiraError::InvalidUrl(_)), "got {err:?}");
+    // A bogus URL is rejected either as a parse error or by the safety
+    // pre-check (which parses first and reports InsecureUrl). Both are correct
+    // rejections — the point is the token never leaves for a bad target.
+    assert!(
+        matches!(err, JiraError::InvalidUrl(_) | JiraError::InsecureUrl(_)),
+        "got {err:?}"
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -502,6 +511,34 @@ fn update_config_inner_does_not_save_token_when_none() {
     assert!(
         !called.into_inner(),
         "save_token closure must not run when new_token = None"
+    );
+}
+
+#[test]
+fn update_config_inner_rejects_disallowed_host() {
+    // Regression (feedback #3): the legacy config path must enforce the provider
+    // host allow-list. A disallowed host (public non-Atlassian) is rejected
+    // BEFORE the config or token are persisted, so the token can never be built
+    // into a client that ships it there.
+    let (dir, state) = fresh_state();
+    let cfg_path = dir.path().join("config.toml");
+    let cfg = JiraConfig {
+        base_url: "https://evil.com".into(),
+        email: "alice@acme.example".into(),
+    };
+    let called = std::cell::Cell::new(false);
+    let res = update_config_inner(&state, &cfg_path, cfg, Some("tok".into()), |_t| {
+        called.set(true);
+        Ok(())
+    });
+    assert!(res.is_err(), "disallowed host must be rejected");
+    assert!(
+        !called.into_inner(),
+        "token must NOT be persisted for a rejected host"
+    );
+    assert!(
+        !cfg_path.exists(),
+        "config must NOT be written for a rejected host"
     );
 }
 

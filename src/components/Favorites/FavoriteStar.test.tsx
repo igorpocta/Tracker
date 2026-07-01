@@ -84,7 +84,17 @@ describe("<FavoriteStar /> controlled vs uncontrolled", () => {
     withProviders(<FavoriteStar issueKey="ACME-3" />);
 
     await waitFor(() => {
-      expect(isFavoriteMock).toHaveBeenCalledWith("ACME-3");
+      expect(isFavoriteMock).toHaveBeenCalledWith("ACME-3", undefined);
+    });
+  });
+
+  it("threads connectionId into the isFavorite IPC (tenant-safe)", async () => {
+    isFavoriteMock.mockResolvedValue(true);
+
+    withProviders(<FavoriteStar issueKey="ACME-3" connectionId={7} />);
+
+    await waitFor(() => {
+      expect(isFavoriteMock).toHaveBeenCalledWith("ACME-3", 7);
     });
   });
 });

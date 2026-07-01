@@ -134,6 +134,20 @@ impl AppState {
                         Some(t) => t,
                         None => continue, // no token yet — skip
                     };
+                    // Enforce the provider allow-list on hydration too: an
+                    // imported / hand-edited config must not route the token to
+                    // an unapproved host. Skip (don't build a client) on failure.
+                    if let Err(e) = crate::validation::validate_provider_base_url(
+                        "jira",
+                        &cfg.base_url,
+                        cfg.allow_custom_host.unwrap_or(false),
+                    ) {
+                        tracing::warn!(
+                            "hydrate: skipping connection {} — unsafe base_url: {e}",
+                            row.id
+                        );
+                        continue;
+                    }
                     let client = JiraClient::new(cfg.base_url.clone(), cfg.email.clone(), token)?;
                     built.push(ActiveConnection {
                         id: row.id,
@@ -160,6 +174,15 @@ impl AppState {
                     } else {
                         cfg.base_url.clone()
                     };
+                    if let Err(e) =
+                        crate::validation::validate_provider_base_url("freelo", &base_url, false)
+                    {
+                        tracing::warn!(
+                            "hydrate: skipping connection {} — unsafe base_url: {e}",
+                            row.id
+                        );
+                        continue;
+                    }
                     let client = FreeloClient::new(base_url, cfg.email.clone(), api_key)?;
                     built.push(ActiveConnection {
                         id: row.id,
@@ -212,6 +235,12 @@ impl AppState {
         let token = crate::keychain::load_jira_token(&self.app_data_dir)?;
         match (cfg, token) {
             (Some(c), Some(token)) => {
+                // Legacy single-Jira shim still feeds `jira_client_cloned()`
+                // (sync, issues). Gate it on the provider allow-list so a
+                // legacy config pointing at an unapproved host never gets a
+                // live client that could ship the token there.
+                crate::validation::validate_provider_base_url("jira", &c.base_url, false)
+                    .map_err(|e| anyhow::anyhow!(e))?;
                 let client = JiraClient::new(c.base_url.clone(), c.email.clone(), token)?;
                 *self.jira_client.write().unwrap_or_else(|e| e.into_inner()) = Some(client);
                 Ok(true)

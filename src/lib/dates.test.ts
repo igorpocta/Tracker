@@ -4,6 +4,7 @@ import {
   addDays,
   combineDateAndTimeAllowingNextDay,
   dayEndUnixS,
+  dayOverlapSeconds,
   dayRangeUnixS,
   dayStartUnixS,
   daysBetween,
@@ -149,5 +150,22 @@ describe("combineDateAndTimeAllowingNextDay", () => {
     const base = new Date(2026, 4, 14, 12, 0, 0);
     const out = combineDateAndTimeAllowingNextDay(base, "12:00")!;
     expect(out.getDate()).toBe(14);
+  });
+});
+
+describe("dayOverlapSeconds", () => {
+  // Day window [1000, 2000).
+  it("returns the full length when fully inside the window", () => {
+    expect(dayOverlapSeconds(1200, 1500, 1000, 2000)).toBe(300);
+  });
+  it("clips a worklog starting before the window", () => {
+    expect(dayOverlapSeconds(800, 1300, 1000, 2000)).toBe(300);
+  });
+  it("clips a worklog ending after the window (cross-midnight tail)", () => {
+    expect(dayOverlapSeconds(1800, 2500, 1000, 2000)).toBe(200);
+  });
+  it("returns 0 (never negative) for a worklog outside the window", () => {
+    expect(dayOverlapSeconds(2100, 2200, 1000, 2000)).toBe(0);
+    expect(dayOverlapSeconds(100, 200, 1000, 2000)).toBe(0);
   });
 });

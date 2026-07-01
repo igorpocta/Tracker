@@ -16,7 +16,7 @@ import { listConnections, listProjectColors } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import type { WorklogRow } from "../../api/types";
 import { isWorkingDayLocal, useCalendarMask } from "../../hooks/useCalendarMask";
-import { addDays, startOfDay } from "../../lib/dates";
+import { addDays, dayOverlapSeconds, dayStartUnixS, startOfDay } from "../../lib/dates";
 import {
   formatDateCs,
   formatDateCsShort,
@@ -421,8 +421,6 @@ function groupByDay(
 ): Map<string, Bucket[]> {
   const days = new Map<string, Map<string, Bucket>>();
   for (const r of rows) {
-    const d = new Date(r.started_at * 1000);
-    const k = formatKey(d);
     // Hierarchie barev: 1) explicit project color, 2) connection color,
     // 3) "lokální" placeholder. Bucket key sloučí worklogy se stejnou
     // barvou+labelem, ať se nezobrazí 5 stejně barevných pruhů vedle sebe.
@@ -445,21 +443,36 @@ function groupByDay(
       bucketKey = "local";
     }
 
-    let dayMap = days.get(k);
-    if (!dayMap) {
-      dayMap = new Map();
-      days.set(k, dayMap);
-    }
-    const existing = dayMap.get(bucketKey);
-    if (existing) {
-      existing.seconds += r.duration_s;
-    } else {
-      dayMap.set(bucketKey, {
-        connectionId: r.connection_id ?? null,
-        label: info.label,
-        color: info.color,
-        seconds: r.duration_s,
-      });
+    // Variant B (feedback #2): split a worklog across every local day it
+    // touches, crediting each day only its overlapping slice — a 23:30→00:30
+    // entry adds 30 min to each day, not 60 min to the start day.
+    const endedAt = r.ended_at ?? r.started_at + r.duration_s;
+    let dayDate = startOfDay(new Date(r.started_at * 1000));
+    const lastDay = startOfDay(new Date(endedAt * 1000));
+    while (dayDate.getTime() <= lastDay.getTime()) {
+      const dayStart = dayStartUnixS(dayDate);
+      const dayEnd = dayStartUnixS(addDays(dayDate, 1));
+      const secs = dayOverlapSeconds(r.started_at, endedAt, dayStart, dayEnd);
+      if (secs > 0) {
+        const k = formatKey(dayDate);
+        let dayMap = days.get(k);
+        if (!dayMap) {
+          dayMap = new Map();
+          days.set(k, dayMap);
+        }
+        const existing = dayMap.get(bucketKey);
+        if (existing) {
+          existing.seconds += secs;
+        } else {
+          dayMap.set(bucketKey, {
+            connectionId: r.connection_id ?? null,
+            label: info.label,
+            color: info.color,
+            seconds: secs,
+          });
+        }
+      }
+      dayDate = addDays(dayDate, 1);
     }
   }
 

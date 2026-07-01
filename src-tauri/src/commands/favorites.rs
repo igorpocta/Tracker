@@ -9,17 +9,29 @@ use crate::cache::{self, issues::IssueRow};
 use crate::state::AppState;
 use crate::validation::validate_issue_key;
 
-/// Pure logic for `list_favorites`. Joins favorite keys against the cached
-/// `issues` table; rows that lack a cached record are returned with empty
-/// summary fields so the UI can still surface the key.
+/// Pure logic for `list_favorites`. Joins favorites against the cached
+/// `issues_v2` table by the exact `(connection_id, issue_key)` pair so two
+/// tenants sharing a key never collide.
+///
+/// Favorites whose `connection_id` the migration could not disambiguate
+/// (legacy NULL) are **skipped** — surfacing them as startable risks routing
+/// to the wrong tenant, so we'd rather not show them than guess.
 pub fn list_favorites_inner(db: &cache::Db) -> Result<Vec<IssueRow>, String> {
-    let keys = cache::favorites::list_keys(db).map_err(|e| e.to_string())?;
-    let mut out = Vec::with_capacity(keys.len());
-    for k in keys {
-        match cache::issues::get_by_key(db, &k).map_err(|e| e.to_string())? {
+    let favs = cache::favorites::list(db).map_err(|e| e.to_string())?;
+    let mut out = Vec::with_capacity(favs.len());
+    for f in favs {
+        let Some(cid) = f.connection_id else {
+            // Ambiguous legacy favorite — do not surface.
+            continue;
+        };
+        match cache::issues::get_by_conn_key(db, cid, &f.issue_key).map_err(|e| e.to_string())? {
             Some(row) => out.push(row),
+            // Favorite for a real connection, but the issue isn't cached yet
+            // (e.g. before first sync). Still startable — carry the key +
+            // connection so the UI can route correctly.
             None => out.push(IssueRow {
-                issue_key: k,
+                connection_id: cid,
+                issue_key: f.issue_key,
                 ..Default::default()
             }),
         }
@@ -37,14 +49,22 @@ pub fn add_favorite_inner(
     cache::favorites::add(db, key, connection_id).map_err(|e| e.to_string())
 }
 
-pub fn remove_favorite_inner(db: &cache::Db, issue_key: &str) -> Result<(), String> {
+pub fn remove_favorite_inner(
+    db: &cache::Db,
+    issue_key: &str,
+    connection_id: Option<i64>,
+) -> Result<(), String> {
     validate_issue_key(issue_key)?;
     let key = issue_key.trim();
-    cache::favorites::remove(db, key).map_err(|e| e.to_string())
+    cache::favorites::remove(db, key, connection_id).map_err(|e| e.to_string())
 }
 
-pub fn is_favorite_inner(db: &cache::Db, issue_key: &str) -> Result<bool, String> {
-    cache::favorites::is_favorite(db, issue_key.trim()).map_err(|e| e.to_string())
+pub fn is_favorite_inner(
+    db: &cache::Db,
+    issue_key: &str,
+    connection_id: Option<i64>,
+) -> Result<bool, String> {
+    cache::favorites::is_favorite(db, issue_key.trim(), connection_id).map_err(|e| e.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -73,8 +93,9 @@ pub async fn remove_favorite(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     issue_key: String,
+    connection_id: Option<i64>,
 ) -> Result<(), String> {
-    remove_favorite_inner(&state.db, &issue_key)?;
+    remove_favorite_inner(&state.db, &issue_key, connection_id)?;
     let _ = app.emit("favorites-changed", &issue_key);
     Ok(())
 }
@@ -83,8 +104,9 @@ pub async fn remove_favorite(
 pub async fn is_favorite(
     state: tauri::State<'_, AppState>,
     issue_key: String,
+    connection_id: Option<i64>,
 ) -> Result<bool, String> {
-    is_favorite_inner(&state.db, &issue_key)
+    is_favorite_inner(&state.db, &issue_key, connection_id)
 }
 
 #[cfg(test)]
@@ -100,15 +122,39 @@ mod tests {
         Db::open(&path).unwrap()
     }
 
+    fn seed_conn(db: &Db) -> i64 {
+        cache::connections::insert(
+            db,
+            cache::connections::NewConnection {
+                provider: "jira",
+                name: "Tenant A",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn list_includes_uncached_keys() {
+    fn list_surfaces_uncached_key_with_connection() {
         let db = open_db();
-        add_favorite_inner(&db, "ACME-1", None).unwrap();
+        let cid = seed_conn(&db);
+        add_favorite_inner(&db, "ACME-1", Some(cid)).unwrap();
         let rows = list_favorites_inner(&db).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].issue_key, "ACME-1");
+        assert_eq!(rows[0].connection_id, cid);
         // name is empty because the issue isn't cached.
         assert_eq!(rows[0].name, "");
+    }
+
+    #[test]
+    fn list_skips_ambiguous_legacy_favorite() {
+        // AK4: a favorite with no resolvable connection is NOT surfaced as
+        // startable (rather than risk the wrong tenant).
+        let db = open_db();
+        add_favorite_inner(&db, "ACME-1", None).unwrap();
+        assert!(list_favorites_inner(&db).unwrap().is_empty());
     }
 
     #[test]
@@ -129,10 +175,11 @@ mod tests {
     #[test]
     fn is_favorite_round_trips() {
         let db = open_db();
-        assert!(!is_favorite_inner(&db, "ACME-2").unwrap());
-        add_favorite_inner(&db, "ACME-2", None).unwrap();
-        assert!(is_favorite_inner(&db, "ACME-2").unwrap());
-        remove_favorite_inner(&db, "ACME-2").unwrap();
-        assert!(!is_favorite_inner(&db, "ACME-2").unwrap());
+        let cid = seed_conn(&db);
+        assert!(!is_favorite_inner(&db, "ACME-2", Some(cid)).unwrap());
+        add_favorite_inner(&db, "ACME-2", Some(cid)).unwrap();
+        assert!(is_favorite_inner(&db, "ACME-2", Some(cid)).unwrap());
+        remove_favorite_inner(&db, "ACME-2", Some(cid)).unwrap();
+        assert!(!is_favorite_inner(&db, "ACME-2", Some(cid)).unwrap());
     }
 }

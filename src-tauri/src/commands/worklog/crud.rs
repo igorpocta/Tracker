@@ -1002,27 +1002,46 @@ pub async fn delete_worklog(
     Ok(())
 }
 
+/// Pure logic for undo: clear the pending-delete flag on **the exact local
+/// row** the user just deleted.
+///
+/// Addressed a tenant-safety bug: the old command resolved the row via a
+/// global `remote_id` lookup, but `remote_id` is only unique within a
+/// `(connection_id, remote_id)` pair. Two worklogs from different tenants
+/// sharing a remote id, both inside the 5 s undo window, could resolve to the
+/// wrong row (`ORDER BY pending_delete_at DESC LIMIT 1`). Undo now takes the
+/// local row id — unambiguous by construction.
+pub fn undo_delete_worklog_inner(
+    db: &crate::cache::Db,
+    local_id: i64,
+) -> Result<WorklogRow, String> {
+    let before = cache::worklogs::get_by_id(db, local_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
+    if before.pending_delete_at.is_none() {
+        return Err("Záznam není ve stavu mazání".to_string());
+    }
+    if before.tombstoned_at.is_some() {
+        return Err("Záznam už byl smazán".to_string());
+    }
+    cache::worklogs::clear_pending_delete(db, local_id).map_err(|e| e.to_string())?;
+    Ok(before)
+}
+
 /// Clear the pending-delete flag (user pressed undo within the 5s window).
 #[tauri::command]
 pub async fn undo_delete_worklog(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    worklog_id: String,
+    worklog_id: i64,
 ) -> Result<(), String> {
-    let before = cache::worklogs::get_pending_delete_by_remote_id_any(&state.db, &worklog_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Záznam nenalezen v lokální paměti".to_string())?;
-    let local_id = before
-        .id
-        .ok_or_else(|| "Chybí lokální id záznamu".to_string())?;
-
-    cache::worklogs::clear_pending_delete(&state.db, local_id).map_err(|e| e.to_string())?;
+    let before = undo_delete_worklog_inner(&state.db, worklog_id)?;
 
     audit_success(
         &state.db,
         AuditOp::Undo,
         before.issue_key.as_deref(),
-        Some(&worklog_id),
+        before.remote_id.as_deref(),
         Some(&before),
         None,
     );
@@ -1698,6 +1717,84 @@ mod tests {
             ..Default::default()
         };
         FreeloService::new(client, cfg)
+    }
+
+    fn open_db() -> crate::cache::Db {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crud.db");
+        std::mem::forget(dir);
+        crate::cache::Db::open(&path).unwrap()
+    }
+
+    fn seed_pending_delete(
+        db: &crate::cache::Db,
+        connection_id: i64,
+        remote_id: &str,
+        pending_at: i64,
+    ) -> i64 {
+        let row = crate::cache::worklogs::WorklogRow {
+            connection_id: Some(connection_id),
+            issue_key: Some("PROJ-1".into()),
+            started_at: 1_700_000_000,
+            ended_at: 1_700_003_600,
+            logged_at: 1_700_000_000,
+            is_synced: true,
+            remote_id: Some(remote_id.into()),
+            ..Default::default()
+        };
+        let id = crate::cache::worklogs::record(db, &row).unwrap();
+        crate::cache::worklogs::mark_pending_delete(db, id, pending_at).unwrap();
+        id
+    }
+
+    #[test]
+    fn undo_restores_exact_local_row_despite_remote_id_collision() {
+        // Two tenants, two worklogs sharing remote_id "100", both inside the
+        // undo window. Undo targeting row A (local id) must restore exactly A —
+        // never B — even though a global remote_id lookup would pick the most
+        // recent pending-delete.
+        let db = open_db();
+        let c1 = crate::cache::connections::insert(
+            &db,
+            crate::cache::connections::NewConnection {
+                provider: "jira",
+                name: "A",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+        let c2 = crate::cache::connections::insert(
+            &db,
+            crate::cache::connections::NewConnection {
+                provider: "jira",
+                name: "B",
+                enabled: true,
+                config_json: "{}",
+            },
+        )
+        .unwrap();
+
+        // B is marked later, so a global remote_id lookup (ORDER BY
+        // pending_delete_at DESC) would wrongly resolve to B.
+        let id_a = seed_pending_delete(&db, c1, "100", 1_700_000_100);
+        let id_b = seed_pending_delete(&db, c2, "100", 1_700_000_200);
+
+        let restored = undo_delete_worklog_inner(&db, id_a).unwrap();
+        assert_eq!(
+            restored.id,
+            Some(id_a),
+            "undo must restore the row it was asked to"
+        );
+
+        let a = crate::cache::worklogs::get_by_id(&db, id_a)
+            .unwrap()
+            .unwrap();
+        let b = crate::cache::worklogs::get_by_id(&db, id_b)
+            .unwrap()
+            .unwrap();
+        assert!(a.pending_delete_at.is_none(), "A must be un-deleted");
+        assert!(b.pending_delete_at.is_some(), "B must stay pending-delete");
     }
 
     fn jira_conn(id: i64, name: &str, enabled: bool) -> ActiveConnection {

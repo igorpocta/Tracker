@@ -17,6 +17,8 @@ use crate::http_base::{self, HttpError, RateLimitInfo};
 pub enum JiraError {
     #[error("invalid url: {0}")]
     InvalidUrl(#[from] url::ParseError),
+    #[error("unsafe base url: {0}")]
+    InsecureUrl(String),
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
     #[error("serde: {0}")]
@@ -80,6 +82,10 @@ impl JiraClient {
     ///
     /// `base_url` should look like `https://example.atlassian.net` (no trailing `/rest/...`).
     pub fn new(base_url: String, email: String, token: String) -> Result<Self, JiraError> {
+        // Defense-in-depth: reject unsafe targets (http, credentials, private/
+        // loopback IPs) here too, so imported / hydrated configs can't route a
+        // token to an arbitrary host even when they bypass the command layer.
+        crate::validation::validate_base_url_safety(&base_url).map_err(JiraError::InsecureUrl)?;
         let base_url = Url::parse(&base_url)?;
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));

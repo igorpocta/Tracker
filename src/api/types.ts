@@ -75,6 +75,9 @@ export type NavigateTarget = "setup" | "main" | "settings";
 /** Mirrors `src-tauri/src/cache/issues.rs::IssueRow`. */
 export interface IssueRow {
   issue_key: string;
+  /** Owning connection (tenant). Present since the multi-connection work;
+   * used to disambiguate the same issue key across tenants. */
+  connection_id?: number | null;
   issue_id?: string | null;
   summary: string;
   status_category?: string | null;
