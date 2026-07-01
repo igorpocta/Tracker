@@ -17,6 +17,7 @@
  */
 import { useState } from "react";
 
+import { useT } from "../../i18n";
 import { formatIsoDate } from "../../lib/dates";
 
 import type { NonWorkingReason } from "../Calendar/CellContextMenu";
@@ -27,10 +28,10 @@ export interface AddNonWorkingDayDialogProps {
   onSave: (date: string, reason: NonWorkingReason, label?: string) => void | Promise<void>;
 }
 
-const REASON_OPTIONS: { value: NonWorkingReason; label: string }[] = [
-  { value: "vacation", label: "Dovolená" },
-  { value: "holiday", label: "Svátek" },
-  { value: "personal", label: "Osobní" },
+const REASON_OPTIONS: { value: NonWorkingReason; labelKey: string }[] = [
+  { value: "vacation", labelKey: "settingsGoals.reason.vacation" },
+  { value: "holiday", labelKey: "settingsGoals.reason.holiday" },
+  { value: "personal", labelKey: "settingsGoals.reason.personal" },
 ];
 
 export function AddNonWorkingDayDialog({
@@ -38,6 +39,7 @@ export function AddNonWorkingDayDialog({
   onClose,
   onSave,
 }: AddNonWorkingDayDialogProps) {
+  const t = useT();
   const [date, setDate] = useState<string>(() => formatIsoDate(new Date()));
   const [reason, setReason] = useState<NonWorkingReason>("vacation");
   const [label, setLabel] = useState<string>("");
@@ -63,7 +65,7 @@ export function AddNonWorkingDayDialog({
   return (
     <div
       role="dialog"
-      aria-label="Přidat nepracovní den"
+      aria-label={t("settingsGoals.dialog.title")}
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
@@ -79,11 +81,13 @@ export function AddNonWorkingDayDialog({
         }}
       >
         <h3 className="text-base font-semibold text-[var(--text-primary)]">
-          Přidat nepracovní den
+          {t("settingsGoals.dialog.title")}
         </h3>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--text-secondary)]">Datum</span>
+          <span className="text-[var(--text-secondary)]">
+            {t("settingsGoals.dialog.date")}
+          </span>
           <input
             type="date"
             value={date}
@@ -96,7 +100,9 @@ export function AddNonWorkingDayDialog({
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--text-secondary)]">Důvod</span>
+          <span className="text-[var(--text-secondary)]">
+            {t("settingsGoals.dialog.reason")}
+          </span>
           <select
             value={reason}
             onChange={(e) => setReason(e.target.value as NonWorkingReason)}
@@ -107,19 +113,21 @@ export function AddNonWorkingDayDialog({
           >
             {REASON_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
-                {o.label}
+                {t(o.labelKey)}
               </option>
             ))}
           </select>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--text-secondary)]">Popis (volitelné)</span>
+          <span className="text-[var(--text-secondary)]">
+            {t("settingsGoals.dialog.description")}
+          </span>
           <input
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="např. Velikonoční pondělí"
+            placeholder={t("settingsGoals.dialog.descriptionPlaceholder")}
             className="px-2 h-8 rounded-[var(--radius-md)] text-sm
                        border border-[var(--border-subtle)] bg-transparent
                        text-[var(--text-primary)] outline-none
@@ -137,7 +145,7 @@ export function AddNonWorkingDayDialog({
                        hover:bg-[var(--bg-hover)]
                        transition-colors duration-150"
           >
-            Zrušit
+            {t("settingsGoals.dialog.cancel")}
           </button>
           <button
             type="button"
@@ -151,7 +159,7 @@ export function AddNonWorkingDayDialog({
               color: "var(--accent-text, #fff)",
             }}
           >
-            Uložit
+            {t("settingsGoals.dialog.save")}
           </button>
         </div>
       </div>

@@ -19,15 +19,16 @@ import {
   setWorkingWeekMask,
 } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
+import { useT } from "../../i18n";
 
-const DAYS: { bit: number; short: string; label: string }[] = [
-  { bit: 1, short: "Po", label: "Pondělí" },
-  { bit: 2, short: "Út", label: "Úterý" },
-  { bit: 4, short: "St", label: "Středa" },
-  { bit: 8, short: "Čt", label: "Čtvrtek" },
-  { bit: 16, short: "Pá", label: "Pátek" },
-  { bit: 32, short: "So", label: "Sobota" },
-  { bit: 64, short: "Ne", label: "Neděle" },
+const DAYS: { bit: number; short: string; labelKey: string }[] = [
+  { bit: 1, short: "Po", labelKey: "settingsGoals.weekday.mon" },
+  { bit: 2, short: "Út", labelKey: "settingsGoals.weekday.tue" },
+  { bit: 4, short: "St", labelKey: "settingsGoals.weekday.wed" },
+  { bit: 8, short: "Čt", labelKey: "settingsGoals.weekday.thu" },
+  { bit: 16, short: "Pá", labelKey: "settingsGoals.weekday.fri" },
+  { bit: 32, short: "So", labelKey: "settingsGoals.weekday.sat" },
+  { bit: 64, short: "Ne", labelKey: "settingsGoals.weekday.sun" },
 ];
 
 const DEFAULT_MASK = 31; // Mon–Fri.
@@ -43,6 +44,7 @@ export function toggleBit(mask: number, bit: number): number {
 }
 
 export function WorkingWeekMask() {
+  const t = useT();
   const queryClient = useQueryClient();
   const q = useQuery({
     queryKey: queryKeys.workingWeekMask.all(),
@@ -81,12 +83,12 @@ export function WorkingWeekMask() {
     <section>
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-semibold text-[var(--text-primary)]">
-          Pracovní dny v týdnu
+          {t("settingsGoals.workingWeek.title")}
         </span>
       </div>
       <div
         role="group"
-        aria-label="Pracovní dny v týdnu"
+        aria-label={t("settingsGoals.workingWeek.title")}
         className="flex flex-wrap gap-2"
       >
         {DAYS.map((d) => {
@@ -112,7 +114,7 @@ export function WorkingWeekMask() {
                 type="checkbox"
                 checked={active}
                 onChange={() => void handleToggle(d.bit)}
-                aria-label={d.label}
+                aria-label={t(d.labelKey)}
                 className="sr-only"
               />
               <span>{d.short}</span>
@@ -121,8 +123,7 @@ export function WorkingWeekMask() {
         })}
       </div>
       <p className="text-[11px] text-[var(--text-tertiary)] mt-3">
-        Které dny v týdnu obvykle pracujete. Víkendy a státní svátky se
-        nezapočítávají do cílů.
+        {t("settingsGoals.workingWeek.description")}
       </p>
     </section>
   );

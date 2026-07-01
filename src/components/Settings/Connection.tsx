@@ -42,11 +42,13 @@ import {
 } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import type { ConnectionDto, FreeloProjectDto } from "../../api/types";
+import { useT, type TFunc } from "../../i18n";
 
 import { AddConnectionDialog } from "./AddConnectionDialog";
 import { EditConnectionDialog } from "./EditConnectionDialog";
 
 export default function Connection() {
+  const t = useT();
   const queryClient = useQueryClient();
   const connsQ = useQuery({
     queryKey: queryKeys.connections.all(),
@@ -74,16 +76,18 @@ export default function Connection() {
     <div className="flex flex-col gap-4 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Připojení
+          {t("connections.title")}
         </h2>
         <p className="text-xs text-[var(--text-tertiary)] mt-1">
-          Připojte jeden nebo více účtů. Můžete je pojmenovat a kdykoli upravit.
+          {t("connections.subtitle")}
         </p>
       </header>
 
       <div className="flex flex-col gap-2">
         {connsQ.isLoading && (
-          <p className="text-xs text-[var(--text-tertiary)]">Načítám…</p>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            {t("connections.loading")}
+          </p>
         )}
 
         {conns.map((conn) => (
@@ -106,13 +110,12 @@ export default function Connection() {
           data-testid="add-connection-button"
         >
           <Plus className="w-4 h-4" aria-hidden />
-          <span className="text-sm">Přidat nové připojení</span>
+          <span className="text-sm">{t("connections.addNew")}</span>
         </button>
 
         {!connsQ.isLoading && conns.length === 0 && (
           <p className="text-xs text-[var(--text-tertiary)] px-3 py-2">
-            Žádná připojení nejsou nakonfigurována. Klikněte na „Přidat nové
-            připojení“ pro start.
+            {t("connections.empty")}
           </p>
         )}
       </div>
@@ -152,6 +155,7 @@ function ConnectionCard({
   onChanged: () => void;
   onEdit: () => void;
 }) {
+  const t = useT();
   const statsQ = useQuery({
     queryKey: queryKeys.connectionStats.for(conn.id),
     queryFn: () => getConnectionStats(conn.id),
@@ -170,13 +174,7 @@ function ConnectionCard({
 
   async function handleFullSync() {
     if (fullSyncing) return;
-    if (
-      !window.confirm(
-        `Stáhnout celou historii pro „${conn.name}"?\n\n` +
-          `Toto stáhne všechny úkoly a worklogy ~10 let zpět a může chvíli trvat. ` +
-          `Pro běžnou aktualizaci stačí tlačítko v levé liště.`,
-      )
-    ) {
+    if (!window.confirm(t("connections.fullSyncConfirm", { name: conn.name }))) {
       return;
     }
     setFullSyncing(true);
@@ -199,7 +197,7 @@ function ConnectionCard({
     setTesting({ kind: "loading" });
     try {
       if (!conn.has_token) {
-        throw new Error("Chybí uložený token");
+        throw new Error(t("connections.missingToken"));
       }
       // Smallest backend round-trip we can use to verify the live client is
       // healthy: a no-op `update_connection` re-hydrates the in-memory client
@@ -213,7 +211,7 @@ function ConnectionCard({
           ? e
           : e instanceof Error
             ? e.message
-            : "Test se nezdařil";
+            : t("connections.testFailed");
       setTesting({ kind: "error", message });
     }
   }
@@ -250,7 +248,7 @@ function ConnectionCard({
               className="text-sm font-medium text-[var(--text-primary)]
                          text-left hover:text-[var(--accent)]
                          transition-colors duration-150 truncate block w-full"
-              title="Klikněte pro přejmenování"
+              title={t("connections.clickToRename")}
             >
               {conn.name}
             </button>
@@ -268,14 +266,14 @@ function ConnectionCard({
               {issuePlural(statsQ.data.issue_count)}
               {statsQ.data.last_synced_at
                 ? ` · sync ${formatSyncTime(statsQ.data.last_synced_at)}`
-                : " · nikdy nesyncováno"}
+                : ` · ${t("connections.neverSynced")}`}
             </div>
           )}
         </div>
 
         <ActionButton
           onClick={() => setRenaming((r) => !r)}
-          ariaLabel="Přejmenovat"
+          ariaLabel={t("connections.rename")}
           testId={`conn-rename-${conn.id}`}
         >
           <Pencil className="w-4 h-4" aria-hidden />
@@ -283,15 +281,17 @@ function ConnectionCard({
 
         <ActionButton
           onClick={onEdit}
-          ariaLabel="Upravit přihlašovací údaje"
+          ariaLabel={t("connections.editCredentials")}
           testId={`conn-edit-${conn.id}`}
         >
-          <span className="text-[11px] font-medium">Upravit</span>
+          <span className="text-[11px] font-medium">
+            {t("connections.edit")}
+          </span>
         </ActionButton>
 
         <ActionButton
           onClick={() => void handleTest()}
-          ariaLabel="Otestovat připojení"
+          ariaLabel={t("connections.testConnection")}
           testId={`conn-test-${conn.id}`}
         >
           {testing.kind === "loading" ? (
@@ -301,13 +301,15 @@ function ConnectionCard({
           ) : testing.kind === "error" ? (
             <CircleAlert className="w-4 h-4 text-[var(--danger)]" aria-hidden />
           ) : (
-            <span className="text-[11px] font-medium">Test</span>
+            <span className="text-[11px] font-medium">
+              {t("connections.test")}
+            </span>
           )}
         </ActionButton>
 
         <ActionButton
           onClick={() => void handleFullSync()}
-          ariaLabel="Stáhnout celou historii (úkoly + worklogy ~10 let)"
+          ariaLabel={t("connections.fullSyncTooltip")}
           testId={`conn-fullsync-${conn.id}`}
         >
           {fullSyncing ? (
@@ -319,7 +321,8 @@ function ConnectionCard({
 
         <ActionButton
           onClick={async () => {
-            if (!window.confirm(`Odpojit „${conn.name}"?`)) return;
+            if (!window.confirm(t("connections.disconnectConfirm", { name: conn.name })))
+              return;
             try {
               await removeConnection(conn.id);
               onChanged();
@@ -327,7 +330,7 @@ function ConnectionCard({
               /* ignore */
             }
           }}
-          ariaLabel="Odpojit"
+          ariaLabel={t("connections.disconnect")}
           testId={`conn-remove-${conn.id}`}
           danger
         >
@@ -373,8 +376,8 @@ function ConnectionCard({
                   style={{ color: accent }}
                 >
                   {isSkip
-                    ? `${syncErrorLabel(syncError.phase)} — ${syncError.error}`
-                    : `${syncErrorLabel(syncError.phase)} selhala`}
+                    ? `${syncErrorLabel(t, syncError.phase)} — ${syncError.error}`
+                    : `${syncErrorLabel(t, syncError.phase)} ${t("connections.syncError.failedSuffix")}`}
                 </p>
                 {!isSkip && (
                   <p className="text-[11px] text-[var(--text-secondary)] break-words">
@@ -397,7 +400,9 @@ function ConnectionCard({
             className="self-start text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                        transition-colors duration-150 pl-11"
           >
-            {expanded ? "Skrýt projekty" : "Vybrané projekty"}
+            {expanded
+              ? t("connections.hideProjects")
+              : t("connections.selectedProjects")}
           </button>
           {expanded && <FreeloProjectsPanel connectionId={conn.id} />}
         </>
@@ -447,6 +452,7 @@ function InlineRename({
   onSubmit: (next: string) => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -475,7 +481,7 @@ function InlineRename({
         if (next.length === 0 || next === initial) onCancel();
         else void onSubmit(next);
       }}
-      aria-label="Nový název"
+      aria-label={t("connections.newName")}
       data-testid="conn-rename-input"
       className="w-full h-7 px-1.5 rounded-[var(--radius-sm)] bg-transparent
                  border border-[var(--border-default)] focus:border-[var(--accent)]
@@ -490,6 +496,7 @@ function InlineRename({
 // ---------------------------------------------------------------------------
 
 function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
+  const t = useT();
   const [projects, setProjects] = useState<FreeloProjectDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -511,7 +518,7 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
             ? e
             : e instanceof Error
               ? e.message
-              : "Načtení projektů se nezdařilo",
+              : t("connections.projectsLoadFailed"),
         );
       } finally {
         if (!cancelled) setLoading(false);
@@ -520,6 +527,7 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionId]);
 
   async function persist(next: FreeloProjectDto[]) {
@@ -550,7 +558,7 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
   if (loading) {
     return (
       <p className="text-xs text-[var(--text-tertiary)] pl-11">
-        Načítám projekty…
+        {t("connections.projectsLoading")}
       </p>
     );
   }
@@ -564,7 +572,7 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
   if (projects.length === 0) {
     return (
       <p className="text-xs text-[var(--text-tertiary)] pl-11">
-        Žádné projekty nenalezeny.
+        {t("connections.noProjects")}
       </p>
     );
   }
@@ -572,7 +580,10 @@ function FreeloProjectsPanel({ connectionId }: { connectionId: number }) {
   return (
     <div className="flex flex-col gap-1 pl-11">
       <p className="text-[11px] text-[var(--text-tertiary)]">
-        Vybráno {selectedCount} z {projects.length}
+        {t("connections.selectedCount", {
+          selected: selectedCount,
+          total: projects.length,
+        })}
       </p>
       <ul
         className="flex flex-col gap-0.5 max-h-[240px] overflow-y-auto"
@@ -612,6 +623,7 @@ const SYNC_RUNS_PAGE_SIZE = 30;
 const SYNC_RUNS_FETCH_LIMIT = 500;
 
 function SyncRunsHistory() {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const q = useQuery({
@@ -637,7 +649,9 @@ function SyncRunsHistory() {
         className="self-start text-xs text-[var(--text-secondary)]
                    hover:text-[var(--text-primary)] transition-colors duration-150"
       >
-        {expanded ? "Skrýt historii synchronizací" : "Historie synchronizací"}
+        {expanded
+          ? t("connections.hideSyncHistory")
+          : t("connections.syncHistory")}
       </button>
       {expanded && (
         <>
@@ -648,13 +662,27 @@ function SyncRunsHistory() {
                   className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]"
                   style={{ borderBottom: "1px solid var(--border-subtle)" }}
                 >
-                  <th className="text-left px-2 py-1.5">Kdy</th>
-                  <th className="text-left px-2 py-1.5">Připojení</th>
-                  <th className="text-left px-2 py-1.5">Režim</th>
-                  <th className="text-right px-2 py-1.5">Úkoly</th>
-                  <th className="text-right px-2 py-1.5">Worklogy</th>
-                  <th className="text-right px-2 py-1.5">Trvání</th>
-                  <th className="text-left px-2 py-1.5">Stav</th>
+                  <th className="text-left px-2 py-1.5">
+                    {t("connections.syncTable.when")}
+                  </th>
+                  <th className="text-left px-2 py-1.5">
+                    {t("connections.syncTable.connection")}
+                  </th>
+                  <th className="text-left px-2 py-1.5">
+                    {t("connections.syncTable.mode")}
+                  </th>
+                  <th className="text-right px-2 py-1.5">
+                    {t("connections.syncTable.issues")}
+                  </th>
+                  <th className="text-right px-2 py-1.5">
+                    {t("connections.syncTable.worklogs")}
+                  </th>
+                  <th className="text-right px-2 py-1.5">
+                    {t("connections.syncTable.duration")}
+                  </th>
+                  <th className="text-left px-2 py-1.5">
+                    {t("connections.syncTable.status")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -664,7 +692,7 @@ function SyncRunsHistory() {
                       colSpan={7}
                       className="px-2 py-3 text-center text-[var(--text-tertiary)]"
                     >
-                      Žádné záznamy.
+                      {t("connections.syncTable.noRecords")}
                     </td>
                   </tr>
                 )}
@@ -680,7 +708,9 @@ function SyncRunsHistory() {
                       </td>
                       <td className="px-2 py-1">{r.connection_name ?? "—"}</td>
                       <td className="px-2 py-1 text-[var(--text-tertiary)]">
-                        {r.mode === "full" ? "celá historie" : "přírůstky"}
+                        {r.mode === "full"
+                          ? t("connections.syncMode.full")
+                          : t("connections.syncMode.incremental")}
                       </td>
                       <td className="px-2 py-1 text-right font-mono tabular-nums">
                         {r.issues_count}
@@ -729,11 +759,12 @@ interface PaginationProps {
 }
 
 function Pagination({ page, totalPages, onChange }: PaginationProps) {
+  const t = useT();
   const prevDisabled = page <= 1;
   const nextDisabled = page >= totalPages;
   return (
     <nav
-      aria-label="Stránkování"
+      aria-label={t("connections.pagination.label")}
       className="flex items-center justify-end gap-2 text-[11px] text-[var(--text-secondary)]"
     >
       <button
@@ -744,7 +775,7 @@ function Pagination({ page, totalPages, onChange }: PaginationProps) {
                    hover:bg-[var(--bg-hover)] transition-colors duration-150
                    disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
-        ← Předchozí
+        {t("connections.pagination.prev")}
       </button>
       <span className="tabular-nums">
         {page} / {totalPages}
@@ -757,7 +788,7 @@ function Pagination({ page, totalPages, onChange }: PaginationProps) {
                    hover:bg-[var(--bg-hover)] transition-colors duration-150
                    disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
-        Další →
+        {t("connections.pagination.next")}
       </button>
     </nav>
   );
@@ -839,16 +870,16 @@ function formatSyncTime(unixS: number): string {
   return `${d.getDate()}. ${d.getMonth() + 1}. ${hh}:${mm}`;
 }
 
-function syncErrorLabel(phase: string): string {
+function syncErrorLabel(t: TFunc, phase: string): string {
   switch (phase) {
     case "connection":
-      return "Připojení";
+      return t("connections.syncError.connection");
     case "issues":
-      return "Načtení úkolů";
+      return t("connections.syncError.issues");
     case "worklogs":
-      return "Načtení záznamů";
+      return t("connections.syncError.worklogs");
     case "worklogs_skipped":
-      return "Worklog sync byl přeskočen";
+      return t("connections.syncError.worklogsSkipped");
     default:
       return phase;
   }

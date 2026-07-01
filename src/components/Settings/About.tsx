@@ -10,6 +10,7 @@ import { getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 
 import { openUrl } from "../../api/commands";
+import { useT } from "../../i18n";
 import { useUpdaterStore } from "../../stores/updaterStore";
 
 // Inline GitHub mark SVG — lucide-react 1.16 (currently pinned) doesn't
@@ -37,6 +38,7 @@ interface AppInfo {
 }
 
 export default function About() {
+  const t = useT();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -49,12 +51,12 @@ export default function About() {
     const s = useUpdaterStore.getState();
     if (s.status === "available") {
       setUpdateResult(
-        `K dispozici je verze ${s.version}. Nabídka k instalaci je v horní liště.`,
+        t("settingsMisc.about.updateAvailable", { version: s.version ?? "" }),
       );
     } else if (s.status === "error") {
-      setUpdateResult(`Kontrola selhala: ${s.error}`);
+      setUpdateResult(t("settingsMisc.about.checkFailed", { error: s.error ?? "" }));
     } else {
-      setUpdateResult("Máte nejnovější verzi.");
+      setUpdateResult(t("settingsMisc.about.upToDate"));
     }
     setChecking(false);
   };
@@ -79,35 +81,37 @@ export default function About() {
     <div className="flex flex-col gap-6 w-full">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          O aplikaci
+          {t("settingsMisc.about.title")}
         </h2>
       </header>
 
       <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-        Tracker je lokální desktopový time-tracker pro Jira Cloud a Freelo.
-        Spouští časomíry, zaznamenává worklogy do lokální SQLite databáze
-        a synchronizuje je do připojených systémů. Všechna data zůstávají
-        u vás na počítači — bez cloudu, bez účtu, bez telemetrie (krom
-        volitelného anonymního reportu chyb).
+        {t("settingsMisc.about.intro")}
       </p>
 
       {error && (
         <p className="text-xs text-[var(--danger)]">
-          Nepodařilo se načíst informace o aplikaci: {error}
+          {t("settingsMisc.about.loadError", { error })}
         </p>
       )}
 
       {info && (
         <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-sm">
-          <dt className="text-[var(--text-tertiary)]">Název</dt>
+          <dt className="text-[var(--text-tertiary)]">
+            {t("settingsMisc.about.name")}
+          </dt>
           <dd className="text-[var(--text-primary)]">{info.name}</dd>
 
-          <dt className="text-[var(--text-tertiary)]">Verze</dt>
+          <dt className="text-[var(--text-tertiary)]">
+            {t("settingsMisc.about.version")}
+          </dt>
           <dd className="text-[var(--text-primary)] font-mono tabular-nums">
             {info.version}
           </dd>
 
-          <dt className="text-[var(--text-tertiary)]">Tauri</dt>
+          <dt className="text-[var(--text-tertiary)]">
+            {t("settingsMisc.about.tauri")}
+          </dt>
           <dd className="text-[var(--text-secondary)] font-mono tabular-nums">
             {info.tauriVersion}
           </dd>
@@ -119,7 +123,7 @@ export default function About() {
           <button
             type="button"
             onClick={openGithub}
-            title="Otevřít repozitář na GitHubu"
+            title={t("settingsMisc.about.openGithubTitle")}
             className="inline-flex items-center gap-2 h-8 px-3 rounded-[var(--radius-md)]
                        text-xs text-[var(--text-secondary)]
                        border border-[var(--border-subtle)]
@@ -127,7 +131,7 @@ export default function About() {
                        transition-colors duration-150"
           >
             <GithubMark className="w-3.5 h-3.5" />
-            GitHub repozitář
+            {t("settingsMisc.about.githubRepo")}
           </button>
 
           <button
@@ -141,7 +145,9 @@ export default function About() {
                        disabled:opacity-50 disabled:cursor-not-allowed
                        transition-colors duration-150"
           >
-            {checking ? "Kontroluji…" : "Zkontrolovat aktualizace"}
+            {checking
+              ? t("settingsMisc.about.checking")
+              : t("settingsMisc.about.checkUpdates")}
           </button>
         </div>
 

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { getPomodoroConfig, setPomodoroConfig } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
+import { useT } from "../../i18n";
 import { firstError, goalSliderHoursSchema } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
@@ -24,6 +25,7 @@ const MIN_HOURS = 1;
 const MAX_HOURS = 14;
 
 export default function SettingsGoals() {
+  const t = useT();
   const goalSeconds = usePrefsStore((s) => s.dailyGoalSeconds);
   const setGoal = usePrefsStore((s) => s.setDailyGoal);
 
@@ -33,13 +35,13 @@ export default function SettingsGoals() {
     <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Cíle
+          {t("settingsGoals.heading")}
         </h2>
       </header>
 
       <SettingsCard
-        title="Denní cíl hodin"
-        description="Kolik hodin chcete denně odpracovat. Používá se v sekci Cíle."
+        title={t("settingsGoals.dailyGoal.title")}
+        description={t("settingsGoals.dailyGoal.description")}
         action={
           <span className="text-lg font-semibold text-[var(--accent)] tabular-nums">
             {hours}h
@@ -95,6 +97,7 @@ export default function SettingsGoals() {
 // ---------------------------------------------------------------------------
 
 function PomodoroSection() {
+  const t = useT();
   const q = useQuery({
     queryKey: queryKeys.pomodoroConfig.all(),
     queryFn: getPomodoroConfig,
@@ -126,7 +129,7 @@ function PomodoroSection() {
   return (
     <section className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-        Pomodoro
+        {t("settingsGoals.pomodoro.title")}
       </h3>
       <label className="flex items-start gap-2 cursor-pointer select-none">
         <input
@@ -137,19 +140,17 @@ function PomodoroSection() {
         />
         <span className="text-xs text-[var(--text-secondary)]">
           <span className="font-medium text-[var(--text-primary)]">
-            Zapnout Pomodoro
+            {t("settingsGoals.pomodoro.enable")}
           </span>
           <br />
-          Při běžícím timeru ti aplikace pošle notifikaci po dokončení work
-          cyklu a poté znovu po pauze. Cyklus se nikam neukládá — slouží jen
-          jako připomínka.
+          {t("settingsGoals.pomodoro.description")}
         </span>
       </label>
       {cfg.enabled && (
         <div className="grid grid-cols-2 gap-3 max-w-xs pl-6">
           <NumberField
             id="pomo-work"
-            label="Práce (min)"
+            label={t("settingsGoals.pomodoro.work")}
             value={work}
             min={5}
             max={180}
@@ -160,7 +161,7 @@ function PomodoroSection() {
           />
           <NumberField
             id="pomo-break"
-            label="Pauza (min)"
+            label={t("settingsGoals.pomodoro.break")}
             value={brk}
             min={1}
             max={60}

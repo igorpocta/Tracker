@@ -17,6 +17,7 @@ import {
   hourlyRateSchema,
   parseRateInput,
 } from "../../lib/validation";
+import { useT } from "../../i18n";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { SettingsCard } from "./SettingsCard";
 
@@ -30,6 +31,7 @@ const CURRENCIES: { value: Currency; label: string }[] = [
 ];
 
 export default function Reporting() {
+  const t = useT();
   const hourlyRate = usePrefsStore((s) => s.hourlyRate);
   const currency = usePrefsStore((s) => s.currency);
   const setHourlyRate = usePrefsStore((s) => s.setHourlyRate);
@@ -50,7 +52,7 @@ export default function Reporting() {
     // until blur to avoid spamming the backend.
     const n = parseRateInput(next);
     if (n === null) {
-      setRateError("musí být platné číslo (např. 1500)");
+      setRateError(t("settingsMisc.reporting.rateInvalid"));
     } else {
       setRateError(firstError(hourlyRateSchema, n));
     }
@@ -79,23 +81,21 @@ export default function Reporting() {
     <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Reporting
+          {t("settingsMisc.reporting.title")}
         </h2>
         <p className="text-xs text-[var(--text-tertiary)] mt-1 max-w-md">
-          Nastavte hodinovou sazbu a uvidíte celkový výdělek v sekci Reporty.
-          Výdělek zůstává skrytý za kliknutím na ikonu oka — vhodné při práci
-          v open space.
+          {t("settingsMisc.reporting.intro")}
         </p>
       </header>
 
       <SettingsCard
-        title="Hodinová sazba"
-        description="Ponechte prázdné a karta výdělků se úplně skryje."
+        title={t("settingsMisc.reporting.hourlyRate")}
+        description={t("settingsMisc.reporting.hourlyRateDescription")}
       >
         <input
           type="text"
           inputMode="decimal"
-          aria-label="Hodinová sazba"
+          aria-label={t("settingsMisc.reporting.hourlyRate")}
           value={rateStr}
           onChange={(e) => handleRateChange(e.target.value)}
           onBlur={handleRateBlur}
@@ -111,11 +111,11 @@ export default function Reporting() {
         )}
       </SettingsCard>
 
-      <SettingsCard title="Měna">
+      <SettingsCard title={t("settingsMisc.reporting.currency")}>
         <select
           value={currency}
           onChange={(e) => void setCurrency(e.target.value as Currency)}
-          aria-label="Měna"
+          aria-label={t("settingsMisc.reporting.currency")}
           className="ui-select w-full"
         >
           {CURRENCIES.map((c) => (

@@ -40,6 +40,7 @@ import {
   roundingIntervalSchema,
 } from "../../lib/validation";
 import { initSentry, shutdownSentry } from "../../lib/sentry";
+import { useT } from "../../i18n";
 import { usePrefsStore } from "../../stores/prefsStore";
 import type { ShellOutletContext } from "../Layout/AppShell";
 import { Button } from "../common/Button";
@@ -52,12 +53,12 @@ const LS_TIME_INPUT_KEY = "tracker.timeInput";
 export type TimeInputStyle = "end" | "duration";
 export type ReindexInterval = "manual" | "15m" | "1h" | "4h" | "daily";
 
-const REINDEX_LABEL: Record<ReindexInterval, string> = {
-  manual: "Pouze ručně",
-  "15m": "Každých 15 minut",
-  "1h": "Každou hodinu",
-  "4h": "Každé 4 hodiny",
-  daily: "Jednou denně",
+const REINDEX_LABEL_KEY: Record<ReindexInterval, string> = {
+  manual: "settingsGeneral.reindex.manual",
+  "15m": "settingsGeneral.reindex.15m",
+  "1h": "settingsGeneral.reindex.1h",
+  "4h": "settingsGeneral.reindex.4h",
+  daily: "settingsGeneral.reindex.daily",
 };
 
 const REINDEX_TO_SECONDS: Record<ReindexInterval, number> = {
@@ -85,6 +86,7 @@ function secondsToReindex(seconds: number): ReindexInterval {
 }
 
 export default function General() {
+  const t = useT();
   const dayTimelineVisible = usePrefsStore((s) => s.dayTimelineVisible);
   const setDayTimelineVisible = usePrefsStore((s) => s.setDayTimelineVisible);
   const navigate = useNavigate();
@@ -148,7 +150,7 @@ export default function General() {
       await setRoundingMode(m);
     } catch {
       setRndMode(previous);
-      pushToast("error", "Nepodařilo se uložit režim zaokrouhlení.");
+      pushToast("error", t("settingsGeneral.rounding.saveModeError"));
     }
   };
   const updateRndInterval = async (n: number) => {
@@ -160,7 +162,7 @@ export default function General() {
       await setRoundingIntervalMinutes(n);
     } catch {
       setRndInterval(previous);
-      pushToast("error", "Nepodařilo se uložit interval zaokrouhlení.");
+      pushToast("error", t("settingsGeneral.rounding.saveIntervalError"));
     }
   };
   const updateActThreshold = async (n: number) => {
@@ -173,7 +175,7 @@ export default function General() {
       await setActivityThresholdMin(n);
     } catch {
       setActThreshold(previous);
-      pushToast("error", "Nepodařilo se uložit práh nečinnosti.");
+      pushToast("error", t("settingsGeneral.activity.saveError"));
     }
   };
 
@@ -226,24 +228,24 @@ export default function General() {
     <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Obecné
+          {t("settingsGeneral.heading")}
         </h2>
       </header>
 
       <Section
-        title="Časová osa dne"
-        description="Zobrazit nebo skrýt vizuální časovou osu nad záznamy."
+        title={t("settingsGeneral.dayTimeline.title")}
+        description={t("settingsGeneral.dayTimeline.description")}
       >
         <div className="grid grid-cols-2 gap-3">
           <ToggleCard
-            label="Viditelná"
+            label={t("settingsGeneral.dayTimeline.visible")}
             active={dayTimelineVisible}
             onClick={() => void setDayTimelineVisible(true)}
           >
             <TimelinePreview filled />
           </ToggleCard>
           <ToggleCard
-            label="Skrytá"
+            label={t("settingsGeneral.dayTimeline.hidden")}
             active={!dayTimelineVisible}
             onClick={() => void setDayTimelineVisible(false)}
           >
@@ -253,17 +255,17 @@ export default function General() {
       </Section>
 
       <Section
-        title="Styl zadávání času"
-        description="Při přidávání záznamu zvolte, jestli preferujete nastavit koncový čas nebo trvání."
+        title={t("settingsGeneral.timeInput.title")}
+        description={t("settingsGeneral.timeInput.description")}
       >
         <div className="flex flex-col gap-2">
           <RadioRow
-            label="Koncový čas — vyberte, kdy práce skončila"
+            label={t("settingsGeneral.timeInput.end")}
             checked={timeInput === "end"}
             onChange={() => updateTimeInput("end")}
           />
           <RadioRow
-            label="Trvání — zadejte počet minut"
+            label={t("settingsGeneral.timeInput.duration")}
             checked={timeInput === "duration"}
             onChange={() => updateTimeInput("duration")}
           />
@@ -271,54 +273,54 @@ export default function General() {
       </Section>
 
       <Section
-        title="Zaokrouhlování času"
-        description="Před uložením do Jiry můžete dobu zaokrouhlit nahoru nebo dolů na zvolený interval."
+        title={t("settingsGeneral.rounding.title")}
+        description={t("settingsGeneral.rounding.description")}
       >
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2">
             <RadioRow
-              label="Žádné — uložit přesnou dobu"
+              label={t("settingsGeneral.rounding.none")}
               checked={rndMode === "none"}
               onChange={() => void updateRndMode("none")}
             />
             <RadioRow
-              label="Nahoru — zaokrouhlit na další interval"
+              label={t("settingsGeneral.rounding.up")}
               checked={rndMode === "up"}
               onChange={() => void updateRndMode("up")}
             />
             <RadioRow
-              label="Dolů — zaokrouhlit na předchozí interval"
+              label={t("settingsGeneral.rounding.down")}
               checked={rndMode === "down"}
               onChange={() => void updateRndMode("down")}
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-            <span>Interval:</span>
+            <span>{t("settingsGeneral.rounding.intervalLabel")}</span>
             <select
               value={rndInterval}
               onChange={(e) => void updateRndInterval(Number(e.target.value))}
               disabled={rndMode === "none"}
               className="ui-select"
             >
-              <option value={1}>1 minuta</option>
-              <option value={5}>5 minut</option>
-              <option value={15}>15 minut</option>
-              <option value={60}>1 hodina</option>
+              <option value={1}>{t("settingsGeneral.rounding.interval1")}</option>
+              <option value={5}>{t("settingsGeneral.rounding.interval5")}</option>
+              <option value={15}>{t("settingsGeneral.rounding.interval15")}</option>
+              <option value={60}>{t("settingsGeneral.rounding.interval60")}</option>
             </select>
           </label>
         </div>
       </Section>
 
       <Section
-        title="Globální klávesová zkratka"
-        description="Systémová zkratka pro spuštění / zastavení časovače odkudkoli — funguje i mimo Tracker a když je okno skryté."
+        title={t("settingsGeneral.shortcut.title")}
+        description={t("settingsGeneral.shortcut.description")}
       >
         <GlobalShortcutSetting pushToast={pushToast} />
       </Section>
 
       <Section
-        title="Spustit při přihlášení"
-        description="Tracker se automaticky spustí při přihlášení do systému. Okno zůstane skryté — bude dostupné z menu baru."
+        title={t("settingsGeneral.autostart.title")}
+        description={t("settingsGeneral.autostart.description")}
       >
         <label className="flex items-center gap-3 text-sm">
           <input
@@ -328,14 +330,14 @@ export default function General() {
             className="w-4 h-4"
           />
           <span className="text-[var(--text-primary)]">
-            Spouštět Tracker automaticky
+            {t("settingsGeneral.autostart.toggle")}
           </span>
         </label>
       </Section>
 
       <Section
-        title="Chytré návrhy úkolů"
-        description='Banner "Jako včera?" navrhuje úkol, na kterém jste v podobný čas trackovali v posledních 14 dnech. Když ho vypnete, žádné návrhy se nezobrazují a backend se na ně ani neptá.'
+        title={t("settingsGeneral.smartSuggestions.title")}
+        description={t("settingsGeneral.smartSuggestions.description")}
       >
         <label className="flex items-center gap-3 text-sm">
           <input
@@ -345,14 +347,14 @@ export default function General() {
             className="w-4 h-4"
           />
           <span className="text-[var(--text-primary)]">
-            Zobrazovat chytré návrhy
+            {t("settingsGeneral.smartSuggestions.toggle")}
           </span>
         </label>
       </Section>
 
       <Section
-        title="Anonymní reportování chyb"
-        description="Pokud zapnete, aplikace zasílá anonymizovaná hlášení chyb na Sentry — pomáhá nám diagnostikovat pády. API tokeny, hesla ani plné e-maily se neposílají. Identifikace je pouze anonymním instalačním ID."
+        title={t("settingsGeneral.sentry.title")}
+        description={t("settingsGeneral.sentry.description")}
       >
         <label className="flex items-center gap-3 text-sm">
           <input
@@ -362,21 +364,20 @@ export default function General() {
             className="w-4 h-4"
           />
           <span className="text-[var(--text-primary)]">
-            Povolit reportování chyb
+            {t("settingsGeneral.sentry.toggle")}
           </span>
         </label>
         <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          Změna se na frontendu projeví ihned. Backend přejde do nového
-          režimu při příštím spuštění aplikace.
+          {t("settingsGeneral.sentry.note")}
         </p>
       </Section>
 
       <Section
-        title="Sledování aktivity"
-        description="Tracker sleduje, kdy s aplikací aktivně pracujete, a tuto informaci zobrazuje v přehledu cílů. Nemá vliv na uložené worklogy."
+        title={t("settingsGeneral.activity.title")}
+        description={t("settingsGeneral.activity.description")}
       >
         <label className="flex flex-col gap-1 text-xs text-[var(--text-secondary)]">
-          <span>Práh nečinnosti (minuty)</span>
+          <span>{t("settingsGeneral.activity.thresholdLabel")}</span>
           <input
             type="number"
             min={1}
@@ -393,30 +394,29 @@ export default function General() {
       </Section>
 
       <Section
-        title="Interval automatické re-indexace"
-        description="Jak často se na pozadí automaticky reindexují úkoly z Jiry. Interval se počítá od konce předchozí synchronizace — ne od fixní hodinové značky. Při startu aplikace proběhne první sync ihned (pokud nebyl proveden v posledních 60 minutách v debug buildu)."
+        title={t("settingsGeneral.reindex.title")}
+        description={t("settingsGeneral.reindex.description")}
       >
         <select
           value={reindex}
           onChange={(e) => updateReindex(e.target.value as ReindexInterval)}
           className="ui-select w-full"
         >
-          {(Object.keys(REINDEX_LABEL) as ReindexInterval[]).map((k) => (
+          {(Object.keys(REINDEX_LABEL_KEY) as ReindexInterval[]).map((k) => (
             <option key={k} value={k}>
-              {REINDEX_LABEL[k]}
+              {t(REINDEX_LABEL_KEY[k])}
             </option>
           ))}
         </select>
         <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          Reindexovat můžete také kdykoli ručně kliknutím na ikonu v liště nebo
-          stisknutím{" "}
+          {t("settingsGeneral.reindex.notePrefix")}
           <kbd className="font-mono px-1 rounded bg-[var(--bg-hover)]">⌘I</kbd>.
         </p>
       </Section>
 
       <Section
-        title="Historie změn"
-        description="Každá akce s worklogem (vytvoření, úprava, smazání, přesun) se ukládá do lokální historie. Z historie lze obnovit smazaný záznam zpět do Jiry nebo vrátit nedávnou úpravu."
+        title={t("settingsGeneral.audit.title")}
+        description={t("settingsGeneral.audit.description")}
       >
         <div className="flex flex-col gap-3">
           <div>
@@ -425,12 +425,12 @@ export default function General() {
               size="md"
               onClick={() => navigate("/audit")}
             >
-              Otevřít historii změn
+              {t("settingsGeneral.audit.open")}
             </Button>
           </div>
           <div className="flex items-end gap-2 flex-wrap">
             <label className="flex flex-col gap-1 text-xs text-[var(--text-secondary)]">
-              <span>Vyprázdnit starší než</span>
+              <span>{t("settingsGeneral.audit.purgeLabel")}</span>
               <div className="flex items-center gap-1">
                 <input
                   type="number"
@@ -442,20 +442,24 @@ export default function General() {
                   }
                   className="ui-input w-24 tabular-nums"
                 />
-                <span className="text-xs text-[var(--text-tertiary)]">dní</span>
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {t("settingsGeneral.audit.days")}
+                </span>
               </div>
             </label>
             <ConfirmButton
-              label="Vyčistit"
-              confirmLabel="Vyčistit"
+              label={t("settingsGeneral.audit.purgeButton")}
+              confirmLabel={t("settingsGeneral.audit.purgeConfirm")}
               variant="danger"
               onConfirm={async () => {
                 try {
                   const n = await purgeAuditLog(purgeDays);
-                  setPurgeStatus(`Smazáno ${n} záznam${czechPlural(n)}.`);
+                  setPurgeStatus(t(purgeDoneKey(n), { n }));
                 } catch (e) {
                   setPurgeStatus(
-                    typeof e === "string" ? e : "Vyčištění selhalo",
+                    typeof e === "string"
+                      ? e
+                      : t("settingsGeneral.audit.purgeFailed"),
                   );
                 }
               }}
@@ -467,8 +471,7 @@ export default function General() {
             </p>
           )}
           <p className="text-[11px] text-[var(--text-tertiary)]">
-            Smaže audit záznamy starší než zvolený počet dní. Tuto akci nelze
-            vrátit.
+            {t("settingsGeneral.audit.purgeHint")}
           </p>
         </div>
       </Section>
@@ -479,6 +482,7 @@ export default function General() {
 }
 
 function BackupSection() {
+  const t = useT();
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -499,9 +503,13 @@ function BackupSection() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setStatus("Export hotov.");
+      setStatus(t("settingsGeneral.backup.exportDone"));
     } catch (e) {
-      setStatus(`Export selhal: ${typeof e === "string" ? e : String(e)}`);
+      setStatus(
+        t("settingsGeneral.backup.exportFailed", {
+          error: typeof e === "string" ? e : String(e),
+        }),
+      );
     } finally {
       setBusy(false);
     }
@@ -510,8 +518,7 @@ function BackupSection() {
   const handleImport = async (file: File) => {
     if (
       !window.confirm(
-        `Importovat „${file.name}"?\n\n` +
-          `POZOR: existující data v aplikaci budou přepsána. Pokračovat?`,
+        t("settingsGeneral.backup.importConfirm", { name: file.name }),
       )
     ) {
       return;
@@ -523,10 +530,18 @@ function BackupSection() {
       const bundle = JSON.parse(text);
       const stats = await importBackup(bundle);
       setStatus(
-        `Importováno: ${stats.worklogs} worklog(s), ${stats.issues_v2} úkol(s), ${stats.connections} připojení.`,
+        t("settingsGeneral.backup.importDone", {
+          worklogs: stats.worklogs,
+          issues: stats.issues_v2,
+          connections: stats.connections,
+        }),
       );
     } catch (e) {
-      setStatus(`Import selhal: ${typeof e === "string" ? e : String(e)}`);
+      setStatus(
+        t("settingsGeneral.backup.importFailed", {
+          error: typeof e === "string" ? e : String(e),
+        }),
+      );
     } finally {
       setBusy(false);
     }
@@ -534,8 +549,8 @@ function BackupSection() {
 
   return (
     <Section
-      title="Záloha a obnova"
-      description="Export všech lokálních dat (worklogy, úkoly, nastavení) do JSON. Tokeny se neukládají — po obnově je nutné znovu zadat. Import přepíše stávající data."
+      title={t("settingsGeneral.backup.title")}
+      description={t("settingsGeneral.backup.description")}
     >
       <div className="flex flex-col gap-2 max-w-md">
         <div className="flex items-center gap-2 flex-wrap">
@@ -548,7 +563,7 @@ function BackupSection() {
                        bg-transparent hover:bg-[var(--accent-soft)]
                        transition-colors duration-150 disabled:opacity-60"
           >
-            Stáhnout zálohu (.json)
+            {t("settingsGeneral.backup.download")}
           </button>
           <button
             type="button"
@@ -559,7 +574,7 @@ function BackupSection() {
                        hover:bg-[var(--bg-hover)] transition-colors duration-150
                        disabled:opacity-60"
           >
-            Obnovit ze souboru…
+            {t("settingsGeneral.backup.restore")}
           </button>
           <input
             ref={fileInputRef}
@@ -582,11 +597,11 @@ function BackupSection() {
   );
 }
 
-/** Czech plural ending for "záznam(y/ů)" based on count. */
-function czechPlural(n: number): string {
-  if (n === 1) return "";
-  if (n >= 2 && n <= 4) return "y";
-  return "ů";
+/** i18n key for the purge-done message based on Czech plural rules. */
+function purgeDoneKey(n: number): string {
+  if (n === 1) return "settingsGeneral.audit.purgeDone.one";
+  if (n >= 2 && n <= 4) return "settingsGeneral.audit.purgeDone.few";
+  return "settingsGeneral.audit.purgeDone.many";
 }
 
 function Section({

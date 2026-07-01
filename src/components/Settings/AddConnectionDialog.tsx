@@ -31,6 +31,7 @@ import {
   testConnectionForProvider,
 } from "../../api/commands";
 import type { ProviderKind, ProviderUser } from "../../api/types";
+import { useT } from "../../i18n";
 import {
   emailSchema,
   freeloApiKeySchema,
@@ -54,6 +55,7 @@ export function AddConnectionDialog({
   onClose,
   onSaved,
 }: AddConnectionDialogProps) {
+  const t = useT();
   const [step, setStep] = useState<Step>("provider");
   const [provider, setProvider] = useState<ProviderKind | null>(null);
 
@@ -135,7 +137,7 @@ export function AddConnectionDialog({
     } catch (e) {
       setTest({
         kind: "error",
-        message: errMsg(e, "Připojení se nezdařilo"),
+        message: errMsg(e, t("connections.connectionFailed")),
       });
     }
   }
@@ -157,7 +159,7 @@ export function AddConnectionDialog({
       onSaved();
       close();
     } catch (e) {
-      setError(errMsg(e, "Uložení se nezdařilo"));
+      setError(errMsg(e, t("connections.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -177,7 +179,7 @@ export function AddConnectionDialog({
     } catch (e) {
       setTest({
         kind: "error",
-        message: errMsg(e, "Připojení se nezdařilo"),
+        message: errMsg(e, t("connections.connectionFailed")),
       });
     }
   }
@@ -202,7 +204,7 @@ export function AddConnectionDialog({
       setFreeloConnectionId(conn.id);
       setStep("freelo-projects");
     } catch (e) {
-      setError(errMsg(e, "Uložení se nezdařilo"));
+      setError(errMsg(e, t("connections.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -222,7 +224,7 @@ export function AddConnectionDialog({
       onSaved();
       close();
     } catch (e) {
-      setError(errMsg(e, "Uložení se nezdařilo"));
+      setError(errMsg(e, t("connections.saveFailed")));
     }
   }
 
@@ -245,7 +247,7 @@ export function AddConnectionDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Přidat nové připojení"
+      aria-label={t("connections.add.dialogLabel")}
       data-testid="add-connection-dialog"
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
@@ -263,14 +265,15 @@ export function AddConnectionDialog({
       >
         <header className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
-            {step === "provider" && "Vyberte poskytovatele"}
-            {step === "creds" && providerLabel(provider) + " — přihlášení"}
-            {step === "freelo-projects" && "Vyberte projekty"}
+            {step === "provider" && t("connections.add.chooseProvider")}
+            {step === "creds" &&
+              providerLabel(provider) + " — " + t("connections.add.signIn")}
+            {step === "freelo-projects" && t("connections.add.chooseProjects")}
           </h3>
           <button
             type="button"
             onClick={close}
-            aria-label="Zavřít"
+            aria-label={t("connections.close")}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                        transition-colors duration-150 text-xl leading-none px-1"
           >
@@ -299,7 +302,7 @@ export function AddConnectionDialog({
 
             <Field
               id="add-jira-url"
-              label="Základní URL Jiry"
+              label={t("connections.field.jiraUrl")}
               type="url"
               placeholder="https://acme.atlassian.net"
               value={jiraUrl}
@@ -310,7 +313,7 @@ export function AddConnectionDialog({
             />
             <Field
               id="add-jira-email"
-              label="E-mail Atlassian účtu"
+              label={t("connections.field.atlassianEmail")}
               type="email"
               placeholder="you@example.com"
               autoComplete="email"
@@ -322,9 +325,9 @@ export function AddConnectionDialog({
             />
             <Field
               id="add-jira-token"
-              label="Jira API token"
+              label={t("connections.field.jiraToken")}
               type="password"
-              placeholder="vložte svůj token"
+              placeholder={t("connections.placeholder.token")}
               mono
               value={jiraToken}
               onChange={(v) => {
@@ -345,11 +348,12 @@ export function AddConnectionDialog({
               />
               <span className="text-xs text-[var(--text-secondary)]">
                 <span className="font-medium text-[var(--text-primary)]">
-                  Vlastní / self-hosted server
+                  {t("connections.customHost.title")}
                 </span>
                 <br />
-                Zapněte pro on-premise Jiru mimo <code>*.atlassian.net</code>.
-                Ověřte, že URL je důvěryhodná — token se odešle na tento server.
+                {t("connections.customHost.descriptionPrefix")}
+                <code>*.atlassian.net</code>
+                {t("connections.customHost.descriptionSuffix")}
               </span>
             </label>
 
@@ -368,7 +372,7 @@ export function AddConnectionDialog({
                 {test.kind === "loading" && (
                   <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
                 )}
-                Otestovat
+                {t("connections.testAction")}
               </button>
               <TestStatus test={test} />
             </div>
@@ -386,7 +390,7 @@ export function AddConnectionDialog({
                 setError(null);
               }}
               onPrimary={() => void jiraSave()}
-              primaryLabel="Uložit"
+              primaryLabel={t("connections.save")}
               primaryDisabled={!canSaveJira}
               primaryLoading={saving}
               primaryTestId="add-conn-save-jira"
@@ -407,7 +411,7 @@ export function AddConnectionDialog({
 
             <Field
               id="add-freelo-email"
-              label="Freelo e-mail"
+              label={t("connections.field.freeloEmail")}
               type="email"
               placeholder="you@example.com"
               autoComplete="email"
@@ -419,9 +423,9 @@ export function AddConnectionDialog({
             />
             <Field
               id="add-freelo-key"
-              label="Freelo API klíč"
+              label={t("connections.field.freeloApiKey")}
               type="password"
-              placeholder="vložte svůj API klíč"
+              placeholder={t("connections.placeholder.apiKey")}
               mono
               value={freeloApiKey}
               onChange={(v) => {
@@ -437,14 +441,14 @@ export function AddConnectionDialog({
                          hover:text-[var(--text-primary)] transition-colors duration-150"
             >
               {freeloBaseUrlAdvanced
-                ? "Skrýt pokročilá nastavení"
-                : "Zobrazit pokročilá nastavení"}
+                ? t("connections.hideAdvanced")
+                : t("connections.showAdvanced")}
             </button>
 
             {freeloBaseUrlAdvanced && (
               <Field
                 id="add-freelo-base-url"
-                label="Freelo API URL"
+                label={t("connections.field.freeloApiUrl")}
                 type="url"
                 placeholder="https://api.freelo.io/v1"
                 value={freeloBaseUrl}
@@ -466,7 +470,7 @@ export function AddConnectionDialog({
                 {test.kind === "loading" && (
                   <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
                 )}
-                Otestovat
+                {t("connections.testAction")}
               </button>
               <TestStatus test={test} />
             </div>
@@ -484,7 +488,7 @@ export function AddConnectionDialog({
                 setError(null);
               }}
               onPrimary={() => void freeloSaveAndAdvance()}
-              primaryLabel="Pokračovat"
+              primaryLabel={t("connections.continue")}
               primaryDisabled={!canSaveFreelo}
               primaryLoading={saving}
               primaryTestId="add-conn-save-freelo"
@@ -534,12 +538,13 @@ function NameField({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const t = useT();
   return (
     <Field
       id="add-conn-name"
-      label="Název připojení"
+      label={t("connections.field.name")}
       type="text"
-      placeholder="např. SAB, Klient X, …"
+      placeholder={t("connections.placeholder.name")}
       value={value}
       onChange={onChange}
     />
@@ -602,6 +607,7 @@ function TestStatus({
     | { kind: "ok"; user: ProviderUser | { displayName: string } }
     | { kind: "error"; message: string };
 }) {
+  const t = useT();
   if (test.kind === "ok") {
     return (
       <span
@@ -609,7 +615,7 @@ function TestStatus({
         role="status"
       >
         <CircleCheck className="w-4 h-4" aria-hidden />
-        Připojeno jako {test.user.displayName}
+        {t("connections.connectedAs", { name: test.user.displayName })}
       </span>
     );
   }
@@ -638,6 +644,7 @@ function FooterButtons({
   primaryLoading: boolean;
   primaryTestId?: string;
 }) {
+  const t = useT();
   return (
     <div className="flex justify-between mt-2">
       <button
@@ -647,7 +654,7 @@ function FooterButtons({
                    hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)]
                    transition-colors duration-150"
       >
-        Zpět
+        {t("connections.back")}
       </button>
       <button
         type="button"

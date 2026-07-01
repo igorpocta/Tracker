@@ -20,20 +20,21 @@ import {
 import type { NonWorkingDay } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import { useTodayBoundary } from "../../hooks/useTodayBoundary";
+import { useT, type TFunc } from "../../i18n";
 import { addDays, formatIsoDate } from "../../lib/dates";
 
 import { AddNonWorkingDayDialog } from "./AddNonWorkingDayDialog";
 
 const WEEKDAYS_SHORT = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
-function reasonMeta(reason: string): { icon: string; label: string } {
+function reasonMeta(reason: string, t: TFunc): { icon: string; label: string } {
   switch (reason) {
     case "vacation":
-      return { icon: "🏖", label: "Dovolená" };
+      return { icon: "🏖", label: t("settingsGoals.reason.vacation") };
     case "holiday":
-      return { icon: "🎉", label: "Svátek" };
+      return { icon: "🎉", label: t("settingsGoals.reason.holiday") };
     case "personal":
-      return { icon: "🙅", label: "Osobní" };
+      return { icon: "🙅", label: t("settingsGoals.reason.personal") };
     default:
       return { icon: "•", label: reason };
   }
@@ -56,6 +57,7 @@ function weekdayFor(iso: string): string {
 const PAGE_SIZE = 20;
 
 export function NonWorkingDaysList() {
+  const t = useT();
   const queryClient = useQueryClient();
   // Recompute on day rollover — the -30 / +90 range slides forward each
   // midnight so the user keeps seeing roughly "the next 90 days".
@@ -104,7 +106,7 @@ export function NonWorkingDaysList() {
     <section>
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-semibold text-[var(--text-primary)]">
-          Nepracovní dny
+          {t("settingsGoals.nonWorking.title")}
         </span>
         <button
           type="button"
@@ -113,19 +115,19 @@ export function NonWorkingDaysList() {
                      text-[var(--accent)] hover:bg-[var(--accent-soft)]
                      transition-colors duration-150"
         >
-          + Přidat nepracovní den
+          {t("settingsGoals.nonWorking.add")}
         </button>
       </div>
 
       {days.length === 0 ? (
         <p className="text-[12px] text-[var(--text-tertiary)]">
-          Žádné nepracovní dny v rozsahu posledních 30 a příštích 90 dnů.
+          {t("settingsGoals.nonWorking.empty")}
         </p>
       ) : (
         <>
           <ul className="flex flex-col gap-1">
             {pageDays.map((d) => {
-              const meta = reasonMeta(d.reason);
+              const meta = reasonMeta(d.reason, t);
               return (
                 <li
                   key={d.date}
@@ -152,7 +154,9 @@ export function NonWorkingDaysList() {
                   <button
                     type="button"
                     onClick={() => void handleRemove(d.date)}
-                    aria-label={`Odebrat ${formatDmy(d.date)}`}
+                    aria-label={t("settingsGoals.nonWorking.remove", {
+                      date: formatDmy(d.date),
+                    })}
                     className="h-6 w-6 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                                rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)]
                                transition-colors duration-150"
@@ -165,7 +169,7 @@ export function NonWorkingDaysList() {
           </ul>
           {showPagination && (
             <nav
-              aria-label="Stránkování nepracovních dnů"
+              aria-label={t("settingsGoals.nonWorking.pagination")}
               className="flex items-center justify-end gap-2 text-[11px] text-[var(--text-secondary)] mt-2"
             >
               <button
@@ -176,7 +180,7 @@ export function NonWorkingDaysList() {
                            hover:bg-[var(--bg-hover)] transition-colors duration-150
                            disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
-                ← Předchozí
+                {t("settingsGoals.nonWorking.previous")}
               </button>
               <span className="tabular-nums">
                 {safePage} / {totalPages}
@@ -189,7 +193,7 @@ export function NonWorkingDaysList() {
                            hover:bg-[var(--bg-hover)] transition-colors duration-150
                            disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
-                Další →
+                {t("settingsGoals.nonWorking.next")}
               </button>
             </nav>
           )}

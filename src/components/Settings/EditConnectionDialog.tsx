@@ -24,6 +24,7 @@ import {
   updateConnectionApi,
 } from "../../api/commands";
 import type { ConnectionDto, ProviderUser } from "../../api/types";
+import { useT } from "../../i18n";
 import {
   emailSchema,
   freeloApiKeySchema,
@@ -50,6 +51,7 @@ export function EditConnectionDialog({
   onClose,
   onSaved,
 }: EditConnectionDialogProps) {
+  const t = useT();
   const cfg = (conn.config ?? {}) as Record<string, unknown>;
   const initialUrl = typeof cfg["base_url"] === "string" ? (cfg["base_url"] as string) : "";
   const initialEmail = typeof cfg["email"] === "string" ? (cfg["email"] as string) : "";
@@ -103,7 +105,7 @@ export function EditConnectionDialog({
       const list = await listJiraStatuses(conn.id);
       setStatuses(list);
     } catch (e) {
-      setStatusesError(errMsg(e, "Statusy se nepodařilo načíst"));
+      setStatusesError(errMsg(e, t("connections.edit.statusesLoadFailed")));
       setStatuses([]); // neretryovat při každém open
     } finally {
       setStatusesLoading(false);
@@ -167,7 +169,7 @@ export function EditConnectionDialog({
     } catch (e) {
       setTest({
         kind: "error",
-        message: errMsg(e, "Připojení se nezdařilo"),
+        message: errMsg(e, t("connections.connectionFailed")),
       });
     }
   }
@@ -200,7 +202,7 @@ export function EditConnectionDialog({
       onSaved();
       handleClose();
     } catch (e) {
-      setError(errMsg(e, "Uložení se nezdařilo"));
+      setError(errMsg(e, t("connections.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -218,7 +220,7 @@ export function EditConnectionDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Upravit ${conn.name}`}
+      aria-label={t("connections.edit.dialogLabel", { name: conn.name })}
       data-testid="edit-connection-dialog"
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
@@ -236,12 +238,14 @@ export function EditConnectionDialog({
       >
         <header className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
-            Upravit {providerLabel(conn.provider)} připojení
+            {t("connections.edit.title", {
+              provider: providerLabel(conn.provider),
+            })}
           </h3>
           <button
             type="button"
             onClick={handleClose}
-            aria-label="Zavřít"
+            aria-label={t("connections.close")}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                        transition-colors duration-150 text-xl leading-none px-1"
           >
@@ -251,17 +255,17 @@ export function EditConnectionDialog({
 
         <Field
           id="edit-conn-name"
-          label="Název připojení"
+          label={t("connections.field.name")}
           type="text"
           value={name}
           onChange={setName}
-          placeholder="např. SAB, Klient X"
+          placeholder={t("connections.placeholder.nameShort")}
         />
 
         {isJira && (
           <Field
             id="edit-jira-url"
-            label="Základní URL Jiry"
+            label={t("connections.field.jiraUrl")}
             type="url"
             value={baseUrl}
             onChange={(v) => {
@@ -284,18 +288,23 @@ export function EditConnectionDialog({
             />
             <span className="text-xs text-[var(--text-secondary)]">
               <span className="font-medium text-[var(--text-primary)]">
-                Vlastní / self-hosted server
+                {t("connections.customHost.title")}
               </span>
               <br />
-              Zapněte pro on-premise Jiru mimo <code>*.atlassian.net</code>.
-              Ověřte, že URL je důvěryhodná — token se odešle na tento server.
+              {t("connections.customHost.descriptionPrefix")}
+              <code>*.atlassian.net</code>
+              {t("connections.customHost.descriptionSuffix")}
             </span>
           </label>
         )}
 
         <Field
           id="edit-conn-email"
-          label={isJira ? "E-mail Atlassian účtu" : "Freelo e-mail"}
+          label={
+            isJira
+              ? t("connections.field.atlassianEmail")
+              : t("connections.field.freeloEmail")
+          }
           type="email"
           value={email}
           autoComplete="email"
@@ -314,13 +323,13 @@ export function EditConnectionDialog({
                          hover:text-[var(--text-primary)] transition-colors duration-150"
             >
               {advanced
-                ? "Skrýt pokročilá nastavení"
-                : "Zobrazit pokročilá nastavení"}
+                ? t("connections.hideAdvanced")
+                : t("connections.showAdvanced")}
             </button>
             {advanced && (
               <Field
                 id="edit-freelo-base-url"
-                label="Freelo API URL"
+                label={t("connections.field.freeloApiUrl")}
                 type="url"
                 value={baseUrl}
                 placeholder="https://api.freelo.io/v1"
@@ -341,14 +350,20 @@ export function EditConnectionDialog({
             className="self-start text-xs text-[var(--text-tertiary)]
                        hover:text-[var(--text-primary)] transition-colors duration-150"
           >
-            {isJira ? "Nahradit API token" : "Nahradit API klíč"}
+            {isJira
+              ? t("connections.edit.replaceToken")
+              : t("connections.edit.replaceApiKey")}
           </button>
         )}
 
         {showSecret && (
           <Field
             id="edit-conn-secret"
-            label={isJira ? "Nový Jira API token" : "Nový Freelo API klíč"}
+            label={
+              isJira
+                ? t("connections.edit.newToken")
+                : t("connections.edit.newApiKey")
+            }
             type="password"
             mono
             value={secret}
@@ -373,7 +388,7 @@ export function EditConnectionDialog({
               {test.kind === "loading" && (
                 <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
               )}
-              Otestovat
+              {t("connections.testAction")}
             </button>
             {test.kind === "ok" && (
               <span
@@ -381,7 +396,7 @@ export function EditConnectionDialog({
                 role="status"
               >
                 <CircleCheck className="w-4 h-4" aria-hidden />
-                Připojeno jako {test.user.displayName}
+                {t("connections.connectedAs", { name: test.user.displayName })}
               </span>
             )}
             {test.kind === "error" && (
@@ -403,11 +418,10 @@ export function EditConnectionDialog({
               />
               <span className="text-xs text-[var(--text-secondary)]">
                 <span className="font-medium text-[var(--text-primary)]">
-                  Zobrazit Dashboard
+                  {t("connections.dashboard.title")}
                 </span>
                 <br />
-                Přidá tuto Jiru do přehledové tabulky „JIRA Přehled" v menu.
-                Vyžaduje JQL filter níže.
+                {t("connections.dashboard.description")}
               </span>
             </label>
             {dashboardEnabled && (
@@ -416,7 +430,7 @@ export function EditConnectionDialog({
                   htmlFor="edit-jira-dashboard-jql"
                   className="text-xs font-medium text-[var(--text-secondary)]"
                 >
-                  JQL pro Dashboard
+                  {t("connections.dashboard.jqlLabel")}
                 </label>
                 <textarea
                   id="edit-jira-dashboard-jql"
@@ -435,8 +449,7 @@ export function EditConnectionDialog({
                              transition-colors duration-150 resize-y"
                 />
                 <p className="text-[10px] text-[var(--text-tertiary)]">
-                  Atlassian odmítne JQL bez aspoň jedné restrikce. Bez ORDER BY
-                  bere defaultní řazení dle Jiry.
+                  {t("connections.dashboard.jqlHint")}
                 </p>
               </div>
             )}
@@ -448,12 +461,12 @@ export function EditConnectionDialog({
               }}
             >
               <summary className="text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
-                Automatický přechod stavu (volitelné)
+                {t("connections.autoTransition.summary")}
               </summary>
               <div className="grid grid-cols-2 gap-3 mt-2">
                 <StatusSelect
                   id="auto-trans-from"
-                  label="Pokud je úkol ve stavu…"
+                  label={t("connections.autoTransition.fromLabel")}
                   value={autoFrom}
                   options={statuses}
                   loading={statusesLoading}
@@ -461,7 +474,7 @@ export function EditConnectionDialog({
                 />
                 <StatusSelect
                   id="auto-trans-to"
-                  label="…přejít při spuštění na"
+                  label={t("connections.autoTransition.toLabel")}
                   value={autoTo}
                   options={statuses}
                   loading={statusesLoading}
@@ -474,9 +487,7 @@ export function EditConnectionDialog({
                 </p>
               )}
               <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
-                Tichá best-effort akce — pokud mezi vybranými stavy v Jiře
-                neexistuje přímá transition, Tracker se ji prostě nepokusí
-                provést (zapíše do logu). Necháte-li vybráno „—", nic se nedělá.
+                {t("connections.autoTransition.hint")}
               </p>
             </details>
           </div>
@@ -497,10 +508,10 @@ export function EditConnectionDialog({
             />
             <span className="text-xs text-[var(--text-secondary)]">
               <span className="font-medium text-[var(--text-primary)]">
-                Vlastní barva v Reportech
+                {t("connections.color.title")}
               </span>
               <br />
-              Když je vypnuto, použije se výchozí barva providera.
+              {t("connections.color.description")}
             </span>
           </label>
           {colorEnabled && (
@@ -510,7 +521,7 @@ export function EditConnectionDialog({
                 value={color || "#1B6FE5"}
                 onChange={(e) => setColor(e.target.value)}
                 className="w-8 h-8 rounded border-none cursor-pointer bg-transparent"
-                aria-label="Barva pro toto připojení"
+                aria-label={t("connections.color.pickerLabel")}
               />
               <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
                 {color || "#1B6FE5"}
@@ -535,7 +546,7 @@ export function EditConnectionDialog({
                        hover:bg-[var(--bg-hover)]
                        transition-colors duration-150"
           >
-            Zrušit
+            {t("connections.cancel")}
           </button>
           <button
             type="button"
@@ -553,7 +564,7 @@ export function EditConnectionDialog({
             {saving && (
               <LoaderCircle className="w-3.5 h-3.5 animate-spin" aria-hidden />
             )}
-            Uložit
+            {t("connections.save")}
           </button>
         </div>
       </div>
@@ -592,6 +603,7 @@ function StatusSelect({
   loading: boolean;
   onChange: (v: string) => void;
 }) {
+  const t = useT();
   // Pokud má uživatel uloženou hodnotu, která už ve statuses není (jiný
   // workflow, přejmenovaný status), zachováme ji jako fallback option, ať
   // se select nepřeskočí na prázdno.
@@ -619,8 +631,10 @@ function StatusSelect({
                    text-sm text-[var(--text-primary)] transition-colors duration-150
                    disabled:opacity-60"
       >
-        <option value="">— nezvoleno —</option>
-        {loading && options === null && <option disabled>Načítám…</option>}
+        <option value="">{t("connections.status.none")}</option>
+        {loading && options === null && (
+          <option disabled>{t("connections.status.loading")}</option>
+        )}
         {merged.map((s) => (
           <option key={s} value={s}>
             {s}

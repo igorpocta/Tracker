@@ -32,10 +32,10 @@ import { useT } from "../../i18n";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { SettingsCard } from "./SettingsCard";
 
-const THEME_OPTIONS: { value: ThemePref; label: string; icon: React.ReactNode }[] = [
-  { value: "light", label: "Světlý", icon: <Sun className="w-4 h-4" aria-hidden /> },
-  { value: "dark", label: "Tmavý", icon: <Moon className="w-4 h-4" aria-hidden /> },
-  { value: "auto", label: "Systémový", icon: <Monitor className="w-4 h-4" aria-hidden /> },
+const THEME_OPTIONS: { value: ThemePref; labelKey: string; icon: React.ReactNode }[] = [
+  { value: "light", labelKey: "settingsMisc.appearance.themeLight", icon: <Sun className="w-4 h-4" aria-hidden /> },
+  { value: "dark", labelKey: "settingsMisc.appearance.themeDark", icon: <Moon className="w-4 h-4" aria-hidden /> },
+  { value: "auto", labelKey: "settingsMisc.appearance.themeSystem", icon: <Monitor className="w-4 h-4" aria-hidden /> },
 ];
 
 export default function Appearance() {
@@ -58,7 +58,7 @@ export default function Appearance() {
     <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Vzhled
+          {t("settingsMisc.appearance.title")}
         </h2>
       </header>
 
@@ -89,14 +89,14 @@ export default function Appearance() {
       </SettingsCard>
 
       <SettingsCard
-        title="Motiv"
-        description="Světlý, tmavý, nebo podle nastavení systému."
+        title={t("settingsMisc.appearance.themeTitle")}
+        description={t("settingsMisc.appearance.themeDescription")}
       >
         <div className="grid grid-cols-3 gap-3">
           {THEME_OPTIONS.map((opt) => (
             <ThemeCard
               key={opt.value}
-              label={opt.label}
+              label={t(opt.labelKey)}
               icon={opt.icon}
               active={theme === opt.value}
               onClick={() => void setTheme(opt.value)}
@@ -106,8 +106,8 @@ export default function Appearance() {
       </SettingsCard>
 
       <SettingsCard
-        title="Barevná paleta"
-        description="Barva zvýraznění v celé aplikaci."
+        title={t("settingsMisc.appearance.paletteTitle")}
+        description={t("settingsMisc.appearance.paletteDescription")}
         action={
           <PaletteModeToggle
             value={paletteMode}
@@ -128,8 +128,8 @@ export default function Appearance() {
       </SettingsCard>
 
       <SettingsCard
-        title="Časová osa dne"
-        description="Rozsah hodin na časové ose nad záznamy. Celý den ukáže 0–24, vlastní rozsah se hodí, když pracujete jen v části dne."
+        title={t("settingsMisc.appearance.timelineTitle")}
+        description={t("settingsMisc.appearance.timelineDescription")}
       >
         <TimelineRangeControl
           startHour={timelineStartHour}
@@ -151,6 +151,7 @@ function TimelineRangeControl({
   endHour: number;
   onChange: (startHour: number, endHour: number) => void;
 }) {
+  const t = useT();
   const isFullDay = startHour === 0 && endHour === 24;
   const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
   // Constrain the option lists so `start < end` always holds without silent
@@ -166,8 +167,8 @@ function TimelineRangeControl({
       >
         {(
           [
-            { full: true, label: "Celý den (0–24)" },
-            { full: false, label: "Vlastní rozsah" },
+            { full: true, label: t("settingsMisc.appearance.timelineFullDay") },
+            { full: false, label: t("settingsMisc.appearance.timelineCustomRange") },
           ] as const
         ).map((opt) => {
           const active = opt.full === isFullDay;
@@ -196,7 +197,7 @@ function TimelineRangeControl({
       {!isFullDay && (
         <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
           <label className="flex items-center gap-1.5">
-            <span>Od</span>
+            <span>{t("settingsMisc.appearance.timelineFrom")}</span>
             <select
               className="ui-select"
               value={startHour}
@@ -211,7 +212,7 @@ function TimelineRangeControl({
           </label>
           <span className="text-[var(--text-tertiary)]">–</span>
           <label className="flex items-center gap-1.5">
-            <span>Do</span>
+            <span>{t("settingsMisc.appearance.timelineTo")}</span>
             <select
               className="ui-select"
               value={endHour}
@@ -261,9 +262,9 @@ function ThemeCard({
   );
 }
 
-const PALETTE_MODE_LABEL: Record<PaletteMode, string> = {
-  mono: "Mono",
-  dual: "Duální",
+const PALETTE_MODE_LABEL_KEY: Record<PaletteMode, string> = {
+  mono: "settingsMisc.appearance.paletteModeMono",
+  dual: "settingsMisc.appearance.paletteModeDual",
 };
 
 function PaletteModeToggle({
@@ -273,6 +274,7 @@ function PaletteModeToggle({
   value: PaletteMode;
   onChange: (v: PaletteMode) => void;
 }) {
+  const t = useT();
   return (
     <div className="inline-flex items-center rounded-full p-0.5 text-xs"
          style={{ background: "var(--bg-active)" }}>
@@ -291,7 +293,7 @@ function PaletteModeToggle({
               : { color: "var(--text-tertiary)" }
           }
         >
-          {PALETTE_MODE_LABEL[m]}
+          {t(PALETTE_MODE_LABEL_KEY[m])}
         </button>
       ))}
     </div>
