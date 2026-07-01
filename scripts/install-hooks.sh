@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Install the git pre-commit hook. Run once per clone — afterwards a normal
-# `git commit` will invoke `scripts/precommit.sh` and refuse to record the
-# commit if any check fails.
+# Install the git pre-push hook. Run once per clone — afterwards a normal
+# `git push` will invoke `scripts/precommit.sh` and refuse to push if any
+# check fails. Running on push (not commit) keeps local commits fast while
+# still gating everything before it reaches origin / CI.
 #
-# To bypass intentionally (e.g. WIP commit before fixing the linter), use
-# `git commit --no-verify`.
+# To bypass intentionally (e.g. pushing a WIP branch), use
+# `git push --no-verify`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -15,7 +16,14 @@ if [[ ! -d .git ]]; then
   exit 1
 fi
 
-HOOK=".git/hooks/pre-commit"
+# Remove a legacy pre-commit hook from older checkouts so the gate doesn't
+# also run on every commit.
+if [[ -f .git/hooks/pre-commit ]] && grep -q "scripts/precommit.sh" .git/hooks/pre-commit; then
+  rm -f .git/hooks/pre-commit
+  echo "Removed legacy pre-commit hook (gate now runs on push)."
+fi
+
+HOOK=".git/hooks/pre-push"
 mkdir -p "$(dirname "$HOOK")"
 cat > "$HOOK" <<'HOOK'
 #!/usr/bin/env bash
@@ -23,5 +31,5 @@ cat > "$HOOK" <<'HOOK'
 exec ./scripts/precommit.sh
 HOOK
 chmod +x "$HOOK"
-echo "Installed pre-commit hook → $HOOK"
-echo "Bypass once with: git commit --no-verify"
+echo "Installed pre-push hook → $HOOK"
+echo "Bypass once with: git push --no-verify"

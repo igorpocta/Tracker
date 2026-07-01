@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Local pre-commit script (Phase 18C — Item 25).
+# Local pre-push gate (Phase 18C — Item 25).
 #
-# Run all the cheap checks we want CI to also enforce, in roughly the order
-# they're likely to fail. The script bails on the first failure (`set -e`)
-# so the developer sees the actionable error immediately.
+# Run all the checks we want CI to also enforce, in roughly the order they're
+# likely to fail. The script bails on the first failure (`set -e`) so the
+# developer sees the actionable error immediately.
 #
 # Manual invocation: `./scripts/precommit.sh`. The git hook installed by
-# `./scripts/install-hooks.sh` exec's this file, so a normal `git commit`
-# also runs the gate.
+# `./scripts/install-hooks.sh` exec's this file on `git push`, so pushing to
+# origin also runs the gate. (`release.sh` runs it too, before tag + build.)
 set -euo pipefail
 
 # Always run from the repo root, regardless of CWD.
