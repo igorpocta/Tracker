@@ -107,8 +107,8 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
   // connection bucketu — tak vidíš v reportu projektovou distribuci, ne
   // jen jednu globální Jira/Freelo barvu.
   const bucketsByDay = useMemo(
-    () => groupByDay(rows, connInfo, projectColorMap),
-    [rows, connInfo, projectColorMap],
+    () => groupByDay(rows, connInfo, projectColorMap, t("reports.local")),
+    [rows, connInfo, projectColorMap, t],
   );
 
   // Phase 18B — Item 1: per-day working-day state.
@@ -425,6 +425,7 @@ function groupByDay(
   rows: WorklogRow[],
   conn: Map<number, ConnInfo>,
   projectColors: Map<string, string>,
+  localLabel: string,
 ): Map<string, Bucket[]> {
   const days = new Map<string, Map<string, Bucket>>();
   for (const r of rows) {
@@ -446,7 +447,7 @@ function groupByDay(
       };
       bucketKey = `c:${r.connection_id}`;
     } else {
-      info = { label: "Lokální", color: LOCAL_COLOR };
+      info = { label: localLabel, color: LOCAL_COLOR };
       bucketKey = "local";
     }
 
@@ -488,8 +489,8 @@ function groupByDay(
   const out = new Map<string, Bucket[]>();
   for (const [k, map] of days) {
     const arr = Array.from(map.values()).sort((a, b) => {
-      const aLocal = a.label === "Lokální";
-      const bLocal = b.label === "Lokální";
+      const aLocal = a.label === localLabel;
+      const bLocal = b.label === localLabel;
       if (aLocal && !bLocal) return 1;
       if (!aLocal && bLocal) return -1;
       return a.label.localeCompare(b.label, "cs", { sensitivity: "base" });

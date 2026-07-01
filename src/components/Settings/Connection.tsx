@@ -43,6 +43,7 @@ import {
 import { queryKeys } from "../../api/queryKeys";
 import type { ConnectionDto, FreeloProjectDto } from "../../api/types";
 import { useT, type TFunc } from "../../i18n";
+import { pluralCs } from "../../lib/format";
 
 import { AddConnectionDialog } from "./AddConnectionDialog";
 import { EditConnectionDialog } from "./EditConnectionDialog";
@@ -260,10 +261,18 @@ function ConnectionCard({
           </div>
           {statsQ.data && (
             <div className="text-[10px] text-[var(--text-tertiary)] truncate font-mono tabular-nums">
-              {statsQ.data.worklog_count.toLocaleString("cs-CZ")} worklog
-              {worklogPlural(statsQ.data.worklog_count)} ·{" "}
-              {statsQ.data.issue_count.toLocaleString("cs-CZ")} úkol
-              {issuePlural(statsQ.data.issue_count)}
+              {statsQ.data.worklog_count.toLocaleString("cs-CZ")}{" "}
+              {pluralCs(statsQ.data.worklog_count, [
+                t("connections.stats.worklog.one"),
+                t("connections.stats.worklog.few"),
+                t("connections.stats.worklog.many"),
+              ])}{" "}
+              · {statsQ.data.issue_count.toLocaleString("cs-CZ")}{" "}
+              {pluralCs(statsQ.data.issue_count, [
+                t("connections.stats.issue.one"),
+                t("connections.stats.issue.few"),
+                t("connections.stats.issue.many"),
+              ])}
               {statsQ.data.last_synced_at
                 ? ` · sync ${formatSyncTime(statsQ.data.last_synced_at)}`
                 : ` · ${t("connections.neverSynced")}`}
@@ -844,17 +853,6 @@ function providerAvatarSpec(p: string): {
   };
 }
 
-/** Plurály pro „worklog/worklogy/worklogů". */
-function worklogPlural(n: number): string {
-  if (n === 1) return "";
-  if (n >= 2 && n <= 4) return "y";
-  return "ů";
-}
-function issuePlural(n: number): string {
-  if (n === 1) return "";
-  if (n >= 2 && n <= 4) return "y";
-  return "ů";
-}
 
 function formatSyncTime(unixS: number): string {
   if (!unixS) return "";

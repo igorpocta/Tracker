@@ -7,6 +7,8 @@ import {
   formatHours,
   formatMoney,
   formatRelativeTime,
+  formatWeekdayCs,
+  formatWeekdayShort,
   isToday,
   pluralCs,
 } from "./format";
@@ -76,6 +78,21 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(now.getTime() - 5 * 60_000, now)).toBe("před 5 min");
     expect(formatRelativeTime(now.getTime() - 3 * 3_600_000, now)).toBe("před 3 h");
     expect(formatRelativeTime(now.getTime() - 2 * 86_400_000, now)).toBe("před 2 dny");
+  });
+
+  it("renders English when lang='en'", () => {
+    const now = new Date("2026-07-01T12:00:00Z");
+    expect(formatRelativeTime(now.getTime() - 5_000, now, "en")).toBe("just now");
+    expect(formatRelativeTime(now.getTime() - 5 * 60_000, now, "en")).toBe("5 min ago");
+    expect(formatRelativeTime(now.getTime() - 2 * 86_400_000, now, "en")).toBe("2 d ago");
+  });
+
+  it("weekday names follow the language", () => {
+    const wed = new Date(2026, 6, 1); // Wednesday
+    expect(formatWeekdayCs(wed, "cs")).toBe("Středa");
+    expect(formatWeekdayCs(wed, "en")).toBe("Wednesday");
+    expect(formatWeekdayShort(3, "cs")).toBe("St");
+    expect(formatWeekdayShort(3, "en")).toBe("We");
   });
 
   it("accepts unix seconds", () => {

@@ -145,6 +145,13 @@ export const connections = {
     // StatusSelect
     "connections.status.none": "— nezvoleno —",
     "connections.status.loading": "Načítám…",
+    // Stats line plurals (Czech 3-form)
+    "connections.stats.worklog.one": "worklog",
+    "connections.stats.worklog.few": "worklogy",
+    "connections.stats.worklog.many": "worklogů",
+    "connections.stats.issue.one": "úkol",
+    "connections.stats.issue.few": "úkoly",
+    "connections.stats.issue.many": "úkolů",
   },
   en: {
     // Connection.tsx — header + list
@@ -291,5 +298,12 @@ export const connections = {
     // StatusSelect
     "connections.status.none": "— not selected —",
     "connections.status.loading": "Loading…",
+    // Stats line plurals (English: one vs many)
+    "connections.stats.worklog.one": "worklog",
+    "connections.stats.worklog.few": "worklogs",
+    "connections.stats.worklog.many": "worklogs",
+    "connections.stats.issue.one": "issue",
+    "connections.stats.issue.few": "issues",
+    "connections.stats.issue.many": "issues",
   },
 } as const;

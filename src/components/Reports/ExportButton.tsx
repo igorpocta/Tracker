@@ -52,7 +52,17 @@ export function ExportButton({ rows, from, to }: ExportButtonProps) {
   const handleExport = () => {
     const issueMap = issueQ.data ?? new Map<string, IssueRow>();
     const filename = `tracker-${formatIso(from)}-${formatIso(to)}.xlsx`;
-    writeXlsx(rows, issueMap, filename);
+    writeXlsx(rows, issueMap, filename, {
+      headers: [
+        t("reports.export.hInitiative"),
+        t("reports.export.hIssue"),
+        t("reports.export.hDescription"),
+        t("reports.export.hStart"),
+        t("reports.export.hHours"),
+      ],
+      sheet: t("reports.export.sheet"),
+      noIssue: t("reports.export.noIssue"),
+    });
   };
 
   return (
@@ -79,19 +89,20 @@ export function ExportButton({ rows, from, to }: ExportButtonProps) {
  * tohohle souboru je zachováno (`buildRowsForExport`) ať to lze
  * unit-testovat bez SheetJS závislosti.
  */
+interface ExportLabels {
+  headers: string[];
+  sheet: string;
+  noIssue: string;
+}
+
 function writeXlsx(
   rows: WorklogRow[],
   issueMap: Map<string, IssueRow>,
   filename: string,
+  labels: ExportLabels,
 ) {
-  const headers = [
-    "Initiative",
-    "Issue",
-    "Popis",
-    "Začátek",
-    "Hodiny",
-  ];
-  const dataRows = buildRowsForExport(rows, issueMap);
+  const headers = labels.headers;
+  const dataRows = buildRowsForExport(rows, issueMap, labels.noIssue);
 
   const ws = XLSX.utils.aoa_to_sheet([
     headers,
@@ -130,7 +141,7 @@ function writeXlsx(
   }
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Worklogy");
+  XLSX.utils.book_append_sheet(wb, ws, labels.sheet);
   XLSX.writeFile(wb, filename, { compression: true });
 }
 
@@ -146,6 +157,7 @@ interface ExportRow {
 export function buildRowsForExport(
   rows: WorklogRow[],
   issueMap: Map<string, IssueRow>,
+  noIssueLabel = "(bez úkolu)",
 ): ExportRow[] {
   return rows
     .slice()
@@ -159,7 +171,7 @@ export function buildRowsForExport(
           : "";
       const issueLabel = key
         ? `${key}: ${iss?.summary ?? r.summary ?? ""}`
-        : "(bez úkolu)";
+        : noIssueLabel;
       const description = r.description ?? r.comment ?? "";
       const start = new Date(r.started_at * 1000);
       const hours = Math.round((r.duration_s / 3600) * 100) / 100;

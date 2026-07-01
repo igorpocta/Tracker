@@ -36,6 +36,14 @@ export const reports = {
 
     "reports.export.title": "Exportovat výkaz do Excelu (.xlsx)",
     "reports.export.button": "Exportovat do Excelu",
+    "reports.local": "Lokální",
+    "reports.export.hInitiative": "Initiative",
+    "reports.export.hIssue": "Issue",
+    "reports.export.hDescription": "Popis",
+    "reports.export.hStart": "Začátek",
+    "reports.export.hHours": "Hodiny",
+    "reports.export.sheet": "Worklogy",
+    "reports.export.noIssue": "(bez úkolu)",
   },
   en: {
     "reports.heading": "Reports",
@@ -73,5 +81,13 @@ export const reports = {
 
     "reports.export.title": "Export the report to Excel (.xlsx)",
     "reports.export.button": "Export to Excel",
+    "reports.local": "Local",
+    "reports.export.hInitiative": "Initiative",
+    "reports.export.hIssue": "Issue",
+    "reports.export.hDescription": "Description",
+    "reports.export.hStart": "Start",
+    "reports.export.hHours": "Hours",
+    "reports.export.sheet": "Worklogs",
+    "reports.export.noIssue": "(no issue)",
   },
 } as const;

@@ -1,9 +1,19 @@
 /**
  * Small set of duration / time formatters shared across the main app.
  *
- * All helpers are pure functions over numbers; they have no React or Tauri
- * dependency so they're trivial to unit-test from Vitest.
+ * Duration/number helpers are pure. Locale-dependent helpers (relative time,
+ * weekday names) accept an optional `lang`; when omitted they read the current
+ * UI language from the prefs store, so call sites don't need to thread it —
+ * while unit tests can still pass an explicit `lang` for pure, deterministic
+ * assertions.
  */
+import type { Language } from "../i18n/messages";
+import { usePrefsStore } from "../stores/prefsStore";
+
+/** Current UI language (non-reactive snapshot). */
+function activeLang(): Language {
+  return usePrefsStore.getState().language;
+}
 
 /** Pad a non-negative integer to at least 2 digits with leading zeros. */
 function pad2(n: number): string {
@@ -74,27 +84,30 @@ export function formatHours(hours: number): string {
 export function formatRelativeTime(
   value: Date | number,
   now: Date = new Date(),
+  lang: Language = activeLang(),
 ): string {
   const past =
     value instanceof Date
       ? value
       : new Date(value < 1e12 ? value * 1000 : value);
   const diffMs = now.getTime() - past.getTime();
-  if (diffMs < 0) return "právě teď";
+  const en = lang === "en";
+  const justNow = en ? "just now" : "právě teď";
+  if (diffMs < 0) return justNow;
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 45) return "právě teď";
+  if (seconds < 45) return justNow;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `před ${minutes} min`;
+  if (minutes < 60) return en ? `${minutes} min ago` : `před ${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `před ${hours} h`;
+  if (hours < 24) return en ? `${hours} h ago` : `před ${hours} h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `před ${days} dny`;
+  if (days < 7) return en ? `${days} d ago` : `před ${days} dny`;
   const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `před ${weeks} týd`;
+  if (weeks < 5) return en ? `${weeks} wk ago` : `před ${weeks} týd`;
   const months = Math.floor(days / 30);
-  if (months < 12) return `před ${months} měs`;
+  if (months < 12) return en ? `${months} mo ago` : `před ${months} měs`;
   const years = Math.floor(days / 365);
-  return `před ${years} r`;
+  return en ? `${years} y ago` : `před ${years} r`;
 }
 
 /**
@@ -120,9 +133,31 @@ const WEEKDAYS_CS = [
   "Sobota",
 ] as const;
 
-/** Czech weekday name with first letter capitalised: `Pondělí`, `Úterý`, … */
-export function formatWeekdayCs(d: Date): string {
-  return WEEKDAYS_CS[d.getDay()];
+const WEEKDAYS_EN = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+const WEEKDAYS_SHORT_CS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"] as const;
+const WEEKDAYS_SHORT_EN = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
+
+/** Full weekday name in the active (or given) language: `Pondělí` / `Monday`. */
+export function formatWeekdayCs(d: Date, lang: Language = activeLang()): string {
+  return (lang === "en" ? WEEKDAYS_EN : WEEKDAYS_CS)[d.getDay()];
+}
+
+/** 2-letter weekday abbreviation in the active (or given) language: `Po` / `Mo`. */
+export function formatWeekdayShort(
+  dayIndex: number,
+  lang: Language = activeLang(),
+): string {
+  const arr = lang === "en" ? WEEKDAYS_SHORT_EN : WEEKDAYS_SHORT_CS;
+  return arr[((dayIndex % 7) + 7) % 7];
 }
 
 /** Format a timestamp as a `HH:MM` clock time in the user's local timezone. */

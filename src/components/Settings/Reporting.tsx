@@ -21,14 +21,7 @@ import { useT } from "../../i18n";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { SettingsCard } from "./SettingsCard";
 
-const CURRENCIES: { value: Currency; label: string }[] = [
-  { value: "CZK", label: "CZK — Česká koruna" },
-  { value: "EUR", label: "EUR — Euro" },
-  { value: "USD", label: "USD — Americký dolar" },
-  { value: "GBP", label: "GBP — Britská libra" },
-  { value: "PLN", label: "PLN — Polský zlotý" },
-  { value: "CHF", label: "CHF — Švýcarský frank" },
-];
+const CURRENCIES: Currency[] = ["CZK", "EUR", "USD", "GBP", "PLN", "CHF"];
 
 export default function Reporting() {
   const t = useT();
@@ -118,9 +111,9 @@ export default function Reporting() {
           aria-label={t("settingsMisc.reporting.currency")}
           className="ui-select w-full"
         >
-          {CURRENCIES.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
+          {CURRENCIES.map((code) => (
+            <option key={code} value={code}>
+              {code} — {t(`settings.currency.${code}`)}
             </option>
           ))}
         </select>

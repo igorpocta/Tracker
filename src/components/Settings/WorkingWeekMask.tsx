@@ -20,15 +20,18 @@ import {
 } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import { useT } from "../../i18n";
+import { formatWeekdayShort } from "../../lib/format";
 
-const DAYS: { bit: number; short: string; labelKey: string }[] = [
-  { bit: 1, short: "Po", labelKey: "settingsGoals.weekday.mon" },
-  { bit: 2, short: "Út", labelKey: "settingsGoals.weekday.tue" },
-  { bit: 4, short: "St", labelKey: "settingsGoals.weekday.wed" },
-  { bit: 8, short: "Čt", labelKey: "settingsGoals.weekday.thu" },
-  { bit: 16, short: "Pá", labelKey: "settingsGoals.weekday.fri" },
-  { bit: 32, short: "So", labelKey: "settingsGoals.weekday.sat" },
-  { bit: 64, short: "Ne", labelKey: "settingsGoals.weekday.sun" },
+// `dow` = JS getDay() index (Sun=0 … Sat=6) so the short label follows the UI
+// language via `formatWeekdayShort`.
+const DAYS: { bit: number; dow: number; labelKey: string }[] = [
+  { bit: 1, dow: 1, labelKey: "settingsGoals.weekday.mon" },
+  { bit: 2, dow: 2, labelKey: "settingsGoals.weekday.tue" },
+  { bit: 4, dow: 3, labelKey: "settingsGoals.weekday.wed" },
+  { bit: 8, dow: 4, labelKey: "settingsGoals.weekday.thu" },
+  { bit: 16, dow: 5, labelKey: "settingsGoals.weekday.fri" },
+  { bit: 32, dow: 6, labelKey: "settingsGoals.weekday.sat" },
+  { bit: 64, dow: 0, labelKey: "settingsGoals.weekday.sun" },
 ];
 
 const DEFAULT_MASK = 31; // Mon–Fri.
@@ -117,7 +120,7 @@ export function WorkingWeekMask() {
                 aria-label={t(d.labelKey)}
                 className="sr-only"
               />
-              <span>{d.short}</span>
+              <span>{formatWeekdayShort(d.dow)}</span>
             </label>
           );
         })}

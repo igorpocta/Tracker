@@ -22,10 +22,9 @@ import { queryKeys } from "../../api/queryKeys";
 import { useTodayBoundary } from "../../hooks/useTodayBoundary";
 import { useT, type TFunc } from "../../i18n";
 import { addDays, formatIsoDate } from "../../lib/dates";
+import { formatWeekdayShort } from "../../lib/format";
 
 import { AddNonWorkingDayDialog } from "./AddNonWorkingDayDialog";
-
-const WEEKDAYS_SHORT = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
 function reasonMeta(reason: string, t: TFunc): { icon: string; label: string } {
   switch (reason) {
@@ -51,7 +50,7 @@ function formatDmy(iso: string): string {
 function weekdayFor(iso: string): string {
   const [y, m, d] = iso.split("-").map((s) => parseInt(s, 10));
   const dt = new Date(y, m - 1, d);
-  return WEEKDAYS_SHORT[dt.getDay()];
+  return formatWeekdayShort(dt.getDay());
 }
 
 const PAGE_SIZE = 20;
