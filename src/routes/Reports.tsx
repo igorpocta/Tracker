@@ -93,7 +93,8 @@ export default function Reports() {
     staleTime: 60_000,
   });
 
-  const rows = q.data ?? [];
+  // Stable identity so the derived useMemos below don't recompute every render.
+  const rows = useMemo(() => q.data ?? [], [q.data]);
   // The fetch returns worklogs OVERLAPPING [fromUnix, toUnix] (variant B), so
   // clip each row to the period before summing — otherwise a worklog straddling
   // the period boundary would over-count its out-of-period slice.

@@ -65,6 +65,8 @@ import { StopDialog } from "../Timer/TimerControls";
 import { CommandBar } from "./CommandBar";
 import { IconSidebar } from "./IconSidebar";
 import { StartTrackingBar } from "./StartTrackingBar";
+import { UpdateBanner } from "../Updater/UpdateBanner";
+import { useUpdaterStore } from "../../stores/updaterStore";
 import { SyncBanner } from "./SyncBanner";
 
 // AppShell sync — viz `refresh` níže. Šetříme API: pokud lokální cache už
@@ -116,6 +118,16 @@ export function AppShell() {
     void hydrateTimer();
     void hydratePrefs();
   }, [hydrateTimer, hydratePrefs]);
+
+  // Auto-update: a few seconds after launch (so it never competes with the
+  // initial data hydration), run a throttled (≤ 1×/day) silent check. The
+  // banner surfaces any result; a failure stays quiet.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void useUpdaterStore.getState().maybeCheckOnStartup();
+    }, 5000);
+    return () => clearTimeout(t);
+  }, []);
 
   // ---- refresh -------------------------------------------------------------
   // Heuristika prvního spuštění: pokud v lokální DB nejsou žádné worklogy,
@@ -448,6 +460,7 @@ export function AppShell() {
 
         <div className="flex-1 min-w-0 flex">
         <div className="flex-1 min-w-0 flex flex-col">
+          <UpdateBanner />
           {!isSettings && <SyncBanner />}
           {!isSettings && (
             // Phase 18B — Item 20: top toolbar sits on the same `--bg-app`

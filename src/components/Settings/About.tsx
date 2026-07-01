@@ -10,6 +10,7 @@ import { getName, getTauriVersion, getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 
 import { openUrl } from "../../api/commands";
+import { useUpdaterStore } from "../../stores/updaterStore";
 
 // Inline GitHub mark SVG — lucide-react 1.16 (currently pinned) doesn't
 // ship a `Github` icon and we don't want to bump the icon library just
@@ -38,6 +39,25 @@ interface AppInfo {
 export default function About() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState<string | null>(null);
+
+  const checkForUpdates = async () => {
+    setChecking(true);
+    setUpdateResult(null);
+    await useUpdaterStore.getState().check({ silent: false });
+    const s = useUpdaterStore.getState();
+    if (s.status === "available") {
+      setUpdateResult(
+        `K dispozici je verze ${s.version}. Nabídka k instalaci je v horní liště.`,
+      );
+    } else if (s.status === "error") {
+      setUpdateResult(`Kontrola selhala: ${s.error}`);
+    } else {
+      setUpdateResult("Máte nejnovější verzi.");
+    }
+    setChecking(false);
+  };
 
   useEffect(() => {
     Promise.all([getName(), getVersion(), getTauriVersion()])
@@ -94,20 +114,40 @@ export default function About() {
         </dl>
       )}
 
-      <div className="pt-2 border-t border-[var(--border-subtle)]">
-        <button
-          type="button"
-          onClick={openGithub}
-          title="Otevřít repozitář na GitHubu"
-          className="inline-flex items-center gap-2 h-8 px-3 rounded-[var(--radius-md)]
-                     text-xs text-[var(--text-secondary)]
-                     border border-[var(--border-subtle)]
-                     hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]
-                     transition-colors duration-150"
-        >
-          <GithubMark className="w-3.5 h-3.5" />
-          GitHub repozitář
-        </button>
+      <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={openGithub}
+            title="Otevřít repozitář na GitHubu"
+            className="inline-flex items-center gap-2 h-8 px-3 rounded-[var(--radius-md)]
+                       text-xs text-[var(--text-secondary)]
+                       border border-[var(--border-subtle)]
+                       hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]
+                       transition-colors duration-150"
+          >
+            <GithubMark className="w-3.5 h-3.5" />
+            GitHub repozitář
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void checkForUpdates()}
+            disabled={checking}
+            className="inline-flex items-center gap-2 h-8 px-3 rounded-[var(--radius-md)]
+                       text-xs text-[var(--text-secondary)]
+                       border border-[var(--border-subtle)]
+                       hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]
+                       disabled:opacity-50 disabled:cursor-not-allowed
+                       transition-colors duration-150"
+          >
+            {checking ? "Kontroluji…" : "Zkontrolovat aktualizace"}
+          </button>
+        </div>
+
+        {updateResult && (
+          <p className="text-xs text-[var(--text-tertiary)]">{updateResult}</p>
+        )}
       </div>
     </div>
   );

@@ -34,6 +34,10 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .plugin(tauri_plugin_notification::init())
+        // Auto-update (GitHub Releases + signed artifacts) and the process
+        // plugin for the explicit "restart & finish" step after a download.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()
