@@ -5,32 +5,36 @@ GitHub Releases (`https://github.com/igorpocta/Tracker/releases/latest/download/
 Signatures are verified natively against a public key baked into the app, so
 security does not rest on trusting a GitHub asset.
 
-The **code, config, capabilities and CI are already wired**. Two things are
-yours to do before the first signed release, because they involve a private
-signing key that must never touch a chat log or the repo:
+The **code, config, capabilities and CI are already wired**, and the signing
+**keypair is already generated** (empty password) with the public key baked
+into `tauri.conf.json`. What's left is yours, because it involves the private
+key, which must never touch a chat log or the repo:
 
-## 1. Generate the updater signing key
+## 1. Signing key — DONE, but back it up
 
-```sh
-# Writes the PRIVATE key to the given path and the PUBLIC key to <path>.pub.
-npm run tauri -- signer generate -w ~/.tracker/updater.key
-# (you'll be asked for an optional password — recommended)
-```
+Generated at `~/.tracker/updater.key` (private) + `~/.tracker/updater.key.pub`
+(public, already in `tauri.conf.json → plugins.updater.pubkey`). Empty password.
 
-- Copy the **public** key (contents of `~/.tracker/updater.key.pub`, a single
-  base64 line) into `src-tauri/tauri.conf.json` →
-  `plugins.updater.pubkey`, replacing `REPLACE_WITH_UPDATER_PUBLIC_KEY`.
-- **Back up the private key offline** (password manager / secure vault). If you
-  lose it you can never again ship an update that existing installs will accept.
+- **Back up `~/.tracker/updater.key` offline now** (password manager / vault).
+  If you lose it you can never again ship an update existing installs accept.
+- Prefer a passworded key? Regenerate:
+  `npm run tauri -- signer generate -w ~/.tracker/updater.key -f`, then paste
+  the new `~/.tracker/updater.key.pub` into `tauri.conf.json`.
 
 ## 2. Add the GitHub Actions secrets
+
+Copy the private key to the clipboard (it is NOT printed anywhere):
+
+```sh
+cat ~/.tracker/updater.key | pbcopy
+```
 
 Repo → Settings → Secrets and variables → Actions:
 
 | Secret | Value |
 | --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | full contents of `~/.tracker/updater.key` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you set (empty string if none) |
+| `TAURI_SIGNING_PRIVATE_KEY` | paste (full contents of `~/.tracker/updater.key`) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | empty string (the key has no password) |
 
 Harden it: put these in a **protected GitHub Environment** with required
 reviewers, and protect the `v*` tags. Anyone who obtains the private key can
