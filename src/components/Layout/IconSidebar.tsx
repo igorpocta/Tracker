@@ -43,6 +43,7 @@ import {
 } from "../../api/commands";
 import { useNow } from "../../hooks/useNow";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { useT } from "../../i18n";
 import { queryKeys } from "../../api/queryKeys";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
@@ -55,30 +56,39 @@ export interface IconSidebarItem {
   badge?: number;
 }
 
-const PRIMARY_NAV_BASE: IconSidebarItem[] = [
-  { to: "/", label: "Časový záznam", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
+/** Static nav definition — labels are i18n keys resolved at render time. */
+interface NavBase {
+  to: string;
+  labelKey: string;
+  icon: ReactNode;
+  end?: boolean;
+}
+
+const PRIMARY_NAV_BASE: NavBase[] = [
+  { to: "/", labelKey: "nav.timeLog", icon: <Clock className="w-5 h-5" aria-hidden />, end: true },
   {
     to: "/unassigned",
-    label: "Nepřiřazené",
+    labelKey: "nav.unassigned",
     icon: <Inbox className="w-5 h-5" aria-hidden />,
   },
-  { to: "/reports", label: "Reporty", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
-  { to: "/calendar", label: "Kalendář", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
-  { to: "/goals", label: "Cíle", icon: <Target className="w-5 h-5" aria-hidden /> },
+  { to: "/reports", labelKey: "nav.reports", icon: <BarChart3 className="w-5 h-5" aria-hidden /> },
+  { to: "/calendar", labelKey: "nav.calendar", icon: <CalendarDays className="w-5 h-5" aria-hidden /> },
+  { to: "/goals", labelKey: "nav.goals", icon: <Target className="w-5 h-5" aria-hidden /> },
   {
     to: "/audit",
-    label: "Historie změn",
+    labelKey: "nav.audit",
     icon: <History className="w-5 h-5" aria-hidden />,
   },
 ];
 
-const JIRA_DASHBOARD_NAV: IconSidebarItem = {
+const JIRA_DASHBOARD_NAV: NavBase = {
   to: "/jira-dashboard",
-  label: "JIRA Přehled",
+  labelKey: "nav.jiraDashboard",
   icon: <LayoutDashboard className="w-5 h-5" aria-hidden />,
 };
 
 export function IconSidebar() {
+  const t = useT();
   const active = useTimerStore((s) => s.active);
   const now = useNow(active ? 1000 : 60_000);
   const elapsed = elapsedSeconds(active, now);
@@ -119,9 +129,13 @@ export function IconSidebar() {
   const baseNav = hasDashboardConnection
     ? [...PRIMARY_NAV_BASE, JIRA_DASHBOARD_NAV]
     : PRIMARY_NAV_BASE;
-  const primaryNav: IconSidebarItem[] = baseNav.map((it) =>
-    it.to === "/unassigned" ? { ...it, badge: unassignedCount } : it,
-  );
+  const primaryNav: IconSidebarItem[] = baseNav.map((it) => ({
+    to: it.to,
+    icon: it.icon,
+    end: it.end,
+    label: t(it.labelKey),
+    badge: it.to === "/unassigned" ? unassignedCount : undefined,
+  }));
 
   // Persistovaný stav posledně neúspěšného syncu — pokud je seznam neprázdný,
   // ring se přebarví červeně a v tooltipu vidíš co padlo. Vyčistí se hned, jak
@@ -176,7 +190,7 @@ export function IconSidebar() {
 
   return (
     <aside
-      aria-label="Hlavní navigace"
+      aria-label={t("nav.mainNav")}
       className="shrink-0 flex flex-col items-center w-[64px] py-3 gap-3
                  border-r"
       style={{
@@ -194,7 +208,7 @@ export function IconSidebar() {
       <NavLink
         to="/"
         end
-        aria-label="Tracker — domů"
+        aria-label={t("nav.home")}
         className="block px-1 py-0.5 mb-1 select-none"
         style={{ color: "var(--accent)" }}
       >
@@ -241,7 +255,7 @@ export function IconSidebar() {
         <SidebarLink
           item={{
             to: "/settings",
-            label: "Nastavení",
+            label: t("nav.settings"),
             icon: <SettingsIcon className="w-5 h-5" aria-hidden />,
           }}
         />
@@ -260,6 +274,7 @@ export function IconSidebar() {
 }
 
 function SidebarLink({ item }: { item: IconSidebarItem }) {
+  const t = useT();
   return (
     <NavLink
       to={item.to}
@@ -287,7 +302,7 @@ function SidebarLink({ item }: { item: IconSidebarItem }) {
       <span className="pointer-events-none">{item.icon}</span>
       {item.badge != null && item.badge > 0 && (
         <span
-          aria-label={`${item.badge} nepřiřazených`}
+          aria-label={t("nav.unassignedBadge", { count: item.badge })}
           className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1
                      flex items-center justify-center rounded-full
                      text-[10px] font-mono font-semibold leading-none

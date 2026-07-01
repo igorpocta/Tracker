@@ -28,6 +28,7 @@ import {
   MONO_PALETTES,
   type PaletteSpec,
 } from "../../lib/accent";
+import { useT } from "../../i18n";
 import { usePrefsStore } from "../../stores/prefsStore";
 import { SettingsCard } from "./SettingsCard";
 
@@ -38,6 +39,9 @@ const THEME_OPTIONS: { value: ThemePref; label: string; icon: React.ReactNode }[
 ];
 
 export default function Appearance() {
+  const t = useT();
+  const language = usePrefsStore((s) => s.language);
+  const setLanguage = usePrefsStore((s) => s.setLanguage);
   const theme = usePrefsStore((s) => s.theme);
   const setTheme = usePrefsStore((s) => s.setTheme);
   const accent = usePrefsStore((s) => s.accent);
@@ -57,6 +61,32 @@ export default function Appearance() {
           Vzhled
         </h2>
       </header>
+
+      <SettingsCard
+        title={t("settings.language.title")}
+        description={t("settings.language.description")}
+      >
+        <div
+          className="inline-flex items-center rounded-full p-0.5 text-xs"
+          style={{ background: "var(--bg-active)" }}
+        >
+          {(["cs", "en"] as const).map((code) => (
+            <button
+              key={code}
+              type="button"
+              onClick={() => void setLanguage(code)}
+              className="px-3 h-7 rounded-full transition-colors duration-150"
+              style={
+                language === code
+                  ? { background: "var(--accent-soft)", color: "var(--accent)" }
+                  : { color: "var(--text-tertiary)" }
+              }
+            >
+              {t(`settings.language.${code}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsCard>
 
       <SettingsCard
         title="Motiv"

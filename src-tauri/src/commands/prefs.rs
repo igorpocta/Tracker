@@ -17,6 +17,10 @@ pub const DEFAULT_HOURLY_RATE: f64 = 0.0;
 pub const DEFAULT_THEME: &str = "auto";
 /// Allowed theme values.
 pub const ALLOWED_THEMES: &[&str] = &["auto", "light", "dark"];
+/// Default UI language.
+pub const DEFAULT_LANGUAGE: &str = "cs";
+/// Allowed UI language codes.
+pub const ALLOWED_LANGUAGES: &[&str] = &["cs", "en"];
 /// Default font size: `"md"`.
 pub const DEFAULT_FONT_SIZE: &str = "md";
 /// Allowed font size values.
@@ -111,6 +115,7 @@ const KEY_WIDGET_FORMAT: &str = "widget_format";
 const KEY_APP_ICON: &str = "app_icon";
 const KEY_HOURLY_RATE: &str = "hourly_rate";
 const KEY_THEME: &str = "theme";
+const KEY_LANGUAGE: &str = "language";
 const KEY_FONT_SIZE: &str = "font_size";
 const KEY_DENSITY: &str = "density";
 const KEY_ACCENT: &str = "accent_color";
@@ -264,6 +269,22 @@ pub fn set_theme_inner(db: &Db, theme: &str) -> Result<(), String> {
         ));
     }
     cache::settings::set(db, KEY_THEME, theme).map_err(|e| e.to_string())
+}
+
+pub fn get_language_inner(db: &Db) -> Result<String, String> {
+    match cache::settings::get(db, KEY_LANGUAGE).map_err(|e| e.to_string())? {
+        Some(v) if ALLOWED_LANGUAGES.contains(&v.as_str()) => Ok(v),
+        _ => Ok(DEFAULT_LANGUAGE.to_string()),
+    }
+}
+
+pub fn set_language_inner(db: &Db, language: &str) -> Result<(), String> {
+    if !ALLOWED_LANGUAGES.contains(&language) {
+        return Err(format!(
+            "Neplatný jazyk {language:?}; očekáváno {ALLOWED_LANGUAGES:?}"
+        ));
+    }
+    cache::settings::set(db, KEY_LANGUAGE, language).map_err(|e| e.to_string())
 }
 
 // ----- Font size -----
@@ -739,6 +760,22 @@ pub async fn set_theme(
 }
 
 #[tauri::command]
+pub async fn get_language(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    get_language_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_language(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    language: String,
+) -> Result<(), String> {
+    set_language_inner(&state.db, &language)?;
+    let _ = app.emit("prefs-changed", "language");
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_font_size(state: tauri::State<'_, AppState>) -> Result<String, String> {
     get_font_size_inner(&state.db)
 }
@@ -1087,6 +1124,15 @@ mod tests {
         let db = open_db();
         assert!(set_theme_inner(&db, "midnight").is_err());
         assert!(set_theme_inner(&db, "").is_err());
+    }
+
+    #[test]
+    fn language_defaults_to_cs_and_round_trips() {
+        let db = open_db();
+        assert_eq!(get_language_inner(&db).unwrap(), "cs");
+        set_language_inner(&db, "en").unwrap();
+        assert_eq!(get_language_inner(&db).unwrap(), "en");
+        assert!(set_language_inner(&db, "de").is_err());
     }
 
     #[test]

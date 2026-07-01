@@ -791,6 +791,15 @@ export function setTheme(theme: ThemePref): Promise<void> {
   return invoke<void>("set_theme", { theme });
 }
 
+/** UI language code (`"cs"` | `"en"`). */
+export function getLanguage(): Promise<string> {
+  return invoke<string>("get_language");
+}
+
+export function setLanguage(language: string): Promise<void> {
+  return invoke<void>("set_language", { language });
+}
+
 export function getFontSize(): Promise<FontSizePref> {
   return invoke<FontSizePref>("get_font_size");
 }

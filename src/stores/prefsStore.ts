@@ -23,6 +23,7 @@ import {
   getDensity,
   getFontSize,
   getHourlyRate,
+  getLanguage,
   getPaletteMode,
   getTheme,
   getTimelineHours,
@@ -35,6 +36,7 @@ import {
   setDensity as invokeSetDensity,
   setFontSize as invokeSetFontSize,
   setHourlyRate as invokeSetHourlyRate,
+  setLanguage as invokeSetLanguage,
   setPaletteMode as invokeSetPaletteMode,
   setTheme as invokeSetTheme,
   setTimelineHours as invokeSetTimelineHours,
@@ -85,6 +87,8 @@ export interface PrefsStoreState {
   widgetFormat: WidgetFormat;
   /** Theme preference (`auto`/`light`/`dark`). */
   theme: ThemePref;
+  /** UI language (`cs`/`en`). Backend-backed. */
+  language: "cs" | "en";
   /** Font-size preference (`sm`/`md`/`lg`). */
   fontSize: FontSizePref;
   /** Density preference (`compact`/`comfortable`). */
@@ -112,6 +116,7 @@ export interface PrefsStoreActions {
   setCurrency: (currency: Currency) => Promise<void>;
   setWidgetFormat: (format: WidgetFormat) => Promise<void>;
   setTheme: (theme: ThemePref) => Promise<void>;
+  setLanguage: (language: "cs" | "en") => Promise<void>;
   setFontSize: (size: FontSizePref) => Promise<void>;
   setDensity: (density: DensityPref) => Promise<void>;
   setAccent: (accent: AccentColor) => Promise<void>;
@@ -245,6 +250,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   currency: DEFAULT_CURRENCY,
   widgetFormat: readWidgetFormat(),
   theme: DEFAULT_THEME,
+  language: "cs",
   fontSize: DEFAULT_FONT_SIZE,
   density: DEFAULT_DENSITY,
   accent: DEFAULT_ACCENT,
@@ -262,6 +268,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         goal,
         rate,
         theme,
+        languageRaw,
         fontSize,
         density,
         accentRaw,
@@ -274,6 +281,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         getDailyGoal(),
         getHourlyRate(),
         getTheme().catch(() => DEFAULT_THEME),
+        getLanguage().catch(() => "cs"),
         getFontSize().catch(() => DEFAULT_FONT_SIZE),
         getDensity().catch(() => DEFAULT_DENSITY),
         getAccentColor().catch(() => DEFAULT_ACCENT as string),
@@ -300,6 +308,8 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         ? (paletteModeRaw as PaletteMode)
         : derivedMode;
 
+      const language: "cs" | "en" = languageRaw === "en" ? "en" : "cs";
+
       applyTheme(theme);
       applyFontSize(fontSize);
       applyDensity(density);
@@ -308,6 +318,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         dailyGoalSeconds: goal,
         hourlyRate: rate,
         theme,
+        language,
         fontSize,
         density,
         accent,
@@ -355,6 +366,14 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
     await invokeSetTheme(theme);
     applyTheme(theme);
     set({ theme });
+  },
+
+  setLanguage: async (language) => {
+    // Optimistic: flip the UI immediately, persist in the background.
+    set({ language });
+    invokeSetLanguage(language).catch(() => {
+      /* backend wiring optional in tests / older builds */
+    });
   },
 
   setFontSize: async (size) => {

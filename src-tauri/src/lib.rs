@@ -473,6 +473,8 @@ pub fn run() {
             commands::prefs::set_hourly_rate,
             commands::prefs::get_theme,
             commands::prefs::set_theme,
+            commands::prefs::get_language,
+            commands::prefs::set_language,
             commands::prefs::get_font_size,
             commands::prefs::set_font_size,
             commands::prefs::get_density,
