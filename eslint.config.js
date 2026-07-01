@@ -23,6 +23,10 @@ export default [
       "src-tauri/target/**",
       "src-tauri/icons/**",
       "scripts/**",
+      // Browser extension: standalone WebExtension bundle with its own
+      // runtime globals (chrome, window, document…) — not part of the app's
+      // TS lint surface.
+      "browser-extension/**",
       "**/*.config.js",
       "**/*.config.ts",
       // Build/test entry that imports config helpers.
