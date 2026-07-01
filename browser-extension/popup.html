@@ -32,6 +32,17 @@
         Token najdeš v aplikaci Tracker — je uložený v souboru
         <code>browser-bridge-token</code> v datovém adresáři aplikace.
       </p>
+
+      <hr class="sep" />
+      <label class="muted" for="selfhost">Self-hosted Jira (volitelné)</label>
+      <input id="selfhost" type="url" placeholder="https://jira.firma.cz" autocomplete="off" spellcheck="false" />
+      <button id="add-host" class="btn">Povolit tento host</button>
+      <p class="hint">
+        Rozšíření standardně běží jen na <code>*.atlassian.net</code>. Pro
+        vlastní/on-premise Jiru sem vlož její adresu — prohlížeč se zeptá na
+        povolení a detekce úkolů se zapne i tam.
+      </p>
+      <div id="hosts" class="hosts"></div>
     </details>
 
     <p id="msg" class="msg"></p>

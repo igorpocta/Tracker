@@ -15,6 +15,42 @@
 
 const BASE = "http://127.0.0.1:27420";
 
+/**
+ * Re-register content scripts for user-added self-hosted Jira hosts. Dynamic
+ * registrations persist across browser restarts, but an extension reload/update
+ * can clear them — so we rebuild from stored `customHosts` on startup, but only
+ * for hosts whose permission is still granted.
+ */
+async function reregisterCustomHosts() {
+  try {
+    const { customHosts } = await chrome.storage.local.get("customHosts");
+    if (!Array.isArray(customHosts) || customHosts.length === 0) return;
+    const existing = await chrome.scripting.getRegisteredContentScripts();
+    const have = new Set(existing.map((s) => s.id));
+    const perms = await chrome.permissions.getAll();
+    const grantedOrigins = new Set(perms.origins || []);
+    const toAdd = [];
+    for (const origin of customHosts) {
+      const id = `jira-${origin}`;
+      const pattern = `${origin}/*`;
+      if (have.has(id) || !grantedOrigins.has(pattern)) continue;
+      toAdd.push({
+        id,
+        matches: [pattern],
+        js: ["content.js"],
+        runAt: "document_idle",
+        persistAcrossSessions: true,
+      });
+    }
+    if (toAdd.length) await chrome.scripting.registerContentScripts(toAdd);
+  } catch {
+    /* best-effort */
+  }
+}
+
+chrome.runtime.onStartup?.addListener(reregisterCustomHosts);
+chrome.runtime.onInstalled?.addListener(reregisterCustomHosts);
+
 async function getToken() {
   const { token } = await chrome.storage.local.get("token");
   return (token || "").trim();

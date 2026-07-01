@@ -55,6 +55,16 @@ input {
 }
 .hint { font-size: 11px; color: var(--muted); }
 code { background: var(--border); padding: 1px 4px; border-radius: 4px; }
+.sep { border: none; border-top: 1px solid var(--border); margin: 12px 0 8px; }
+.hosts { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.host-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted);
+}
+.btn-link {
+  border: none; background: transparent; color: var(--danger);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px;
+}
 .msg { min-height: 16px; font-size: 12px; margin: 8px 0 0; }
 .msg.err { color: var(--danger); }
 .msg.ok { color: var(--accent); }

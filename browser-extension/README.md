@@ -42,10 +42,17 @@ Zkopíruj obsah, otevři popup rozšíření → **Nastavení** → vlož token 
 Content script navíc průběžně hlásí „na co se právě díváš", takže Tracker může
 nabízet chytré návrhy worklogů.
 
+## Self-hosted / on-premise Jira
+
+Rozšíření standardně běží jen na `*.atlassian.net`. Pro vlastní Jiru otevři popup
+→ **Nastavení** → pole **Self-hosted Jira**, vlož adresu (`https://jira.firma.cz`)
+a klikni **Povolit tento host**. Prohlížeč se zeptá na povolení pro tuto doménu
+a detekce úkolů se na ní zapne (dynamická registrace content-scriptu, přežije
+restart). Přidané hosty lze v popupu zase odebrat.
+
 ## Poznámky / omezení
 
-- **Jen Jira Cloud** (`*.atlassian.net`). Self-hosted / vlastní host by chtěl
-  přidat do `host_permissions` + `content_scripts.matches` v `manifest.json`.
+- Standardní matches: `*.atlassian.net`; další hosty se přidávají za běhu (viz výše).
 - Endpointy bridge: `GET /status`, `GET /timer-state`, `GET|POST /visible-ticket`,
   `POST /start-timer`, `POST /stop-timer` (viz `src-tauri/src/server.rs`).
 - Token se ukládá do `chrome.storage.local` rozšíření, nikam jinam se neposílá.
