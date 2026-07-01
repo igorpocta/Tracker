@@ -9,6 +9,8 @@ import { Coffee, Pause, RotateCw } from "lucide-react";
 import { useEffect } from "react";
 
 import type { IdleGap } from "../../hooks/useIdleDetection";
+import { useT } from "../../i18n";
+import type { TFunc } from "../../i18n";
 
 export interface IdleDialogProps {
   gap: IdleGap;
@@ -26,6 +28,7 @@ export function IdleDialog({
   onDiscard,
   onDiscardAndContinue,
 }: IdleDialogProps) {
+  const t = useT();
   // ESC = Keep (nejméně destruktivní volba).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -40,7 +43,7 @@ export function IdleDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Detekována ne-aktivita"
+      aria-label={t("timer.idle.label")}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
     >
@@ -54,12 +57,13 @@ export function IdleDialog({
         <div className="flex items-center gap-2">
           <Coffee className="w-5 h-5 text-[var(--accent)]" aria-hidden />
           <h3 className="text-base font-semibold text-[var(--text-primary)]">
-            Byl jsi pryč {mins} {pluralMin(mins)}
+            {t("timer.idle.title", { mins, unit: pluralMin(mins, t) })}
           </h3>
         </div>
         <p className="text-xs text-[var(--text-secondary)]">
-          Časomíra na {issueKey || "úkolu bez přiřazení"} běžela celou dobu.
-          Co s tou ne-aktivitou?
+          {t("timer.idle.body", {
+            issue: issueKey || t("timer.idle.noIssue"),
+          })}
         </p>
         <div className="flex flex-col gap-2 mt-2">
           <button
@@ -73,10 +77,10 @@ export function IdleDialog({
             <Pause className="w-4 h-4 text-[var(--text-tertiary)]" aria-hidden />
             <span className="flex-1">
               <span className="font-medium text-[var(--text-primary)]">
-                Zachovat
+                {t("timer.idle.keep")}
               </span>
               <span className="block text-[11px] text-[var(--text-tertiary)]">
-                Časomíra pokračuje, čas se započítá.
+                {t("timer.idle.keep.desc")}
               </span>
             </span>
           </button>
@@ -91,10 +95,10 @@ export function IdleDialog({
             <Pause className="w-4 h-4 text-[var(--text-tertiary)]" aria-hidden />
             <span className="flex-1">
               <span className="font-medium text-[var(--text-primary)]">
-                Odečíst a zastavit
+                {t("timer.idle.discard")}
               </span>
               <span className="block text-[11px] text-[var(--text-tertiary)]">
-                Uložit worklog s časem před ne-aktivitou.
+                {t("timer.idle.discard.desc")}
               </span>
             </span>
           </button>
@@ -110,9 +114,9 @@ export function IdleDialog({
           >
             <RotateCw className="w-4 h-4" aria-hidden />
             <span className="flex-1">
-              <span className="font-medium">Odečíst a pokračovat</span>
+              <span className="font-medium">{t("timer.idle.discardContinue")}</span>
               <span className="block text-[11px] opacity-80">
-                Zastaví, uloží, znovu spustí časomíru pro stejný úkol.
+                {t("timer.idle.discardContinue.desc")}
               </span>
             </span>
           </button>
@@ -122,8 +126,8 @@ export function IdleDialog({
   );
 }
 
-function pluralMin(n: number): string {
-  if (n === 1) return "minutu";
-  if (n >= 2 && n <= 4) return "minuty";
-  return "minut";
+function pluralMin(n: number, t: TFunc): string {
+  if (n === 1) return t("timer.idle.unit.one");
+  if (n >= 2 && n <= 4) return t("timer.idle.unit.few");
+  return t("timer.idle.unit.many");
 }

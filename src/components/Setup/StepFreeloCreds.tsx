@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 
 import { testConnectionForProvider } from "../../api/commands";
 import type { ProviderUser } from "../../api/types";
+import { useT } from "../../i18n";
 import {
   emailSchema,
   firstError,
@@ -43,6 +44,7 @@ export function StepFreeloCreds({
   onTested,
   onBack,
 }: StepFreeloCredsProps) {
+  const t = useT();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [advanced, setAdvanced] = useState(false);
 
@@ -94,7 +96,7 @@ export function StepFreeloCreds({
           htmlFor="freelo-email"
           className="text-sm font-medium text-[var(--text-primary)]"
         >
-          Freelo e-mail
+          {t("setup.freelo.emailLabel")}
         </label>
         <input
           id="freelo-email"
@@ -121,12 +123,12 @@ export function StepFreeloCreds({
           htmlFor="freelo-api-key"
           className="text-sm font-medium text-[var(--text-primary)]"
         >
-          Freelo API klíč
+          {t("setup.freelo.apiKeyLabel")}
         </label>
         <input
           id="freelo-api-key"
           type="password"
-          placeholder="vložte svůj API klíč"
+          placeholder={t("setup.freelo.apiKeyPlaceholder")}
           value={apiKey}
           onChange={(e) => {
             onChangeApiKey(e.target.value);
@@ -141,9 +143,9 @@ export function StepFreeloCreds({
           <p className="text-xs text-[var(--danger)]">{apiKeyError}</p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          Najdete ho na{" "}
+          {t("setup.freelo.apiKeyHintPrefix")}{" "}
           <span className="text-[var(--text-secondary)]">
-            Freelo → Profil → API klíč
+            {t("setup.freelo.apiKeyHintPath")}
           </span>
           .
         </p>
@@ -154,7 +156,9 @@ export function StepFreeloCreds({
         onClick={() => setAdvanced((a) => !a)}
         className="self-start text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors duration-150"
       >
-        {advanced ? "Skrýt pokročilá nastavení" : "Zobrazit pokročilá nastavení"}
+        {advanced
+          ? t("setup.freelo.advancedHide")
+          : t("setup.freelo.advancedShow")}
       </button>
 
       {advanced && (
@@ -163,7 +167,7 @@ export function StepFreeloCreds({
             htmlFor="freelo-base-url"
             className="text-sm font-medium text-[var(--text-primary)]"
           >
-            Freelo API URL
+            {t("setup.freelo.baseUrlLabel")}
           </label>
           <input
             id="freelo-base-url"
@@ -186,7 +190,7 @@ export function StepFreeloCreds({
           {test.kind === "loading" && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Otestovat připojení
+          {t("setup.button.testConnection")}
         </button>
 
         {test.kind === "ok" && (
@@ -195,7 +199,7 @@ export function StepFreeloCreds({
             role="status"
           >
             <CircleCheck className="w-4 h-4" aria-hidden />
-            Připojeno jako {test.user.displayName}
+            {t("setup.status.connectedAs", { name: test.user.displayName })}
           </span>
         )}
         {test.kind === "error" && (
@@ -211,7 +215,7 @@ export function StepFreeloCreds({
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Zpět
+          {t("setup.button.back")}
         </button>
       </div>
     </form>

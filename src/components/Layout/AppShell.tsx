@@ -44,6 +44,7 @@ import {
   queryKeys,
 } from "../../api/queryKeys";
 import type { ActiveTimerState, WorklogRow } from "../../api/types";
+import { useT } from "../../i18n";
 import { pluralCs } from "../../lib/format";
 import { clampDiscardStartMs } from "../../lib/idleGap";
 import { useActivityTracker } from "../../hooks/useActivityTracker";
@@ -109,6 +110,7 @@ export interface ShellOutletContext {
 }
 
 export function AppShell() {
+  const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -202,14 +204,17 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: queryKeys.searchIssues.all() });
       pushToast(
         "success",
-        `Reindexováno ${n} ${pluralCs(n, ["úkol", "úkoly", "úkolů"])}.`,
+        t("layout.reindexed", {
+          count: n,
+          noun: pluralCs(n, ["úkol", "úkoly", "úkolů"]),
+        }),
       );
     } catch (e) {
-      pushToast("error", typeof e === "string" ? e : "Reindexace selhala.");
+      pushToast("error", typeof e === "string" ? e : t("layout.reindexFailed"));
     } finally {
       reindexingRef.current = false;
     }
-  }, [queryClient, pushToast]);
+  }, [queryClient, pushToast, t]);
 
   // ---- backend events ------------------------------------------------------
   const onWorklogSaved = useCallback(
@@ -221,11 +226,14 @@ export function AppShell() {
           : minutes % 60 === 0
             ? `${minutes / 60}h`
             : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-      pushToast("success", `Uloženo ${dur} na ${row.issue_key}.`);
+      pushToast(
+        "success",
+        t("layout.worklogSaved", { dur, issueKey: String(row.issue_key) }),
+      );
       invalidateWorklogQueries(queryClient);
       setStopOpen(false);
     },
-    [pushToast, queryClient],
+    [pushToast, queryClient, t],
   );
   useTauriEvent<WorklogRow>("worklog-saved", onWorklogSaved);
 
@@ -255,10 +263,11 @@ export function AppShell() {
 
   const onWorklogError = useCallback(
     (err: unknown) => {
-      const msg = typeof err === "string" ? err : "Synchronizace s Jirou selhala";
-      pushToast("error", `Záznam: ${msg}`);
+      const msg =
+        typeof err === "string" ? err : t("layout.syncWithJiraFailed");
+      pushToast("error", t("layout.worklogError", { msg }));
     },
-    [pushToast],
+    [pushToast, t],
   );
   useTauriEvent<unknown>("worklog-error", onWorklogError);
 
@@ -318,11 +327,11 @@ export function AppShell() {
       }
       await state.stop();
     } catch (e) {
-      pushToast("error", typeof e === "string" ? e : "Idle: stop selhal");
+      pushToast("error", typeof e === "string" ? e : t("layout.idleStopFailed"));
     } finally {
       dismissIdleGap();
     }
-  }, [idleGap, dismissIdleGap, pushToast]);
+  }, [idleGap, dismissIdleGap, pushToast, t]);
 
   const handleIdleDiscardContinue = useCallback(async () => {
     if (!idleGap) return;
@@ -343,12 +352,12 @@ export function AppShell() {
     } catch (e) {
       pushToast(
         "error",
-        typeof e === "string" ? e : "Idle: restart selhal",
+        typeof e === "string" ? e : t("layout.idleRestartFailed"),
       );
     } finally {
       dismissIdleGap();
     }
-  }, [idleGap, dismissIdleGap, pushToast]);
+  }, [idleGap, dismissIdleGap, pushToast, t]);
 
   const handleStopConfirm = useCallback(
     async ({
@@ -366,10 +375,13 @@ export function AppShell() {
           .getState()
           .stop(comment.length > 0 ? comment : undefined);
       } catch (e) {
-        pushToast("error", typeof e === "string" ? e : "Failed to save worklog");
+        pushToast(
+          "error",
+          typeof e === "string" ? e : t("layout.failedToSaveWorklog"),
+        );
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   // ---- Start tracking handler ---------------------------------------------
@@ -391,10 +403,13 @@ export function AppShell() {
         );
         navigate("/");
       } catch (e) {
-        pushToast("error", typeof e === "string" ? e : "Nepodařilo se spustit časomíru");
+        pushToast(
+          "error",
+          typeof e === "string" ? e : t("layout.startTimerFailed"),
+        );
       }
     },
-    [navigate, pushToast],
+    [navigate, pushToast, t],
   );
 
   // Phase 18A — Item 4: start an unassigned timer.
@@ -403,18 +418,15 @@ export function AppShell() {
       try {
         await startTimer(null, undefined, comment.length > 0 ? comment : null);
         navigate("/");
-        pushToast(
-          "info",
-          "Časomíra běží bez přiřazeného úkolu — nezapomeňte ho přiřadit před uložením.",
-        );
+        pushToast("info", t("layout.unassignedTimerRunning"));
       } catch (e) {
         pushToast(
           "error",
-          typeof e === "string" ? e : "Nepodařilo se spustit časomíru",
+          typeof e === "string" ? e : t("layout.startTimerFailed"),
         );
       }
     },
-    [navigate, pushToast],
+    [navigate, pushToast, t],
   );
 
   // Reassign the running timer to a different issue (RunningBar chip → picker).
@@ -424,15 +436,15 @@ export function AppShell() {
     async (issueKey: string) => {
       try {
         await useTimerStore.getState().assign(issueKey);
-        pushToast("success", `Časomíra přepnuta na ${issueKey}.`);
+        pushToast("success", t("layout.timerReassigned", { issueKey }));
       } catch (e) {
         pushToast(
           "error",
-          typeof e === "string" ? e : "Přepnutí úkolu selhalo.",
+          typeof e === "string" ? e : t("layout.reassignFailed"),
         );
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   // ---- Add entry panel -----------------------------------------------------
@@ -565,11 +577,12 @@ export function AppShell() {
               });
               pushToast(
                 "success",
-                `Záznam přidán na ${entry.issueKey}.`,
+                t("layout.entryAdded", { issueKey: entry.issueKey }),
               );
               invalidateWorklogQueries(queryClient);
             } catch (e) {
-              const msg = typeof e === "string" ? e : "Záznam se nepodařilo uložit";
+              const msg =
+                typeof e === "string" ? e : t("layout.entrySaveFailed");
               pushToast("error", msg);
               throw e; // Re-throw so the panel keeps the form open.
             }
@@ -594,11 +607,11 @@ export function AppShell() {
               // the React state in sync with reality.
               setActive(null);
               setStopOpen(false);
-              pushToast("info", "Časomíra zahozena bez uložení.");
+              pushToast("info", t("layout.timerDiscarded"));
             } catch (e) {
               pushToast(
                 "error",
-                typeof e === "string" ? e : "Zahození časomíry selhalo.",
+                typeof e === "string" ? e : t("layout.timerDiscardFailed"),
               );
             }
           }}

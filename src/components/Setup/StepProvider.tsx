@@ -7,11 +7,13 @@
  */
 import { Clock, FolderGit2, Layers, Server } from "lucide-react";
 
+import { useT } from "../../i18n";
 import type { ProviderKind } from "../../api/types";
 
 export interface ProviderOption {
   kind: ProviderKind;
   label: string;
+  /** i18n key for the provider description. */
   description: string;
   available: boolean;
   Icon: typeof Server;
@@ -21,28 +23,28 @@ export const PROVIDERS: ProviderOption[] = [
   {
     kind: "jira",
     label: "Jira Cloud",
-    description: "Atlassian Jira (REST API v3, API token)",
+    description: "setup.provider.jira.description",
     available: true,
     Icon: Server,
   },
   {
     kind: "freelo",
     label: "Freelo",
-    description: "Freelo (REST API v1, e-mail + API klíč)",
+    description: "setup.provider.freelo.description",
     available: true,
     Icon: Layers,
   },
   {
     kind: "toggl",
     label: "Toggl",
-    description: "Toggl Track",
+    description: "setup.provider.toggl.description",
     available: false,
     Icon: Clock,
   },
   {
     kind: "clockify",
     label: "Clockify",
-    description: "Clockify",
+    description: "setup.provider.clockify.description",
     available: false,
     Icon: FolderGit2,
   },
@@ -55,6 +57,7 @@ export interface StepProviderProps {
 }
 
 export function StepProvider({ value, onChange, onNext }: StepProviderProps) {
+  const t = useT();
   return (
     <form
       onSubmit={(e) => {
@@ -65,11 +68,10 @@ export function StepProvider({ value, onChange, onNext }: StepProviderProps) {
     >
       <div>
         <label className="text-sm font-medium text-[var(--text-primary)]">
-          Vyberte poskytovatele
+          {t("setup.provider.choose")}
         </label>
         <p className="text-xs text-[var(--text-tertiary)] mt-1">
-          Připojení k jednomu nebo více poskytovatelům lze přidat později v
-          Nastavení.
+          {t("setup.provider.hint")}
         </p>
       </div>
 
@@ -101,12 +103,12 @@ export function StepProvider({ value, onChange, onNext }: StepProviderProps) {
                 <span className="text-sm font-semibold">{p.label}</span>
                 {disabled && (
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--bg-active)] text-[var(--text-tertiary)] uppercase tracking-wide">
-                    Brzy
+                    {t("setup.provider.soon")}
                   </span>
                 )}
               </div>
               <p className="text-xs text-[var(--text-tertiary)]">
-                {p.description}
+                {t(p.description)}
               </p>
             </button>
           );
@@ -119,7 +121,7 @@ export function StepProvider({ value, onChange, onNext }: StepProviderProps) {
           disabled={!value}
           className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
-          Další
+          {t("setup.button.next")}
         </button>
       </div>
     </form>

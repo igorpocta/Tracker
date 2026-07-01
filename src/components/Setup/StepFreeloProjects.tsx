@@ -9,6 +9,7 @@ import { CheckSquare, LoaderCircle, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { FreeloProjectDto } from "../../api/types";
+import { useT } from "../../i18n";
 
 export interface StepFreeloProjectsProps {
   /** Fetch fn injected so the step can be exercised with a Promise mock. */
@@ -28,6 +29,7 @@ export function StepFreeloProjects({
   onFinish,
   onBack,
 }: StepFreeloProjectsProps) {
+  const t = useT();
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState("");
@@ -51,13 +53,13 @@ export function StepFreeloProjects({
             ? e
             : e instanceof Error
               ? e.message
-              : "Načtení projektů se nezdařilo";
+              : t("setup.projects.loadError");
         setLoad({ kind: "error", message });
       });
     return () => {
       cancelled = true;
     };
-  }, [fetchProjects]);
+  }, [fetchProjects, t]);
 
   const filteredProjects = useMemo(() => {
     if (load.kind !== "ok") return [];
@@ -95,11 +97,10 @@ export function StepFreeloProjects({
     <form onSubmit={handleFinish} className="flex flex-col gap-4">
       <div>
         <label className="text-sm font-medium text-[var(--text-primary)]">
-          Vyberte projekty
+          {t("setup.projects.label")}
         </label>
         <p className="text-xs text-[var(--text-tertiary)] mt-1">
-          Pouze úkoly z vybraných projektů se stáhnou a budou dostupné v
-          tickeru.
+          {t("setup.projects.hint")}
         </p>
       </div>
 
@@ -109,7 +110,7 @@ export function StepFreeloProjects({
           role="status"
         >
           <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
-          Načítám projekty…
+          {t("setup.projects.loading")}
         </div>
       )}
 
@@ -121,7 +122,7 @@ export function StepFreeloProjects({
 
       {load.kind === "ok" && load.projects.length === 0 && (
         <p className="text-sm text-[var(--text-tertiary)]">
-          Tento účet zatím nemá žádné projekty.
+          {t("setup.projects.empty")}
         </p>
       )}
 
@@ -129,7 +130,7 @@ export function StepFreeloProjects({
         <>
           <input
             type="text"
-            placeholder="Hledat projekt…"
+            placeholder={t("setup.projects.searchPlaceholder")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="px-3 h-9 rounded-[var(--radius-md)] bg-transparent border border-[var(--border-default)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-ring)] text-sm text-[var(--text-primary)] transition-colors duration-150"
@@ -175,7 +176,10 @@ export function StepFreeloProjects({
             })}
           </ul>
           <p className="text-xs text-[var(--text-tertiary)]">
-            Vybráno {selected.size} z {load.projects.length}.
+            {t("setup.projects.selectedCount", {
+              selected: selected.size,
+              total: load.projects.length,
+            })}
           </p>
         </>
       )}
@@ -186,7 +190,7 @@ export function StepFreeloProjects({
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Zpět
+          {t("setup.button.back")}
         </button>
         <button
           type="submit"
@@ -196,7 +200,7 @@ export function StepFreeloProjects({
           {submitting && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Dokončit
+          {t("setup.button.finish")}
         </button>
       </div>
     </form>

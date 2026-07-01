@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { useT } from "../../i18n";
 import { emailSchema, firstError } from "../../lib/validation";
 
 export interface StepEmailProps {
@@ -15,6 +16,7 @@ export interface StepEmailProps {
  * "Test connection" in step 3.
  */
 export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
+  const t = useT();
   const error = useMemo(
     () => (value.length === 0 ? null : firstError(emailSchema, value)),
     [value],
@@ -31,7 +33,7 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
     >
       <div className="flex flex-col gap-1.5">
         <label htmlFor="setup-email" className="text-sm font-medium text-[var(--text-primary)]">
-          E-mail Atlassian účtu
+          {t("setup.email.label")}
         </label>
         <input
           id="setup-email"
@@ -52,7 +54,7 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          E-mail propojený s vaším Atlassian účtem.
+          {t("setup.email.hint")}
         </p>
       </div>
 
@@ -62,14 +64,14 @@ export function StepEmail({ value, onChange, onNext, onBack }: StepEmailProps) {
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Zpět
+          {t("setup.button.back")}
         </button>
         <button
           type="submit"
           disabled={!isValid}
           className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
-          Další
+          {t("setup.button.next")}
         </button>
       </div>
     </form>

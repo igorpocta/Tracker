@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useT } from "../i18n";
 import {
   addConnection,
   enterMainApp,
@@ -33,6 +34,7 @@ import {
  */
 export default function Setup() {
   const navigate = useNavigate();
+  const t = useT();
 
   const [step, setStep] = useState(0);
   const [provider, setProvider] = useState<ProviderKind | null>(null);
@@ -108,7 +110,7 @@ export default function Setup() {
   async function handleFreeloFinish(projectIds: number[]) {
     setSubmitError(null);
     if (freeloConnectionId == null) {
-      setSubmitError("Vnitřní chyba: chybí id připojení");
+      setSubmitError(t("setup.error.missingConnectionId"));
       return;
     }
     try {
@@ -138,10 +140,10 @@ export default function Setup() {
     provider === "freelo" ? FREELO_SETUP_STEPS : JIRA_SETUP_STEPS;
   const title =
     provider === "freelo"
-      ? "Připojit Freelo"
+      ? t("setup.title.connectFreelo")
       : provider === "jira"
-        ? "Připojit Jira"
-        : "Připojit účet";
+        ? t("setup.title.connectJira")
+        : t("setup.title.connectAccount");
 
   return (
     <Wizard step={step} steps={steps} title={title}>

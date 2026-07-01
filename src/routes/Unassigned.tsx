@@ -25,8 +25,10 @@ import { IssuePicker } from "../components/Worklog/IssuePicker";
 import { useAssignWorklog } from "../hooks/useAssignWorklog";
 import { formatDateCs, formatDurationShort, pluralCs } from "../lib/format";
 import { formatHHMM } from "../lib/dates";
+import { useT } from "../i18n";
 
 export function Unassigned() {
+  const t = useT();
   const ctx = useOutletContext<ShellOutletContext>();
 
   const rowsQ = useQuery({
@@ -43,7 +45,7 @@ export function Unassigned() {
     <PageContainer>
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2 mb-1">
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-          Nepřiřazené
+          {t("unassigned.title")}
         </h1>
         {rows.length > 0 && (
           <div className="text-right">
@@ -52,19 +54,22 @@ export function Unassigned() {
             </div>
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               {rows.length}{" "}
-              {pluralCs(rows.length, ["záznam", "záznamy", "záznamů"])}{" "}
-              k přiřazení
+              {pluralCs(rows.length, [
+                t("unassigned.count.one"),
+                t("unassigned.count.few"),
+                t("unassigned.count.many"),
+              ])}{" "}
+              {t("unassigned.toAssign")}
             </div>
           </div>
         )}
       </div>
       <p className="text-xs text-[var(--text-tertiary)] mb-4">
-        Záznamy bez úkolu se nevyfakturují. Přiřaď je dřív, než budeš dělat
-        fakturu.
+        {t("unassigned.description")}
       </p>
 
       {rowsQ.isLoading ? (
-        <div className="text-sm text-[var(--text-tertiary)]">Načítám…</div>
+        <div className="text-sm text-[var(--text-tertiary)]">{t("unassigned.loading")}</div>
       ) : rows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
           <CheckCircle2
@@ -72,10 +77,10 @@ export function Unassigned() {
             aria-hidden
           />
           <div className="text-sm text-[var(--text-primary)]">
-            Vše přiřazeno 🎉
+            {t("unassigned.allAssigned")}
           </div>
           <div className="text-xs text-[var(--text-tertiary)]">
-            Žádné nepřiřazené záznamy — nic ti na faktuře neuteče.
+            {t("unassigned.emptyHint")}
           </div>
         </div>
       ) : (
@@ -96,6 +101,7 @@ function UnassignedRow({
   row: ApiWorklogRow;
   onAssign: (row: ApiWorklogRow, issueKey: string) => Promise<void>;
 }) {
+  const t = useT();
   const started = new Date(row.started_at * 1000);
   const ended = new Date((row.started_at + row.duration_s) * 1000);
   const comment = row.comment ?? row.description ?? null;
@@ -118,7 +124,7 @@ function UnassignedRow({
         {comment && comment.trim().length > 0 ? (
           comment
         ) : (
-          <span className="text-[var(--text-tertiary)]">(bez poznámky)</span>
+          <span className="text-[var(--text-tertiary)]">{t("unassigned.noNote")}</span>
         )}
       </span>
       <IssuePicker onPick={(key) => onAssign(row, key)} />

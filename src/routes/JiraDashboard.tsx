@@ -28,6 +28,7 @@ import {
   type JiraDashboardRow,
 } from "../api/commands";
 import { PageContainer } from "../components/Layout/PageContainer";
+import { useT } from "../i18n";
 import { usePrefsStore } from "../stores/prefsStore";
 import { useTimerStore } from "../stores/timerStore";
 
@@ -47,19 +48,20 @@ interface SortState {
 }
 
 const COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "issue_key", label: "Úkol" },
-  { key: "assignee", label: "Pověřená osoba" },
-  { key: "reporter", label: "Zadavatel" },
-  { key: "priority", label: "Priorita" },
-  { key: "status", label: "Stav" },
-  { key: "created", label: "Vytvořeno" },
-  { key: "due_date", label: "Termín dokončení" },
+  { key: "issue_key", label: "routes.dashboard.col.issue" },
+  { key: "assignee", label: "routes.dashboard.col.assignee" },
+  { key: "reporter", label: "routes.dashboard.col.reporter" },
+  { key: "priority", label: "routes.dashboard.col.priority" },
+  { key: "status", label: "routes.dashboard.col.status" },
+  { key: "created", label: "routes.dashboard.col.created" },
+  { key: "due_date", label: "routes.dashboard.col.due" },
 ];
 
 const ACTION_COLUMN_COUNT = 1;
 const TOTAL_COLUMN_COUNT = COLUMNS.length + ACTION_COLUMN_COUNT;
 
 export default function JiraDashboard() {
+  const t = useT();
   const [sort, setSort] = useState<SortState>({ key: "issue_key", dir: "asc" });
   const showHidden = usePrefsStore((s) => s.dashboardShowHidden);
   const setShowHidden = usePrefsStore((s) => s.setDashboardShowHidden);
@@ -122,12 +124,14 @@ export default function JiraDashboard() {
       <header className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            JIRA Přehled
+            {t("routes.dashboard.title")}
           </h1>
           <span className="text-xs text-[var(--text-tertiary)]">
             {q.isLoading
-              ? "Načítám…"
-              : `${shown.length} úkol${shown.length === 1 ? "" : "ů"}`}
+              ? t("routes.dashboard.loading")
+              : shown.length === 1
+                ? t("routes.dashboard.issueCountOne", { count: shown.length })
+                : t("routes.dashboard.issueCountMany", { count: shown.length })}
           </span>
         </div>
         <button
@@ -140,13 +144,13 @@ export default function JiraDashboard() {
                      bg-transparent hover:bg-[var(--accent-soft)]
                      transition-colors duration-150
                      disabled:opacity-60 disabled:cursor-progress"
-          title="Aktualizovat z Jiry"
+          title={t("routes.dashboard.refreshFromJira")}
         >
           <RefreshCw
             className={`w-3.5 h-3.5 ${q.isFetching ? "animate-spin" : ""}`}
             aria-hidden
           />
-          Aktualizovat
+          {t("routes.dashboard.refresh")}
         </button>
       </header>
 
@@ -181,16 +185,15 @@ export default function JiraDashboard() {
             onChange={(e) => void setShowHidden(e.target.checked)}
             className="w-4 h-4 accent-[var(--accent)]"
           />
-          Zobrazit i skryté úkoly
+          {t("routes.dashboard.showHidden")}
         </label>
         {hiddenCount > 0 && (
           <span className="text-[11px] text-[var(--text-tertiary)]">
-            {hiddenCount}{" "}
             {hiddenCount === 1
-              ? "skrytý úkol"
+              ? t("routes.dashboard.hiddenCountOne", { count: hiddenCount })
               : hiddenCount <= 4
-                ? "skryté úkoly"
-                : "skrytých úkolů"}
+                ? t("routes.dashboard.hiddenCountFew", { count: hiddenCount })
+                : t("routes.dashboard.hiddenCountMany", { count: hiddenCount })}
           </span>
         )}
       </div>
@@ -207,14 +210,14 @@ export default function JiraDashboard() {
               {COLUMNS.map((col) => (
                 <HeaderCell
                   key={col.key}
-                  label={col.label}
+                  label={t(col.label)}
                   active={sort.key === col.key}
                   dir={sort.dir}
                   onClick={() => toggle(col.key)}
                 />
               ))}
               <th className="px-3 py-2 text-right font-medium select-none w-24">
-                <span className="sr-only">Akce</span>
+                <span className="sr-only">{t("routes.dashboard.actions")}</span>
               </th>
             </tr>
           </thead>
@@ -226,8 +229,8 @@ export default function JiraDashboard() {
                   className="py-8 text-center text-[var(--text-tertiary)]"
                 >
                   {rows.length > 0 && !showHidden
-                    ? "Všechny úkoly jsou skryté. Zapni „Zobrazit i skryté úkoly“."
-                    : "Žádné úkoly nevyhovují JQL filtru."}
+                    ? t("routes.dashboard.emptyAllHidden")
+                    : t("routes.dashboard.emptyNoMatch")}
                 </td>
               </tr>
             )}
@@ -244,8 +247,7 @@ export default function JiraDashboard() {
 
       {rows.length === 0 && !q.isLoading && errors.length === 0 && (
         <p className="text-xs text-[var(--text-tertiary)] text-center">
-          Žádná Jira integrace zatím nemá zapnutý Dashboard. Zapni ho v
-          Nastavení → Připojení → Upravit.
+          {t("routes.dashboard.noIntegration")}
         </p>
       )}
     </PageContainer>
@@ -289,6 +291,7 @@ function DashboardRowView({
   row: JiraDashboardRow;
   onToggleHidden: (row: JiraDashboardRow) => void;
 }) {
+  const t = useT();
   const onIssueClick = (e: React.MouseEvent) => {
     e.preventDefault();
     void openJiraIssue(row.issue_key);
@@ -306,7 +309,7 @@ function DashboardRowView({
           type="button"
           onClick={onIssueClick}
           className="font-mono font-semibold text-[var(--accent)] hover:underline"
-          title={`Otevřít ${row.issue_key} v Jiře`}
+          title={t("routes.dashboard.openIssue", { issue: row.issue_key })}
         >
           {row.issue_key}
         </button>
@@ -349,12 +352,21 @@ function HideButton({
   hidden: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onClick}
-      title={hidden ? "Zobrazit úkol v přehledu" : "Skrýt úkol z přehledu"}
-      aria-label={hidden ? "Zobrazit úkol" : "Skrýt úkol"}
+      title={
+        hidden
+          ? t("routes.dashboard.hideShow")
+          : t("routes.dashboard.hideHide")
+      }
+      aria-label={
+        hidden
+          ? t("routes.dashboard.hideShowAria")
+          : t("routes.dashboard.hideHideAria")
+      }
       className="inline-flex items-center justify-center w-7 h-7 rounded-full
                  text-[var(--text-tertiary)] border border-transparent
                  hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]
@@ -370,6 +382,7 @@ function HideButton({
 }
 
 function StartTimerButton({ issueKey }: { issueKey: string }) {
+  const t = useT();
   const active = useTimerStore((s) => s.active);
   const busy = useTimerStore((s) => s.busy);
   const start = useTimerStore((s) => s.start);
@@ -380,10 +393,10 @@ function StartTimerButton({ issueKey }: { issueKey: string }) {
   if (isRunningHere) {
     return (
       <span
-        title="Časomíra pro tento úkol právě běží"
+        title={t("routes.dashboard.timerRunning")}
         className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[var(--accent)]"
         style={{ background: "var(--accent-soft)" }}
-        aria-label="Časomíra běží"
+        aria-label={t("routes.dashboard.timerRunningAria")}
       >
         <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
       </span>
@@ -396,8 +409,10 @@ function StartTimerButton({ issueKey }: { issueKey: string }) {
   // existující časomíru zastaví.
   const disabled = busy || isRunningElsewhere;
   const title = isRunningElsewhere
-    ? `Nejdřív zastav běžící časomíru (${active!.issue_key || "bez úkolu"})`
-    : `Spustit časomíru pro ${issueKey}`;
+    ? t("routes.dashboard.startBlocked", {
+        issue: active!.issue_key || t("routes.dashboard.noIssue"),
+      })
+    : t("routes.dashboard.startTimer", { issue: issueKey });
 
   const handleClick = async () => {
     if (disabled) return;
@@ -414,7 +429,7 @@ function StartTimerButton({ issueKey }: { issueKey: string }) {
       onClick={() => void handleClick()}
       disabled={disabled}
       title={title}
-      aria-label={`Spustit časomíru pro ${issueKey}`}
+      aria-label={t("routes.dashboard.startTimer", { issue: issueKey })}
       className="inline-flex items-center justify-center w-7 h-7 rounded-full
                  text-[var(--accent)] border border-[var(--accent-soft)]
                  bg-transparent hover:bg-[var(--accent-soft)]

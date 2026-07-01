@@ -13,11 +13,17 @@
  * and spread it into `cs` / `en` below.
  */
 import { connections } from "./messages/connections";
+import { layout } from "./messages/layout";
 import { nav } from "./messages/nav";
+import { reports } from "./messages/reports";
+import { routes } from "./messages/routes";
 import { settings } from "./messages/settings";
 import { settingsGeneral } from "./messages/settingsGeneral";
 import { settingsGoals } from "./messages/settingsGoals";
 import { settingsMisc } from "./messages/settingsMisc";
+import { setup } from "./messages/setup";
+import { timeLog } from "./messages/timeLog";
+import { timer } from "./messages/timer";
 
 export type Language = "cs" | "en";
 
@@ -35,6 +41,12 @@ const NAMESPACES = [
   settingsMisc,
   connections,
   settingsGoals,
+  timeLog,
+  reports,
+  routes,
+  layout,
+  timer,
+  setup,
 ];
 
 const cs: Catalogue = Object.assign({}, ...NAMESPACES.map((n) => n.cs));

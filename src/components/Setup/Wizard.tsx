@@ -18,10 +18,12 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { useT } from "../../i18n";
+
 export interface WizardStepMeta {
   /** 1-based index used purely for accessibility. */
   index: number;
-  /** Short label shown beneath the icon. */
+  /** i18n key for the short label shown beneath the icon. */
   label: string;
   /** lucide-react icon component for the step. */
   Icon: typeof Globe;
@@ -29,17 +31,17 @@ export interface WizardStepMeta {
 
 /** Step list for the Jira flow (preserved from Phase 17). */
 export const JIRA_SETUP_STEPS: WizardStepMeta[] = [
-  { index: 1, label: "Poskytovatel", Icon: Server },
-  { index: 2, label: "URL", Icon: Globe },
-  { index: 3, label: "E-mail", Icon: Mail },
-  { index: 4, label: "Token", Icon: KeyRound },
+  { index: 1, label: "setup.step.provider", Icon: Server },
+  { index: 2, label: "setup.step.url", Icon: Globe },
+  { index: 3, label: "setup.step.email", Icon: Mail },
+  { index: 4, label: "setup.step.token", Icon: KeyRound },
 ];
 
 /** Step list for the Freelo flow (Phase 18E). */
 export const FREELO_SETUP_STEPS: WizardStepMeta[] = [
-  { index: 1, label: "Poskytovatel", Icon: Server },
-  { index: 2, label: "Přihlášení", Icon: KeyRound },
-  { index: 3, label: "Projekty", Icon: Layers },
+  { index: 1, label: "setup.step.provider", Icon: Server },
+  { index: 2, label: "setup.step.credentials", Icon: KeyRound },
+  { index: 3, label: "setup.step.projects", Icon: Layers },
 ];
 
 /** Legacy alias kept so existing tests / imports continue to compile. */
@@ -62,26 +64,30 @@ export interface WizardProps {
  * `CircleCheck`; the current step highlights its associated icon.
  */
 export function Wizard({ step, steps, title, children }: WizardProps) {
+  const t = useT();
   const list = steps ?? JIRA_SETUP_STEPS;
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <section
         className="w-full max-w-[480px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] p-7"
         role="region"
-        aria-label="Průvodce nastavením"
+        aria-label={t("setup.wizard.regionLabel")}
       >
         <header className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
-            {title ?? "Připojit účet"}
+            {title ?? t("setup.title.connectAccount")}
           </h1>
           <p className="text-sm text-[var(--text-tertiary)] mt-1">
-            Krok {step + 1} z {list.length}
+            {t("setup.wizard.stepCounter", {
+              current: step + 1,
+              total: list.length,
+            })}
           </p>
         </header>
 
         <ol
           className="flex items-center justify-between mb-8"
-          aria-label="Postup nastavení"
+          aria-label={t("setup.wizard.progressLabel")}
         >
           {list.map((s, i) => {
             const isDone = i < step;
@@ -119,7 +125,7 @@ export function Wizard({ step, steps, title, children }: WizardProps) {
                       : "text-[var(--text-tertiary)]")
                   }
                 >
-                  {s.label}
+                  {t(s.label)}
                 </span>
               </li>
             );

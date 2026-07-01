@@ -9,6 +9,7 @@
  */
 import { useUpdaterStore } from "../../stores/updaterStore";
 import { useTimerStore } from "../../stores/timerStore";
+import { useT } from "../../i18n";
 
 function pct(downloaded: number, total: number | null): number | null {
   if (!total || total <= 0) return null;
@@ -16,6 +17,7 @@ function pct(downloaded: number, total: number | null): number | null {
 }
 
 export function UpdateBanner() {
+  const t = useT();
   const status = useUpdaterStore((s) => s.status);
   const version = useUpdaterStore((s) => s.version);
   const downloaded = useUpdaterStore((s) => s.downloaded);
@@ -76,10 +78,10 @@ export function UpdateBanner() {
     return wrap(
       <>
         <span className="flex-1">
-          Je dostupná nová verze{version ? ` ${version}` : ""}.
+          {t("layout.updateAvailable", { version: version ? ` ${version}` : "" })}
         </span>
-        {btn("Stáhnout", () => void download(), true)}
-        {btn("Později", dismiss)}
+        {btn(t("layout.download"), () => void download(), true)}
+        {btn(t("layout.later"), dismiss)}
       </>,
     );
   }
@@ -88,8 +90,10 @@ export function UpdateBanner() {
     const p = pct(downloaded, total);
     return wrap(
       <span className="flex-1">
-        Stahuji aktualizaci{version ? ` ${version}` : ""}…
-        {p != null ? ` ${p} %` : ""}
+        {t("layout.downloadingUpdate", {
+          version: version ? ` ${version}` : "",
+          pct: p != null ? ` ${p} %` : "",
+        })}
       </span>,
     );
   }
@@ -98,13 +102,13 @@ export function UpdateBanner() {
     return wrap(
       <>
         <span className="flex-1">
-          Aktualizace{version ? ` ${version}` : ""} je stažená a připravená.
-          {timerActive
-            ? " Běží časomíra — po restartu bude pokračovat."
-            : ""}
+          {t("layout.updateReady", {
+            version: version ? ` ${version}` : "",
+            timerNote: timerActive ? t("layout.updateTimerNote") : "",
+          })}
         </span>
-        {btn("Restartovat a dokončit", () => void relaunch(), !timerActive)}
-        {btn("Později", dismiss)}
+        {btn(t("layout.restartAndFinish"), () => void relaunch(), !timerActive)}
+        {btn(t("layout.later"), dismiss)}
       </>,
     );
   }
@@ -113,9 +117,9 @@ export function UpdateBanner() {
   return wrap(
     <>
       <span className="flex-1">
-        Aktualizace se nezdařila{error ? `: ${error}` : "."}
+        {t("layout.updateFailed", { error: error ? `: ${error}` : "." })}
       </span>
-      {btn("Zavřít", dismiss)}
+      {btn(t("layout.close"), dismiss)}
     </>,
     "danger",
   );

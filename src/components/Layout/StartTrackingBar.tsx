@@ -28,6 +28,7 @@ import { IssuePicker } from "../Worklog/IssuePicker";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useIssueSearch } from "../../hooks/useIssueSearch";
 import { useNow } from "../../hooks/useNow";
+import { useT } from "../../i18n";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
@@ -108,6 +109,7 @@ function IdleBar({
   ) => void;
   onStartUnassigned?: (comment: string) => void;
 }) {
+  const t = useT();
   const [comment, setComment] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -202,15 +204,15 @@ function IdleBar({
   const canStartUnassigned = !inputHasText && !!onStartUnassigned;
   const startEnabled = canStartIssue || canStartUnassigned;
   const startLabel = canStartIssue
-    ? "Spustit"
+    ? t("layout.start")
     : canStartUnassigned
-      ? "Spustit bez úkolu"
-      : "Spustit";
+      ? t("layout.startUnassigned")
+      : t("layout.start");
   const startTitle = canStartIssue
-    ? "Spustit časomíru pro označený úkol"
+    ? t("layout.startTitleIssue")
     : canStartUnassigned
-      ? "Spustit časomíru bez úkolu — můžete přiřadit později"
-      : "Vyhledejte úkol nebo zadejte poznámku";
+      ? t("layout.startTitleUnassigned")
+      : t("layout.startTitleSearch");
   const onStartClick = () => {
     if (canStartIssue) {
       onSubmit();
@@ -248,8 +250,8 @@ function IdleBar({
               onStartClick();
             }
           }}
-          placeholder="Začít stopovat…"
-          aria-label="Vyhledat a spustit časomíru"
+          placeholder={t("layout.searchPlaceholder")}
+          aria-label={t("layout.searchAriaLabel")}
           aria-expanded={open}
           className="w-full h-11 pl-4 pr-24 rounded-[var(--radius-md)]
                      bg-[var(--bg-surface)] border border-[var(--border-subtle)]
@@ -294,8 +296,8 @@ function IdleBar({
               onStartClick();
             }
           }}
-          placeholder="Poznámka (volitelné)"
-          aria-label="Poznámka k zapnuté časomíře"
+          placeholder={t("layout.commentPlaceholder")}
+          aria-label={t("layout.commentAriaLabel")}
           className="w-full h-11 pl-8 pr-3 rounded-[var(--radius-md)]
                      bg-[var(--bg-surface)] border border-[var(--border-subtle)]
                      text-xs text-[var(--text-primary)]
@@ -352,6 +354,7 @@ export function SearchDropdown({
   loading,
   emptyQuery,
 }: SearchDropdownProps) {
+  const t = useT();
   // Find the index where favorites end and the "rest" begins. We use it to
   // emit two section headers when the query is empty: "★ Oblíbené" above
   // the favourite rows, "Naposledy trackováno" above the recently-tracked
@@ -372,19 +375,19 @@ export function SearchDropdown({
     >
       {emptyQuery && favCount > 0 && (
         <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          ★ Oblíbené
+          {t("layout.favorites")}
         </div>
       )}
       {loading && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
-          {emptyQuery ? "Načítám…" : "Vyhledávání…"}
+          {emptyQuery ? t("layout.loading") : t("layout.searching")}
         </div>
       )}
       {!loading && results.length === 0 && (
         <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">
           {emptyQuery
-            ? "Začněte psát pro vyhledání úkolu."
-            : "Žádné odpovídající úkoly."}
+            ? t("layout.typeToSearch")
+            : t("layout.noMatchingIssues")}
         </div>
       )}
       {results.map((iss, idx) => {
@@ -397,7 +400,7 @@ export function SearchDropdown({
           <Fragment key={rowKey(iss)}>
             {(showRestHeader || showFirstRestHeader) && (
               <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-                Naposledy trackováno
+                {t("layout.recentlyTracked")}
               </div>
             )}
             <div
@@ -429,7 +432,7 @@ export function SearchDropdown({
                   {iss.issue_key}
                 </span>
                 <span className="truncate flex-1 text-[var(--text-primary)]">
-                  {iss.summary || "(načítá se…)"}
+                  {iss.summary || t("layout.summaryLoading")}
                 </span>
               </button>
             </div>
@@ -455,6 +458,7 @@ function RunningBar({
   onStop?: () => void;
   onReassign?: (issueKey: string) => Promise<void> | void;
 }) {
+  const t = useT();
   const now = useNow(1000);
   const elapsed = elapsedSeconds(active, now);
   // Phase 18A — Item 4: unassigned timer surfaces ⚠ + red ring.
@@ -505,7 +509,7 @@ function RunningBar({
               type="button"
               onClick={toggle}
               disabled={picking}
-              title="Změnit úkol běžící časomíry"
+              title={t("layout.changeRunningIssue")}
               className="group flex items-center gap-2 min-w-0 w-full text-left
                          rounded-[var(--radius-sm)] -mx-1 px-1 py-0.5
                          hover:bg-[var(--bg-hover)] transition-colors duration-150
@@ -517,7 +521,7 @@ function RunningBar({
                   unassigned ? "text-red-500" : "text-[var(--accent)]",
                 )}
               >
-                {unassigned ? "⚠ BEZ ÚKOLU" : active.issue_key}
+                {unassigned ? t("layout.unassignedChip") : active.issue_key}
               </span>
               {!unassigned &&
                 active.summary &&
@@ -554,8 +558,8 @@ function RunningBar({
                 setEditingComment(false);
               }
             }}
-            placeholder="Poznámka"
-            aria-label="Upravit poznámku"
+            placeholder={t("layout.commentShort")}
+            aria-label={t("layout.editComment")}
             className="shrink-0 w-44 h-7 px-2 text-xs rounded-[var(--radius-sm)]
                        bg-transparent border border-[var(--border-subtle)]
                        focus:outline-none focus:border-[var(--border-default)]"
@@ -566,7 +570,7 @@ function RunningBar({
             onClick={() => setEditingComment(true)}
             className="shrink-0 max-w-[12rem] text-left text-xs text-[var(--text-tertiary)] truncate
                        hover:text-[var(--text-secondary)] transition-colors duration-150"
-            title="Upravit poznámku"
+            title={t("layout.editComment")}
           >
             {active.comment && active.comment.trim().length > 0 ? (
               <span className="inline-flex items-center gap-1.5">
@@ -574,9 +578,9 @@ function RunningBar({
                 <span className="truncate">{active.comment}</span>
               </span>
             ) : unassigned ? (
-              "Přiřaďte úkol před uložením"
+              t("layout.assignBeforeSaving")
             ) : (
-              <span className="text-[var(--text-tertiary)]">+ poznámka</span>
+              <span className="text-[var(--text-tertiary)]">{t("layout.addComment")}</span>
             )}
           </button>
         )}
@@ -600,7 +604,7 @@ function RunningBar({
                    disabled:opacity-60 disabled:cursor-not-allowed"
       >
         <Square className="w-3.5 h-3.5" aria-hidden />
-        Stop
+        {t("layout.stop")}
       </button>
     </div>
   );

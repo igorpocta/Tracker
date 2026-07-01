@@ -44,35 +44,37 @@ import {
   startOfDay,
   startOfMonth,
 } from "../lib/dates";
+import { useT } from "../i18n";
 import { formatDurationShort } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
 const MONTHS_LONG = [
-  "leden",
-  "únor",
-  "březen",
-  "duben",
-  "květen",
-  "červen",
-  "červenec",
-  "srpen",
-  "září",
-  "říjen",
-  "listopad",
-  "prosinec",
+  "routes.goals.month.leden",
+  "routes.goals.month.unor",
+  "routes.goals.month.brezen",
+  "routes.goals.month.duben",
+  "routes.goals.month.kveten",
+  "routes.goals.month.cerven",
+  "routes.goals.month.cervenec",
+  "routes.goals.month.srpen",
+  "routes.goals.month.zari",
+  "routes.goals.month.rijen",
+  "routes.goals.month.listopad",
+  "routes.goals.month.prosinec",
 ];
 
 const WEEKDAYS_LONG = [
-  "Neděle",
-  "Pondělí",
-  "Úterý",
-  "Středa",
-  "Čtvrtek",
-  "Pátek",
-  "Sobota",
+  "routes.goals.weekday.sunday",
+  "routes.goals.weekday.monday",
+  "routes.goals.weekday.tuesday",
+  "routes.goals.weekday.wednesday",
+  "routes.goals.weekday.thursday",
+  "routes.goals.weekday.friday",
+  "routes.goals.weekday.saturday",
 ];
 
 export default function Goals() {
+  const t = useT();
   const dailyGoalSeconds = usePrefsStore((s) => s.dailyGoalSeconds);
   // Recompute `today` (and the month range derived from it) on day rollover.
   const { rolloverCount } = useTodayBoundary();
@@ -157,11 +159,14 @@ export default function Goals() {
       <div className="flex items-start justify-between gap-4 flex-wrap pt-2">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Cíle
+            {t("routes.goals.title")}
           </h1>
           <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
-            {MONTHS_LONG[today.getMonth()]} {today.getFullYear()} ·{" "}
-            denní cíl {dailyGoalHours}h
+            {t("routes.goals.subtitle", {
+              month: t(MONTHS_LONG[today.getMonth()]),
+              year: today.getFullYear(),
+              hours: dailyGoalHours,
+            })}
           </p>
         </div>
         <div
@@ -169,27 +174,38 @@ export default function Goals() {
                      border border-[var(--border-subtle)]
                      text-[11px] text-[var(--text-tertiary)]"
         >
-          {workingDaysElapsed} / {workingDaysInMonth} prac. dní uplynulo
+          {t("routes.goals.workDaysElapsed", {
+            elapsed: workingDaysElapsed,
+            total: workingDaysInMonth,
+          })}
         </div>
       </div>
 
       <ProgressCard
-        title="Dnes"
-        subtitle={`${WEEKDAYS_LONG[today.getDay()]}, ${today.getDate()}. ${
-          MONTHS_LONG[today.getMonth()]
-        }`}
+        title={t("routes.goals.today")}
+        subtitle={t("routes.goals.todaySubtitle", {
+          weekday: t(WEEKDAYS_LONG[today.getDay()]),
+          day: today.getDate(),
+          month: t(MONTHS_LONG[today.getMonth()]),
+        })}
         value={todaySeconds}
         goal={dailyGoalSeconds}
-        valueLabel={`cíl: ${dailyGoalHours}h`}
+        valueLabel={t("routes.goals.goalLabel", { hours: dailyGoalHours })}
         percent={todayPct}
       />
 
       <ProgressCard
-        title="Tento měsíc"
-        subtitle={`${workingDaysInMonth} pracovních dní · ${dailyGoalHours}h každý = celkem ${workingDaysInMonth * dailyGoalHours}h`}
+        title={t("routes.goals.thisMonth")}
+        subtitle={t("routes.goals.monthSubtitle", {
+          days: workingDaysInMonth,
+          hours: dailyGoalHours,
+          total: workingDaysInMonth * dailyGoalHours,
+        })}
         value={monthSeconds}
         goal={monthGoalSeconds}
-        valueLabel={`cíl: ${workingDaysInMonth * dailyGoalHours}h`}
+        valueLabel={t("routes.goals.goalLabel", {
+          hours: workingDaysInMonth * dailyGoalHours,
+        })}
         percent={monthPct}
       />
 
@@ -203,20 +219,20 @@ export default function Goals() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
-          label="Očekáváno do dnes"
+          label={t("routes.goals.expectedByToday")}
           value={formatDurationShort(expectedByTodaySeconds)}
         />
         <StatCard
-          label="Skutečně zalogováno"
+          label={t("routes.goals.actualLogged")}
           value={formatDurationShort(monthSeconds)}
         />
         <StatCard
-          label="Rozdíl tempa"
+          label={t("routes.goals.paceDiff")}
           value={formatSignedDuration(paceDifferenceSeconds)}
           tone={paceDifferenceSeconds >= 0 ? "neutral" : "danger"}
         />
         <StatCard
-          label="Zbývající dny"
+          label={t("routes.goals.remainingDays")}
           value={`${Math.max(0, remainingWorkingDays)}`}
         />
       </div>

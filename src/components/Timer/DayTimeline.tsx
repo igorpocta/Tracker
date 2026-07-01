@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { WorklogRow } from "../../api/types";
+import { useT } from "../../i18n";
 import { formatHHMM } from "../../lib/dates";
 import { formatDurationShort } from "../../lib/format";
 import { usePrefsStore } from "../../stores/prefsStore";
@@ -84,6 +85,7 @@ export function DayTimeline({
   onSplitRequest,
   onCreateRequest,
 }: DayTimelineProps) {
+  const t = useT();
   // Configured axis window (Nastavení → Vzhled). Falls back to 6–22.
   const startHour = usePrefsStore((s) => s.timelineStartHour);
   const endHour = usePrefsStore((s) => s.timelineEndHour);
@@ -254,10 +256,10 @@ export function DayTimeline({
     <div
       className="rounded-[var(--radius-md)] border border-[var(--border-subtle)]
                  bg-[var(--bg-surface)] p-3"
-      aria-label="Časová osa dne"
+      aria-label={t("timer.timeline.label")}
     >
       <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] mb-2">
-        Časová osa dne
+        {t("timer.timeline.heading")}
       </h3>
       <div ref={canvasHostRef} className="relative">
         <canvas
@@ -394,9 +396,7 @@ export function DayTimeline({
         )}
       </div>
       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
-        Klikni pro zvýraznění. Tažením přes prázdné místo založíš nový záznam
-        — čas u kurzoru ukazuje začátek, konec a dobu trvání. U lokálních
-        záznamů můžeš tažením rozdělit blok na dva úkoly.
+        {t("timer.timeline.hint")}
       </div>
     </div>
   );
@@ -447,10 +447,11 @@ function CanvasTooltip({
   row: WorklogRow | undefined;
   x: number;
 }) {
+  const t = useT();
   if (!row) return null;
   return (
     <TimelineBubble x={x} gap={6} className="px-2 py-1.5 text-[11px]">
-      <div className="font-medium">{row.issue_key ?? "(bez úkolu)"}</div>
+      <div className="font-medium">{row.issue_key ?? t("timer.timeline.noIssue")}</div>
       {row.summary && (
         <div className="text-[var(--text-tertiary)] max-w-[260px] truncate">
           {row.summary}

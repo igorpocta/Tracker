@@ -13,6 +13,8 @@
  * level. Hovering doesn't do anything; this is intentionally restrained.
  */
 
+import { useT } from "../../i18n";
+
 interface Chip {
   keys: string;
   label: string;
@@ -31,16 +33,17 @@ export function CommandBar({
   onReindex,
   onNewEntry,
 }: CommandBarProps) {
+  const t = useT();
   const isMac =
     typeof navigator !== "undefined" &&
     /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
   const mod = isMac ? "⌘" : "Ctrl";
 
   const chips: Array<Chip & { onClick?: () => void }> = [
-    { keys: `${mod},`, label: "Nastavení", onClick: onSettings },
-    { keys: `${mod}R`, label: "Obnovit", onClick: onRefresh },
-    { keys: `${mod}I`, label: "Reindexovat", onClick: onReindex },
-    { keys: `${mod}N`, label: "Nový záznam", onClick: onNewEntry },
+    { keys: `${mod},`, label: t("layout.cmdSettings"), onClick: onSettings },
+    { keys: `${mod}R`, label: t("layout.cmdRefresh"), onClick: onRefresh },
+    { keys: `${mod}I`, label: t("layout.cmdReindex"), onClick: onReindex },
+    { keys: `${mod}N`, label: t("layout.cmdNewEntry"), onClick: onNewEntry },
   ];
 
   return (

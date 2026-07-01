@@ -16,6 +16,7 @@ import { listConnections, listProjectColors } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
 import type { WorklogRow } from "../../api/types";
 import { isWorkingDayLocal, useCalendarMask } from "../../hooks/useCalendarMask";
+import { useT } from "../../i18n";
 import { addDays, dayOverlapSeconds, dayStartUnixS, startOfDay } from "../../lib/dates";
 import {
   formatDateCs,
@@ -62,6 +63,7 @@ function accentWithOpacity(percent: number): string {
 }
 
 export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartProps) {
+  const t = useT();
   const days = useMemo(() => buildDayList(from, to), [from, to]);
   // V mono paletě je --accent-2 == --accent → goal line by se ztratila
   // ve sloupcích. Tehdy zůstáváme u zlaté `--warning`. Dual paleta dovolí
@@ -157,7 +159,7 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                     bg-[var(--bg-surface)] p-5">
       <div className="flex items-center justify-between mb-3 gap-4 flex-wrap">
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-          Hodiny za den
+          {t("reports.chart.heading")}
         </h3>
         {legend.length > 0 && (
           <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)]">
@@ -275,7 +277,9 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                 <div
                   className="absolute left-0 right-0 pointer-events-none"
                   style={{ bottom: `${goalLinePct}%` }}
-                  aria-label={`Denní cíl ${dailyGoalHours} h`}
+                  aria-label={t("reports.chart.goalAria", {
+                    hours: dailyGoalHours ?? 0,
+                  })}
                 >
                   <div
                     className="w-full"
@@ -293,7 +297,7 @@ export function DailyBarChart({ rows, from, to, dailyGoalHours }: DailyBarChartP
                       opacity: 0.85,
                     }}
                   >
-                    cíl {dailyGoalHours}h
+                    {t("reports.chart.goalLabel", { hours: dailyGoalHours ?? 0 })}
                   </div>
                 </div>
               )}
@@ -333,6 +337,7 @@ function DailyTooltip({
   buckets: Bucket[];
   total: number;
 }) {
+  const t = useT();
   return (
     <div
       role="tooltip"
@@ -350,7 +355,9 @@ function DailyTooltip({
         {formatWeekdayCs(date)} · {formatDateCs(date)}
       </div>
       <div className="text-[var(--text-tertiary)] mb-1">
-        {formatDurationShort(total)} celkem
+        {t("reports.chart.tooltipTotal", {
+          duration: formatDurationShort(total),
+        })}
       </div>
       <div className="flex flex-col gap-0.5">
         {buckets.map((b) => (

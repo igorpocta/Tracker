@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SyncRunStatus } from "../../api/types";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { useT } from "../../i18n";
 
 type Phase = "connection" | "issues" | "worklogs";
 
@@ -65,10 +66,10 @@ const INITIAL_BANNER_STATE: BannerState = {
 
 const PHASE_ORDER: Phase[] = ["connection", "issues", "worklogs"];
 
-const PHASE_META: Record<Phase, { label: string; icon: typeof Link2 }> = {
-  connection: { label: "Připojuji se", icon: Link2 },
-  issues: { label: "Načítám úkoly", icon: ListTodo },
-  worklogs: { label: "Načítám záznamy", icon: Clock },
+const PHASE_META: Record<Phase, { labelKey: string; icon: typeof Link2 }> = {
+  connection: { labelKey: "layout.phaseConnection", icon: Link2 },
+  issues: { labelKey: "layout.phaseIssues", icon: ListTodo },
+  worklogs: { labelKey: "layout.phaseWorklogs", icon: Clock },
 };
 
 const PROVIDER_LABEL: Record<"jira" | "freelo", string> = {
@@ -77,6 +78,7 @@ const PROVIDER_LABEL: Record<"jira" | "freelo", string> = {
 };
 
 export function SyncBanner() {
+  const t = useT();
   const [state, setState] = useState<BannerState>(INITIAL_BANNER_STATE);
   const hideTimer = useRef<number | null>(null);
 
@@ -179,12 +181,12 @@ export function SyncBanner() {
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-medium text-[var(--text-primary)] truncate">
             {hasError
-              ? "Synchronizace selhala"
+              ? t("layout.syncFailed")
               : isComplete
-                ? "Synchronizace dokončena"
+                ? t("layout.syncComplete")
                 : state.connectionName
-                  ? `Synchronizuji ${state.connectionName}`
-                  : "Synchronizuji…"}
+                  ? t("layout.syncing", { name: state.connectionName })
+                  : t("layout.syncingGeneric")}
           </span>
           {state.total > 1 && !isComplete && (
             <span className="font-mono tabular-nums text-[var(--text-tertiary)]">
@@ -240,7 +242,7 @@ export function SyncBanner() {
                     className={`w-3.5 h-3.5 ${ph.status === "active" ? "animate-spin" : ""}`}
                     aria-hidden
                   />
-                  <span>{meta.label}</span>
+                  <span>{t(meta.labelKey)}</span>
                   {ph.count !== null && (
                     <span className="font-mono tabular-nums">{ph.count}</span>
                   )}
@@ -254,8 +256,8 @@ export function SyncBanner() {
           <button
             type="button"
             onClick={dismiss}
-            aria-label="Zavřít"
-            title="Zavřít"
+            aria-label={t("layout.close")}
+            title={t("layout.close")}
             className="ml-1 p-1 rounded hover:bg-[var(--bg-hover)]
                        text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
                        transition-colors duration-150 shrink-0"

@@ -51,6 +51,7 @@ import {
   startOfWeek,
   startOfYear,
 } from "../lib/dates";
+import { useT } from "../i18n";
 import { formatDateCs, formatDurationShort } from "../lib/format";
 import { usePrefsStore } from "../stores/prefsStore";
 
@@ -62,16 +63,17 @@ type Period =
   | "last-30"
   | "this-year";
 
-const PERIOD_LABEL: Record<Period, string> = {
-  "this-week": "Tento týden",
-  "last-week": "Minulý týden",
-  "this-month": "Tento měsíc",
-  "last-month": "Minulý měsíc",
-  "last-30": "Posledních 30 dní",
-  "this-year": "Od začátku roku",
-};
+const PERIODS: Period[] = [
+  "this-week",
+  "last-week",
+  "this-month",
+  "last-month",
+  "last-30",
+  "this-year",
+];
 
 export default function Reports() {
+  const t = useT();
   const [period, setPeriod] = useState<Period>("this-month");
   const [from, to] = useMemo(() => periodRange(period), [period]);
   const hourlyRate = usePrefsStore((s) => s.hourlyRate);
@@ -125,7 +127,7 @@ export default function Reports() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Reporty
+            {t("reports.heading")}
           </h1>
           <PeriodSelector value={period} onChange={setPeriod} />
           <span className="text-xs font-mono text-[var(--text-tertiary)]">
@@ -179,6 +181,7 @@ function PeriodSelector({
   value: Period;
   onChange: (p: Period) => void;
 }) {
+  const t = useT();
   return (
     <label className="inline-flex items-center gap-1 cursor-pointer">
       <select
@@ -186,20 +189,11 @@ function PeriodSelector({
         onChange={(e) => onChange(e.target.value as Period)}
         className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                    cursor-pointer focus:outline-none pr-4"
-        aria-label="Období"
+        aria-label={t("reports.period.aria")}
       >
-        {(
-          [
-            "this-week",
-            "last-week",
-            "this-month",
-            "last-month",
-            "last-30",
-            "this-year",
-          ] as Period[]
-        ).map((p) => (
+        {PERIODS.map((p) => (
           <option key={p} value={p}>
-            {PERIOD_LABEL[p]}
+            {t(`reports.period.${p}`)}
           </option>
         ))}
       </select>
@@ -216,14 +210,20 @@ function StreakBadge({
 }: {
   streaks?: { current: number; longest: number; today_met: boolean };
 }) {
+  const t = useT();
   if (!streaks || streaks.current === 0) return null;
   const days = streaks.current;
   // "Pracovní dny" pluralizace pro češtinu.
-  const label = days === 1 ? "den" : days >= 2 && days <= 4 ? "dny" : "dní";
+  const label =
+    days === 1
+      ? t("reports.streak.day")
+      : days >= 2 && days <= 4
+        ? t("reports.streak.days2to4")
+        : t("reports.streak.daysMany");
   const isRecord = streaks.current === streaks.longest;
   const tooltip = isRecord
-    ? "Po sobě jdoucí pracovní dny se splněným denním cílem · osobní rekord!"
-    : `Po sobě jdoucí pracovní dny se splněným denním cílem · nejdelší ${streaks.longest}`;
+    ? t("reports.streak.tooltipRecord")
+    : t("reports.streak.tooltip", { longest: streaks.longest });
   return (
     <div
       title={tooltip}
@@ -242,11 +242,13 @@ function StreakBadge({
         // the visual primary in the chip. In mono palettes accent-2 == accent,
         // so this renders identically there; only dual palettes show the pair.
         <span className="text-[10px]" style={{ color: "var(--accent-2)" }}>
-          · rekord {streaks.longest}
+          {t("reports.streak.record", { longest: streaks.longest })}
         </span>
       )}
       {!streaks.today_met && (
-        <span className="text-[10px] opacity-60">· dnes ještě</span>
+        <span className="text-[10px] opacity-60">
+          {t("reports.streak.todayPending")}
+        </span>
       )}
     </div>
   );
@@ -261,6 +263,7 @@ function IssuesBreakdown({
   fromUnix: number;
   toUnixExcl: number;
 }) {
+  const t = useT();
   const aggregated = useMemo(
     () => aggregateByIssue(rows, fromUnix, toUnixExcl),
     [rows, fromUnix, toUnixExcl],
@@ -271,28 +274,28 @@ function IssuesBreakdown({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Rozpad úkolů
+        {t("reports.breakdown.heading")}
       </h3>
       {/* Hlavička je samostatný grid se stejnou template column definicí
           jako řádky níž — díky `grid-cols-subgrid` na řádcích zůstanou
           sloupce zarovnané přes celou tabulku.                       */}
       <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs px-2 -mx-2">
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
-          Úkol
+          {t("reports.breakdown.issue")}
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1">
-          Popis
+          {t("reports.breakdown.description")}
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1 text-right">
-          Celkem
+          {t("reports.breakdown.total")}
         </div>
         <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] pb-1 text-right">
-          Naposledy zaznamenáno
+          {t("reports.breakdown.lastLogged")}
         </div>
       </div>
       {aggregated.length === 0 ? (
         <div className="py-4 text-center text-[var(--text-tertiary)] text-xs">
-          Zatím prázdné.
+          {t("reports.breakdown.empty")}
         </div>
       ) : (
         <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 text-xs">
@@ -316,7 +319,7 @@ function IssuesBreakdown({
                   <IssuePill issueKey={a.issueKey} />
                 </div>
                 <div className="truncate text-[var(--text-secondary)]">
-                  {a.summary || "(načítá se…)"}
+                  {a.summary || t("reports.breakdown.loadingSummary")}
                 </div>
                 <div className="text-right font-mono tabular-nums text-[var(--text-primary)]">
                   {formatDurationShort(a.totalSeconds)}

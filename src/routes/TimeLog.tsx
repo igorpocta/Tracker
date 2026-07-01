@@ -56,6 +56,7 @@ import { formatDateCs, formatDurationShort, formatWeekdayCs } from "../lib/forma
 import { useAssignWorklog } from "../hooks/useAssignWorklog";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
 import { usePrefsStore } from "../stores/prefsStore";
+import { useT, translate, type TFunc } from "../i18n";
 
 type Mode = "day" | "week";
 
@@ -65,14 +66,18 @@ type Mode = "day" | "week";
  * ("Čtvrtek · 14. 5. 2026"); relative days keep the prefix and lowercase the
  * weekday after it ("Dnes · čtvrtek · 14. 5. 2026"). Exported for unit tests.
  */
-export function dayHeaderLabel(selectedDate: Date, todayStart: Date): string {
+export function dayHeaderLabel(
+  selectedDate: Date,
+  todayStart: Date,
+  t: TFunc = (key, vars) => translate("cs", key, vars),
+): string {
   const diffDays = Math.round(
     (selectedDate.getTime() - todayStart.getTime()) / (24 * 3600 * 1000),
   );
   let prefix: string | null = null;
-  if (diffDays === 0) prefix = "Dnes";
-  else if (diffDays === -1) prefix = "Včera";
-  else if (diffDays === 1) prefix = "Zítra";
+  if (diffDays === 0) prefix = t("timeLog.header.today");
+  else if (diffDays === -1) prefix = t("timeLog.header.yesterday");
+  else if (diffDays === 1) prefix = t("timeLog.header.tomorrow");
   const weekday = formatWeekdayCs(selectedDate);
   const fmt = formatDateCs(selectedDate);
   return prefix
@@ -102,6 +107,7 @@ export function retainPresentHidden(
 }
 
 export default function TimeLog() {
+  const t = useT();
   const ctx = useOutletContext<ShellOutletContext>();
   const queryClient = useQueryClient();
   // The Calendar route navigates here with `location.state.targetDateMs` set
@@ -180,8 +186,8 @@ export default function TimeLog() {
     if (mode === "week") {
       return `${formatDateCs(from)} – ${formatDateCs(to)}`;
     }
-    return dayHeaderLabel(selectedDate, todayStart);
-  }, [mode, selectedDate, todayStart, from, to]);
+    return dayHeaderLabel(selectedDate, todayStart, t);
+  }, [mode, selectedDate, todayStart, from, to, t]);
 
   const fromUnix = dayStartUnixS(from);
   const toUnix = dayEndUnixS(to);
@@ -222,7 +228,7 @@ export default function TimeLog() {
         } catch (e) {
           ctx.pushToast(
             "error",
-            typeof e === "string" ? e : "Nepodařilo se smazat záznam",
+            typeof e === "string" ? e : t("timeLog.error.deleteRecord"),
           );
         }
         return;
@@ -244,19 +250,19 @@ export default function TimeLog() {
         });
         ctx.pushToast(
           "error",
-          typeof e === "string" ? e : "Záznam se nepodařilo smazat",
+          typeof e === "string" ? e : t("timeLog.error.deleteFailed"),
         );
         return;
       }
       // Show undo toast with 5s grace window.
-      ctx.pushToast("info", "Záznam smazán", {
+      ctx.pushToast("info", t("timeLog.deleted"), {
         ttlMs: 5000,
         undo: {
-          label: "Vrátit",
+          label: t("timeLog.undo"),
           action: async () => {
             try {
               // Undo by local row id — remote ids aren't unique across tenants.
-              if (row.id == null) throw "Chybí lokální id záznamu";
+              if (row.id == null) throw t("timeLog.error.missingLocalId");
               await undoDeleteWorklog(row.id);
               // Restored — reveal the row again.
               setHiddenIds((prev) => {
@@ -271,7 +277,7 @@ export default function TimeLog() {
               // `hiddenIds` against the refetched data.
               ctx.pushToast(
                 "error",
-                typeof e === "string" ? e : "Obnovení záznamu selhalo.",
+                typeof e === "string" ? e : t("timeLog.error.restoreFailed"),
               );
             } finally {
               invalidateWorklogQueries(queryClient);
@@ -280,7 +286,7 @@ export default function TimeLog() {
         },
       });
     },
-    [ctx, queryClient],
+    [ctx, queryClient, t],
   );
 
   const handleUpdate = useCallback(
@@ -317,18 +323,18 @@ export default function TimeLog() {
         } else {
           // No upstream id AND no local rowid — shouldn't happen but bail
           // safely so we don't silently swallow the edit.
-          ctx.pushToast("error", "Záznam nemá ID, nelze upravit.");
+          ctx.pushToast("error", t("timeLog.error.noId"));
           return;
         }
         invalidateWorklogQueries(queryClient);
       } catch (e) {
         ctx.pushToast(
           "error",
-          typeof e === "string" ? e : "Záznam se nepodařilo aktualizovat",
+          typeof e === "string" ? e : t("timeLog.error.updateFailed"),
         );
       }
     },
-    [ctx, queryClient],
+    [ctx, queryClient, t],
   );
 
   // Assign an issue to a worklog that was created without one (timer stopped
@@ -345,7 +351,7 @@ export default function TimeLog() {
       <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Časový záznam
+            {t("timeLog.title")}
           </h1>
           <ModeSelector value={mode} onChange={setMode} />
 
@@ -354,8 +360,8 @@ export default function TimeLog() {
             <button
               type="button"
               onClick={handlePrev}
-              aria-label={mode === "week" ? "Předchozí týden" : "Předchozí den"}
-              title={mode === "week" ? "Předchozí týden" : "Předchozí den"}
+              aria-label={mode === "week" ? t("timeLog.nav.prevWeek") : t("timeLog.nav.prevDay")}
+              title={mode === "week" ? t("timeLog.nav.prevWeek") : t("timeLog.nav.prevDay")}
               className="w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-sm)]
                          border border-[var(--border-subtle)] text-[var(--text-secondary)]
                          hover:bg-[var(--bg-hover)] transition-colors duration-150"
@@ -371,8 +377,8 @@ export default function TimeLog() {
               type="button"
               onClick={handleNext}
               disabled={mode === "day" ? isAtToday : false}
-              aria-label={mode === "week" ? "Další týden" : "Další den"}
-              title={mode === "week" ? "Další týden" : "Další den"}
+              aria-label={mode === "week" ? t("timeLog.nav.nextWeek") : t("timeLog.nav.nextDay")}
+              title={mode === "week" ? t("timeLog.nav.nextWeek") : t("timeLog.nav.nextDay")}
               className="w-7 h-7 inline-flex items-center justify-center rounded-[var(--radius-sm)]
                          border border-[var(--border-subtle)] text-[var(--text-secondary)]
                          hover:bg-[var(--bg-hover)] transition-colors duration-150
@@ -390,7 +396,7 @@ export default function TimeLog() {
                            bg-[var(--accent-soft)] text-[var(--accent)]
                            hover:bg-[var(--bg-hover)] transition-colors duration-150"
               >
-                Dnes
+                {t("timeLog.nav.today")}
               </button>
             )}
           </div>
@@ -400,7 +406,7 @@ export default function TimeLog() {
             {totalSeconds > 0 ? formatDurationShort(totalSeconds) : "0m"}
           </div>
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Celkem
+            {t("timeLog.total")}
           </div>
         </div>
       </div>
@@ -451,7 +457,7 @@ export default function TimeLog() {
             } catch (e) {
               ctx.pushToast(
                 "error",
-                typeof e === "string" ? e : "Nepodařilo se vytvořit záznam",
+                typeof e === "string" ? e : t("timeLog.error.createFailed"),
               );
             }
           }}
@@ -475,7 +481,7 @@ export default function TimeLog() {
             } catch (e) {
               ctx.pushToast(
                 "error",
-                typeof e === "string" ? e : "Split selhal",
+                typeof e === "string" ? e : t("timeLog.error.splitFailed"),
               );
             } finally {
               setSplitRequest(null);
@@ -487,14 +493,14 @@ export default function TimeLog() {
       {/* Worklog rows ---------------------------------------------------- */}
       <div className="flex flex-col gap-1">
         {worklogsQ.isLoading && (
-          <div className="text-xs text-[var(--text-tertiary)] py-2">Načítání…</div>
+          <div className="text-xs text-[var(--text-tertiary)] py-2">{t("timeLog.loading")}</div>
         )}
         {!worklogsQ.isLoading && rows.length === 0 && (
           <div className="text-xs text-[var(--text-tertiary)] py-6 text-center
                           rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)]">
-            Pro toto období nejsou žádné záznamy. Stiskněte{" "}
+            {t("timeLog.empty.prefix")}{" "}
             <kbd className="font-mono px-1 rounded bg-[var(--bg-hover)]">⌘N</kbd>{" "}
-            pro přidání.
+            {t("timeLog.empty.suffix")}
           </div>
         )}
         {[...rows]
@@ -528,7 +534,7 @@ export default function TimeLog() {
                      transition-colors duration-150"
         >
           <Plus className="w-3.5 h-3.5" aria-hidden />
-          Nový záznam
+          {t("timeLog.newEntry")}
         </button>
       </div>
     </PageContainer>
@@ -542,6 +548,7 @@ function ModeSelector({
   value: Mode;
   onChange: (m: Mode) => void;
 }) {
+  const t = useT();
   return (
     <label className="inline-flex items-center gap-1 cursor-pointer">
       <select
@@ -549,10 +556,10 @@ function ModeSelector({
         onChange={(e) => onChange(e.target.value as Mode)}
         className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                    cursor-pointer focus:outline-none pr-4"
-        aria-label="Režim"
+        aria-label={t("timeLog.mode.aria")}
       >
-        <option value="day">Den</option>
-        <option value="week">Týden</option>
+        <option value="day">{t("timeLog.mode.day")}</option>
+        <option value="week">{t("timeLog.mode.week")}</option>
       </select>
       <ChevronDown
         className="w-3 h-3 -ml-3 text-[var(--text-tertiary)] pointer-events-none"
@@ -588,6 +595,7 @@ export function WorklogRow({
   highlighted,
   refCallback,
 }: WorklogRowProps) {
+  const t = useT();
   // `useOutletContext` returns null outside a router outlet (e.g. in unit
   // tests that render the row standalone), so treat the toast as optional.
   const ctx = useOutletContext<ShellOutletContext | null>();
@@ -696,7 +704,7 @@ export function WorklogRow({
               setEditing(null);
             }
           }}
-          placeholder="Komentář"
+          placeholder={t("timeLog.row.commentPlaceholder")}
           className="flex-1 min-w-0 text-xs bg-transparent border border-[var(--border-subtle)]
                      rounded-[var(--radius-sm)] px-2 h-7 focus:outline-none
                      focus:border-[var(--border-default)]"
@@ -707,7 +715,7 @@ export function WorklogRow({
           onClick={beginEditingComment}
           className="flex-1 min-w-0 flex items-center gap-2 text-xs text-left text-[var(--text-primary)]
                      hover:underline decoration-dotted underline-offset-4"
-          title="Upravit komentář"
+          title={t("timeLog.row.editComment")}
         >
           {/* Phase 18A — Item 8: fall back to "(načítá se…)" when an
               issue IS set but its summary hasn't been backfilled yet (the
@@ -717,7 +725,7 @@ export function WorklogRow({
               icons + warning chips on the right stay visible. */}
           <span className="flex-1 min-w-0 truncate">
             {row.summary ||
-              (row.issue_key ? "(načítá se…)" : "Nepřiřazen")}
+              (row.issue_key ? t("timeLog.row.loadingSummary") : t("timeLog.row.unassigned"))}
           </span>
           {row.comment && (
             <MessageSquare
@@ -740,32 +748,32 @@ export function WorklogRow({
               if (row.id == null) return;
               try {
                 await pushLocalWorklog(row.id);
-                pushToast?.("success", "Synchronizováno s providerem.");
+                pushToast?.("success", t("timeLog.row.synced"));
               } catch (err) {
                 console.error("[push_local_worklog] failed:", err);
                 pushToast?.(
                   "error",
                   typeof err === "string"
                     ? err
-                    : "Synchronizace s providerem selhala.",
+                    : t("timeLog.row.syncFailed"),
                 );
               }
             })();
           }}
-          title="Klikni pro vynucenou synchronizaci s providerem"
+          title={t("timeLog.row.forceSync")}
           className="font-mono text-[10px] text-orange-500 shrink-0
                      hover:text-orange-400 hover:underline underline-offset-2
                      transition-colors duration-150"
         >
-          ⚠ lokální · ↻
+          {t("timeLog.row.localChip")}
         </button>
       )}
       {row.pending_assignment && (
         <span
-          title="Časomíra byla zastavena bez přiřazeného úkolu — vyberte úkol vlevo"
+          title={t("timeLog.row.pendingAssignment")}
           className="font-mono text-[10px] text-red-500 shrink-0"
         >
-          ⚠ bez úkolu
+          {t("timeLog.row.noIssueChip")}
         </span>
       )}
       <span className="font-mono tabular-nums text-[11px] text-[var(--text-tertiary)] shrink-0
@@ -788,14 +796,14 @@ export function WorklogRow({
             }
           }}
           className={editCellCls}
-          aria-label="Začátek"
+          aria-label={t("timeLog.row.startAria")}
         />
       ) : (
         <button
           type="button"
           onClick={beginEditingStart}
           className={readCellCls}
-          title="Upravit začátek"
+          title={t("timeLog.row.editStart")}
         >
           {formatHHMM(started)}
         </button>
@@ -816,14 +824,14 @@ export function WorklogRow({
             }
           }}
           className={editCellCls}
-          aria-label="Konec"
+          aria-label={t("timeLog.row.endAria")}
         />
       ) : (
         <button
           type="button"
           onClick={beginEditingEnd}
           className={readCellCls}
-          title="Upravit konec"
+          title={t("timeLog.row.editEnd")}
         >
           {formatHHMM(ended)}
         </button>
@@ -847,7 +855,7 @@ export function WorklogRow({
                      bg-transparent border border-[var(--border-subtle)]
                      rounded-[var(--radius-sm)] px-1 h-7 focus:outline-none
                      focus:border-[var(--border-default)]"
-          aria-label="Trvání"
+          aria-label={t("timeLog.row.durationAria")}
         />
       ) : (
         <button
@@ -855,15 +863,15 @@ export function WorklogRow({
           onClick={beginEditingDuration}
           className="font-mono tabular-nums text-[11px] text-[var(--text-primary)] shrink-0
                      w-16 text-right hover:underline decoration-dotted underline-offset-4"
-          title="Upravit trvání"
+          title={t("timeLog.row.editDuration")}
         >
           {formatDurationShort(row.duration_s)}
         </button>
       )}
       <button
         type="button"
-        aria-label={`Smazat záznam ${row.issue_key}`}
-        title="Smazat"
+        aria-label={t("timeLog.row.deleteAria", { issueKey: row.issue_key ?? "" })}
+        title={t("timeLog.row.delete")}
         onClick={() => onDelete(row)}
         className="text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
       >
@@ -928,6 +936,7 @@ function SplitWorklogDialog({
   onCancel: () => void;
   onConfirm: (newIssueKey: string) => void;
 }) {
+  const t = useT();
   const [key, setKey] = useState("");
   const splitDate = new Date(splitAtMs);
   const hh = String(splitDate.getHours()).padStart(2, "0");
@@ -936,7 +945,7 @@ function SplitWorklogDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Rozdělit záznam"
+      aria-label={t("timeLog.split.aria")}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
       onClick={(e) => {
@@ -951,11 +960,11 @@ function SplitWorklogDialog({
         }}
       >
         <h3 className="text-base font-semibold text-[var(--text-primary)]">
-          Rozdělit záznam v {hh}:{mm}
+          {t("timeLog.split.title", { time: `${hh}:${mm}` })}
         </h3>
         <p className="text-xs text-[var(--text-secondary)]">
-          První kus zůstane na úkolu <span className="font-mono">{row.issue_key ?? "(bez úkolu)"}</span>.
-          Druhý kus přiřaď k jinému úkolu (nech prázdné pro 'bez úkolu').
+          {t("timeLog.split.descriptionPrefix")} <span className="font-mono">{row.issue_key ?? t("timeLog.split.noIssue")}</span>.
+          {" "}{t("timeLog.split.descriptionSuffix")}
         </p>
         <input
           type="text"
@@ -979,7 +988,7 @@ function SplitWorklogDialog({
             className="h-8 px-3 rounded-[var(--radius-md)] text-sm
                        text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
           >
-            Zrušit
+            {t("timeLog.split.cancel")}
           </button>
           <button
             type="button"
@@ -987,7 +996,7 @@ function SplitWorklogDialog({
             className="h-8 px-3 rounded-[var(--radius-md)] text-sm font-semibold"
             style={{ background: "var(--accent)", color: "var(--accent-text, #fff)" }}
           >
-            Rozdělit
+            {t("timeLog.split.confirm")}
           </button>
         </div>
       </div>
@@ -1008,6 +1017,7 @@ function CreateWorklogDialog({
   onCancel: () => void;
   onConfirm: (issueKey: string) => void;
 }) {
+  const t = useT();
   const [key, setKey] = useState("");
   const start = new Date(startedAtMs);
   const end = new Date(endedAtMs);
@@ -1018,7 +1028,7 @@ function CreateWorklogDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Vytvořit záznam z časové osy"
+      aria-label={t("timeLog.create.aria")}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.4)" }}
       onClick={(e) => {
@@ -1033,14 +1043,13 @@ function CreateWorklogDialog({
         }}
       >
         <h3 className="text-base font-semibold text-[var(--text-primary)]">
-          Vytvořit záznam {startLabel}–{endLabel}
+          {t("timeLog.create.title", { start: startLabel, end: endLabel })}
           <span className="text-[var(--text-tertiary)] font-normal text-sm">
-            {" "}· {durMin} min
+            {" "}· {t("timeLog.create.minutes", { count: durMin })}
           </span>
         </h3>
         <p className="text-xs text-[var(--text-secondary)]">
-          Zadej úkol — záznam bude rovnou odeslán do providera (Jira / Freelo
-          podle prefixu klíče).
+          {t("timeLog.create.description")}
         </p>
         <input
           type="text"
@@ -1064,7 +1073,7 @@ function CreateWorklogDialog({
             className="h-8 px-3 rounded-[var(--radius-md)] text-sm
                        text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
           >
-            Zrušit
+            {t("timeLog.create.cancel")}
           </button>
           <button
             type="button"
@@ -1077,7 +1086,7 @@ function CreateWorklogDialog({
               color: "var(--accent-text, #fff)",
             }}
           >
-            Vytvořit
+            {t("timeLog.create.confirm")}
           </button>
         </div>
       </div>

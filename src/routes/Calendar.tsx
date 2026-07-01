@@ -38,6 +38,7 @@ import type { ShellOutletContext } from "../components/Layout/AppShell";
 import { PageContainer } from "../components/Layout/PageContainer";
 import { isWorkingDayLocal, useCalendarMask } from "../hooks/useCalendarMask";
 import { useTodayBoundary } from "../hooks/useTodayBoundary";
+import { useT } from "../i18n";
 import {
   addDays,
   dayEndUnixS,
@@ -53,26 +54,37 @@ import { formatDurationShort, formatHours } from "../lib/format";
 
 // Phase 18B — Item 29: short month names used in the Yearly view.
 const MONTHS_SHORT = [
-  "Led", "Úno", "Bře", "Dub", "Kvě", "Čvn",
-  "Čvc", "Srp", "Zář", "Říj", "Lis", "Pro",
+  "routes.calendar.monthShort.jan",
+  "routes.calendar.monthShort.feb",
+  "routes.calendar.monthShort.mar",
+  "routes.calendar.monthShort.apr",
+  "routes.calendar.monthShort.may",
+  "routes.calendar.monthShort.jun",
+  "routes.calendar.monthShort.jul",
+  "routes.calendar.monthShort.aug",
+  "routes.calendar.monthShort.sep",
+  "routes.calendar.monthShort.oct",
+  "routes.calendar.monthShort.nov",
+  "routes.calendar.monthShort.dec",
 ];
 
 const MONTHS = [
-  "Leden",
-  "Únor",
-  "Březen",
-  "Duben",
-  "Květen",
-  "Červen",
-  "Červenec",
-  "Srpen",
-  "Září",
-  "Říjen",
-  "Listopad",
-  "Prosinec",
+  "routes.calendar.monthLong.jan",
+  "routes.calendar.monthLong.feb",
+  "routes.calendar.monthLong.mar",
+  "routes.calendar.monthLong.apr",
+  "routes.calendar.monthLong.may",
+  "routes.calendar.monthLong.jun",
+  "routes.calendar.monthLong.jul",
+  "routes.calendar.monthLong.aug",
+  "routes.calendar.monthLong.sep",
+  "routes.calendar.monthLong.oct",
+  "routes.calendar.monthLong.nov",
+  "routes.calendar.monthLong.dec",
 ];
 
 export default function Calendar() {
+  const t = useT();
   // Recompute `today` whenever the day actually rolls over — otherwise
   // a session left open past midnight would keep highlighting yesterday.
   // `rolloverCount` is the trigger; the factory does not read it
@@ -89,14 +101,14 @@ export default function Calendar() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap pt-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-            Přehled kalendáře
+            {t("routes.calendar.title")}
           </h1>
           <Segmented
             value={view}
             onChange={setView}
             options={[
-              { value: "monthly", label: "Měsíční" },
-              { value: "yearly", label: "Roční" },
+              { value: "monthly", label: t("routes.calendar.monthly") },
+              { value: "yearly", label: t("routes.calendar.yearly") },
             ]}
           />
           {view === "monthly" ? (
@@ -137,6 +149,7 @@ function MonthlyView({
   month: number;
   today: Date;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { pushToast } = useOutletContext<ShellOutletContext>();
   const navigate = useNavigate();
@@ -196,11 +209,11 @@ function MonthlyView({
       } catch (e) {
         pushToast(
           "error",
-          typeof e === "string" ? e : "Nepodařilo se označit den jako volný.",
+          typeof e === "string" ? e : t("routes.calendar.markFailed"),
         );
       }
     },
-    [refreshNonWorking, pushToast],
+    [refreshNonWorking, pushToast, t],
   );
 
   const handleUnmark = useCallback(
@@ -211,11 +224,11 @@ function MonthlyView({
       } catch (e) {
         pushToast(
           "error",
-          typeof e === "string" ? e : "Nepodařilo se zrušit volný den.",
+          typeof e === "string" ? e : t("routes.calendar.unmarkFailed"),
         );
       }
     },
-    [refreshNonWorking, pushToast],
+    [refreshNonWorking, pushToast, t],
   );
 
   const monthDays: Date[] = [];
@@ -232,17 +245,25 @@ function MonthlyView({
             {monthTotal > 0 ? formatDurationShort(monthTotal) : "0m"}
           </div>
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Celkem za měsíc
+            {t("routes.calendar.monthTotal")}
           </div>
         </div>
       </div>
       <div className="grid grid-cols-7 gap-2 px-1">
-        {["PO", "ÚT", "ST", "ČT", "PÁ", "SO", "NE"].map((d) => (
+        {[
+          "routes.calendar.weekday.mon",
+          "routes.calendar.weekday.tue",
+          "routes.calendar.weekday.wed",
+          "routes.calendar.weekday.thu",
+          "routes.calendar.weekday.fri",
+          "routes.calendar.weekday.sat",
+          "routes.calendar.weekday.sun",
+        ].map((d) => (
           <div
             key={d}
             className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]"
           >
-            {d}
+            {t(d)}
           </div>
         ))}
       </div>
@@ -311,6 +332,7 @@ function YearlyView({
   today: Date;
   onPickMonth: (month: number) => void;
 }) {
+  const t = useT();
   const yearStart = useMemo(() => new Date(year, 0, 1), [year]);
   const yearEnd = useMemo(() => new Date(year, 11, 31), [year]);
 
@@ -344,7 +366,7 @@ function YearlyView({
             {yearTotal > 0 ? formatDurationShort(yearTotal) : "0m"}
           </div>
           <div className="text-[11px] text-[var(--text-tertiary)]">
-            Celkem za rok {year}
+            {t("routes.calendar.yearTotal", { year })}
           </div>
         </div>
       </div>
@@ -377,6 +399,7 @@ function MiniMonth({
   dayTotals: Map<string, number>;
   onPick: () => void;
 }) {
+  const t = useT();
   const monthStart = startOfMonth(new Date(year, month, 1));
   const monthEnd = endOfMonth(monthStart);
   const leadingBlanks = (monthStart.getDay() + 6) % 7;
@@ -398,19 +421,27 @@ function MiniMonth({
         className="w-full flex items-baseline justify-between mb-2 group"
       >
         <span className="text-sm font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors duration-150">
-          {MONTHS_SHORT[month]}
+          {t(MONTHS_SHORT[month])}
         </span>
         <span className="text-[10px] font-mono tabular-nums text-[var(--text-tertiary)]">
           {monthSeconds > 0 ? formatDurationShort(monthSeconds) : "—"}
         </span>
       </button>
       <div className="grid grid-cols-7 gap-[2px]">
-        {["P", "Ú", "S", "Č", "P", "S", "N"].map((d, i) => (
+        {[
+          "routes.calendar.weekdayShort.mon",
+          "routes.calendar.weekdayShort.tue",
+          "routes.calendar.weekdayShort.wed",
+          "routes.calendar.weekdayShort.thu",
+          "routes.calendar.weekdayShort.fri",
+          "routes.calendar.weekdayShort.sat",
+          "routes.calendar.weekdayShort.sun",
+        ].map((d, i) => (
           <div
             key={`w-${i}`}
             className="text-[9px] text-center text-[var(--text-tertiary)] mb-0.5"
           >
-            {d}
+            {t(d)}
           </div>
         ))}
         {Array.from({ length: leadingBlanks }).map((_, i) => (
@@ -459,6 +490,7 @@ function YearPicker({
   year: number;
   onYearChange: (y: number) => void;
 }) {
+  const t = useT();
   const years = useMemo(() => {
     const now = new Date().getFullYear();
     return Array.from({ length: 6 }, (_, i) => now - 3 + i);
@@ -469,7 +501,7 @@ function YearPicker({
       onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
       className="appearance-none bg-transparent border-none text-sm text-[var(--text-secondary)]
                  cursor-pointer focus:outline-none"
-      aria-label="Rok"
+      aria-label={t("routes.calendar.year")}
     >
       {years.map((y) => (
         <option key={y} value={y}>
@@ -493,6 +525,7 @@ function CalendarCell({
   isNonWorking?: boolean;
   onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const t = useT();
   const hours = seconds / 3600;
   const fill = Math.min(1, hours / 8);
   const filled = hours > 0;
@@ -536,7 +569,7 @@ function CalendarCell({
       onContextMenu={onContextMenu}
       aria-label={
         isNonWorking
-          ? `${date.getDate()}. ${date.getMonth() + 1}. — nepracovní den`
+          ? `${date.getDate()}. ${date.getMonth() + 1}. — ${t("routes.calendar.nonWorkingDay")}`
           : `${date.getDate()}. ${date.getMonth() + 1}.`
       }
       className={clsx(
@@ -606,6 +639,7 @@ function YearMonthPickers({
   onYearChange: (y: number) => void;
   onMonthChange: (m: number) => void;
 }) {
+  const t = useT();
   const years = useMemo(() => {
     const now = new Date().getFullYear();
     return Array.from({ length: 6 }, (_, i) => now - 3 + i);
@@ -617,7 +651,7 @@ function YearMonthPickers({
         value={year}
         onChange={(e) => onYearChange(parseInt(e.target.value, 10))}
         className="appearance-none bg-transparent border-none cursor-pointer focus:outline-none"
-        aria-label="Rok"
+        aria-label={t("routes.calendar.year")}
       >
         {years.map((y) => (
           <option key={y} value={y}>
@@ -629,11 +663,11 @@ function YearMonthPickers({
         value={month}
         onChange={(e) => onMonthChange(parseInt(e.target.value, 10))}
         className="appearance-none bg-transparent border-none cursor-pointer focus:outline-none"
-        aria-label="Měsíc"
+        aria-label={t("routes.calendar.month")}
       >
         {MONTHS.map((m, i) => (
           <option key={m} value={i}>
-            {m}
+            {t(m)}
           </option>
         ))}
       </select>

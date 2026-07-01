@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 
 import { testJiraConnection } from "../../api/commands";
 import type { JiraUser } from "../../api/types";
+import { useT } from "../../i18n";
 import { firstError, tokenSchema } from "../../lib/validation";
 
 export interface StepTokenProps {
@@ -39,6 +40,7 @@ export function StepToken({
   baseUrl,
   email,
 }: StepTokenProps) {
+  const t = useT();
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [submitting, setSubmitting] = useState(false);
 
@@ -84,12 +86,12 @@ export function StepToken({
     <form onSubmit={handleFinish} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <label htmlFor="setup-token" className="text-sm font-medium text-[var(--text-primary)]">
-          Jira API token
+          {t("setup.token.label")}
         </label>
         <input
           id="setup-token"
           type="password"
-          placeholder="vložte svůj token"
+          placeholder={t("setup.token.placeholder")}
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
@@ -108,7 +110,7 @@ export function StepToken({
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          Vytvořte si ho na{" "}
+          {t("setup.token.hintPrefix")}{" "}
           <span className="text-[var(--text-secondary)]">id.atlassian.com → Security → API tokens</span>.
         </p>
       </div>
@@ -123,7 +125,7 @@ export function StepToken({
           {test.kind === "loading" && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Otestovat připojení
+          {t("setup.button.testConnection")}
         </button>
 
         {test.kind === "ok" && (
@@ -132,7 +134,7 @@ export function StepToken({
             role="status"
           >
             <CircleCheck className="w-4 h-4" aria-hidden />
-            Připojeno jako {test.user.displayName}
+            {t("setup.status.connectedAs", { name: test.user.displayName })}
           </span>
         )}
         {test.kind === "error" && (
@@ -148,7 +150,7 @@ export function StepToken({
           onClick={onBack}
           className="h-9 px-4 rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-sm font-medium text-[var(--text-primary)] transition-colors duration-150"
         >
-          Zpět
+          {t("setup.button.back")}
         </button>
         <button
           type="submit"
@@ -158,7 +160,7 @@ export function StepToken({
           {submitting && (
             <LoaderCircle className="w-4 h-4 animate-spin" aria-hidden />
           )}
-          Dokončit
+          {t("setup.button.finish")}
         </button>
       </div>
     </form>

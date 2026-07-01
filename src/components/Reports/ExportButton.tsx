@@ -17,6 +17,7 @@ import * as XLSX from "xlsx";
 
 import { searchIssuesCache } from "../../api/commands";
 import type { IssueRow, WorklogRow } from "../../api/types";
+import { useT } from "../../i18n";
 
 export interface ExportButtonProps {
   rows: WorklogRow[];
@@ -25,6 +26,7 @@ export interface ExportButtonProps {
 }
 
 export function ExportButton({ rows, from, to }: ExportButtonProps) {
+  const t = useT();
   const issueKeys = Array.from(
     new Set(rows.map((r) => r.issue_key).filter((k): k is string => !!k)),
   );
@@ -64,10 +66,10 @@ export function ExportButton({ rows, from, to }: ExportButtonProps) {
                  bg-transparent hover:bg-[var(--accent-soft)]
                  transition-colors duration-150
                  disabled:opacity-60 disabled:cursor-not-allowed"
-      title="Exportovat výkaz do Excelu (.xlsx)"
+      title={t("reports.export.title")}
     >
       <Download className="w-3.5 h-3.5" aria-hidden />
-      Exportovat do Excelu
+      {t("reports.export.button")}
     </button>
   );
 }

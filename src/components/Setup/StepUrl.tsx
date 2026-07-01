@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { useT } from "../../i18n";
 import { firstError, urlSchema } from "../../lib/validation";
 
 export interface StepUrlProps {
@@ -15,6 +16,7 @@ export interface StepUrlProps {
  * disabled until validation passes.
  */
 export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
+  const t = useT();
   // Don't surface "must be a valid URL" before the user has typed anything.
   const error = useMemo(
     () => (value.length === 0 ? null : firstError(urlSchema, value)),
@@ -32,7 +34,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
     >
       <div className="flex flex-col gap-1.5">
         <label htmlFor="setup-url" className="text-sm font-medium text-[var(--text-primary)]">
-          Základní URL Jiry
+          {t("setup.url.label")}
         </label>
         <input
           id="setup-url"
@@ -53,7 +55,9 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
           </p>
         )}
         <p className="text-xs text-[var(--text-tertiary)]">
-          Vaše Atlassian Cloud URL, např. <code>https://acme.atlassian.net</code>.
+          {t("setup.url.hintPrefix")}{" "}
+          <code>https://acme.atlassian.net</code>
+          {t("setup.url.hintSuffix")}
         </p>
       </div>
 
@@ -63,7 +67,7 @@ export function StepUrl({ value, onChange, onNext }: StepUrlProps) {
           disabled={!isValid}
           className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-active)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed text-[var(--accent-text)] text-sm font-medium transition-colors duration-150"
         >
-          Další
+          {t("setup.button.next")}
         </button>
       </div>
     </form>
