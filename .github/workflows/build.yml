@@ -237,7 +237,6 @@ jobs:
           name: Tracker-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
 
@@ -300,7 +299,6 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           files: |
             artifacts/**/*.dmg
-            artifacts/**/*.app/**
             artifacts/**/*.msi
             artifacts/**/*.exe
             updater-dist/*.app.tar.gz
