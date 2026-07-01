@@ -6,6 +6,12 @@ zvolíte.
 
 **Platformy:** macOS · Windows &nbsp;•&nbsp; **Postaveno na:** Tauri 2, React, TypeScript, SQLite
 
+## Náhled
+
+![Tracker — Časový záznam s rychlým spuštěním z oblíbených a naposledy sledovaných úkolů](docs/screenshots/screenshot.png)
+
+*Hlavní obrazovka (Časový záznam): spuštění jedním kliknutím z oblíbených / naposledy sledovaných, denní časová osa, přehled worklogů a denní součet.*
+
 ## Funkce
 
 - **Sledování času jedním kliknutím** — z tray ikony, popoveru i hlavního okna.
