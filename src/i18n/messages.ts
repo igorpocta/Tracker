@@ -27,6 +27,7 @@ import { settingsMisc } from "./messages/settingsMisc";
 import { setup } from "./messages/setup";
 import { timeLog } from "./messages/timeLog";
 import { timer } from "./messages/timer";
+import { validation } from "./messages/validation";
 import { worklog } from "./messages/worklog";
 
 export type Language = "cs" | "en";
@@ -55,6 +56,7 @@ const NAMESPACES = [
   worklog,
   misc,
   common,
+  validation,
 ];
 
 const cs: Catalogue = Object.assign({}, ...NAMESPACES.map((n) => n.cs));

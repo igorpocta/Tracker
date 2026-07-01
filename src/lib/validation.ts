@@ -15,23 +15,30 @@
  */
 import { z } from "zod";
 
+import { translate } from "../i18n/messages";
+import { usePrefsStore } from "../stores/prefsStore";
+
+// Validation messages are stored as i18n keys (see i18n/messages/validation.ts)
+// and resolved to the active language by `firstError`. Zod carries the key
+// through as its `message`, so this layer stays free of hard-coded UI text.
+
 /**
  * Jira Cloud instance URL. Must parse as a URL *and* use `https://` so we don't
  * accidentally accept `http://` or e.g. an `ftp://` scheme.
  */
 export const urlSchema = z
   .string()
-  .url("musí být platná URL")
-  .regex(/^https:\/\//, "musí začínat https://");
+  .url("validation.url")
+  .regex(/^https:\/\//, "validation.https");
 
 /** Account email — basic shape check, not RFC-perfect. */
-export const emailSchema = z.string().email("musí být platný e-mail");
+export const emailSchema = z.string().email("validation.email");
 
 /**
  * Jira API token. We can't actually verify the token without hitting the API,
  * but we can at least reject obviously-too-short strings.
  */
-export const tokenSchema = z.string().min(10, "API token vypadá příliš krátký");
+export const tokenSchema = z.string().min(10, "validation.tokenShort");
 
 /**
  * Freelo API key. Freelo's keys are typically 20–80 chars; we accept a
@@ -39,8 +46,8 @@ export const tokenSchema = z.string().min(10, "API token vypadá příliš krát
  */
 export const freeloApiKeySchema = z
   .string()
-  .min(20, "API klíč vypadá příliš krátký")
-  .max(200, "API klíč je příliš dlouhý");
+  .min(20, "validation.apiKeyShort")
+  .max(200, "validation.apiKeyLong");
 
 // -----------------------------------------------------------------------------
 // Numeric setting schemas (Phase 18C — Item 23)
@@ -56,20 +63,20 @@ export const freeloApiKeySchema = z
  */
 export const hourlyRateSchema = z
   .number()
-  .refine((n) => Number.isFinite(n), "musí být platné číslo")
-  .refine((n) => n >= 0, "nesmí být záporná")
+  .refine((n) => Number.isFinite(n), "validation.number")
+  .refine((n) => n >= 0, "validation.negative")
   // Shoduje se s `MAX_HOURLY_RATE` v `commands/prefs.rs`. Pokud někdy
   // přijde měna s hyperinflací, šplhne to per-currency.
-  .refine((n) => n <= 99_999, "je příliš vysoká (max 99 999)");
+  .refine((n) => n <= 99_999, "validation.rateTooHigh");
 
 /**
  * Daily goal in hours. 0.5..=24, matching the backend.
  */
 export const dailyGoalHoursSchema = z
   .number()
-  .refine((n) => Number.isFinite(n), "musí být platné číslo")
-  .refine((n) => n >= 0.5, "minimum je 0,5 h")
-  .refine((n) => n <= 24, "maximum je 24 h");
+  .refine((n) => Number.isFinite(n), "validation.number")
+  .refine((n) => n >= 0.5, "validation.dailyGoalMin")
+  .refine((n) => n <= 24, "validation.dailyGoalMax");
 
 /**
  * Activity threshold in minutes. 1..=120 — backend caps at 120 to give some
@@ -77,28 +84,28 @@ export const dailyGoalHoursSchema = z
  */
 export const activityThresholdSchema = z
   .number()
-  .int("musí být celé číslo")
-  .min(1, "minimum je 1 min")
-  .max(120, "maximum je 120 min");
+  .int("validation.integer")
+  .min(1, "validation.activityMin")
+  .max(120, "validation.activityMax");
 
 /** Rounding interval — strict enum of valid steps. */
 export const roundingIntervalSchema = z
   .number()
-  .refine((n) => [1, 5, 15, 60].includes(n), "musí být 1, 5, 15 nebo 60");
+  .refine((n) => [1, 5, 15, 60].includes(n), "validation.roundingSet");
 
 /** Working week mask — 7-bit value (Mon=1 … Sun=64). */
 export const workingWeekMaskSchema = z
   .number()
-  .int("musí být celé číslo")
-  .min(0, "minimum je 0")
-  .max(127, "maximum je 127");
+  .int("validation.integer")
+  .min(0, "validation.maskMin")
+  .max(127, "validation.maskMax");
 
 /** Goal-slider hours (UI slider in Settings → Cíle). */
 export const goalSliderHoursSchema = z
   .number()
-  .refine((n) => Number.isFinite(n), "musí být platné číslo")
-  .min(1, "minimum je 1 h")
-  .max(14, "maximum je 14 h");
+  .refine((n) => Number.isFinite(n), "validation.number")
+  .min(1, "validation.goalSliderMin")
+  .max(14, "validation.goalSliderMax");
 
 /**
  * HH:MM 24-hour time. Accepts "0:00" through "23:59". Used by the start-time
@@ -106,7 +113,7 @@ export const goalSliderHoursSchema = z
  */
 export const timeOfDaySchema = z
   .string()
-  .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "musí být ve formátu HH:MM");
+  .regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "validation.timeFormat");
 
 /**
  * Provider issue key. Accepts:
@@ -121,15 +128,15 @@ export const issueKeySchema = z
   .string()
   .regex(
     /^[A-Z][A-Z0-9]+-[1-9][0-9]*$/,
-    "musí být ve formátu PROJ-123",
+    "validation.issueKeyFormat",
   );
 
 /** JQL query — non-empty after trim, max 2000 chars, no NUL bytes. */
 export const jqlSchema = z
   .string()
-  .refine((s) => s.trim().length > 0, "dotaz nesmí být prázdný")
-  .refine((s) => s.length <= 2000, "dotaz je příliš dlouhý (max 2000 znaků)")
-  .refine((s) => !s.includes("\0"), "obsahuje neplatný znak");
+  .refine((s) => s.trim().length > 0, "validation.jqlEmpty")
+  .refine((s) => s.length <= 2000, "validation.jqlTooLong")
+  .refine((s) => !s.includes("\0"), "validation.jqlInvalidChar");
 
 /** ISO-4217 currency code — enum of allowed values, mirrors the backend. */
 export const currencySchema = z.enum(
@@ -166,5 +173,7 @@ export function parseRateInput(raw: string): number | null {
 export function firstError<T>(schema: z.ZodType<T>, value: unknown): string | null {
   const result = schema.safeParse(value);
   if (result.success) return null;
-  return result.error.issues[0]?.message ?? "neplatná hodnota";
+  // Zod carries the message as an i18n key; resolve it to the active language.
+  const key = result.error.issues[0]?.message ?? "validation.invalid";
+  return translate(usePrefsStore.getState().language, key);
 }
