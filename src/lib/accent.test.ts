@@ -33,9 +33,40 @@ afterEach(() => {
 });
 
 describe("palette specs", () => {
-  it("has 10 mono palettes and 10 dual palettes", () => {
-    expect(MONO_PALETTES).toHaveLength(10);
-    expect(DUAL_PALETTES).toHaveLength(10);
+  it("has 15 mono palettes and 15 dual palettes", () => {
+    expect(MONO_PALETTES).toHaveLength(15);
+    expect(DUAL_PALETTES).toHaveLength(15);
+  });
+
+  it("includes the 2026 trend palettes with valid hex specs", () => {
+    const monoIds = [
+      "future-dusk",
+      "digital-lavender",
+      "butter-yellow",
+      "cherry-red",
+      "matcha",
+    ];
+    const dualIds = [
+      "dusk-ember",
+      "matcha-clay",
+      "lavender-mint",
+      "butter-berry",
+      "slate-coral",
+    ];
+    for (const id of [...monoIds, ...dualIds]) {
+      const spec = getPaletteSpec(id);
+      // Must resolve to itself, not fall back to the default.
+      expect(spec.id).toBe(id);
+      expect(spec.primary).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(spec.secondary).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+    for (const id of monoIds) expect(isDualPalette(id)).toBe(false);
+    for (const id of dualIds) expect(isDualPalette(id)).toBe(true);
+    // Dual palettes must actually use two distinct colors.
+    for (const id of dualIds) {
+      const spec = getPaletteSpec(id);
+      expect(spec.primary.toLowerCase()).not.toBe(spec.secondary.toLowerCase());
+    }
   });
 
   it("identifies the mode correctly", () => {

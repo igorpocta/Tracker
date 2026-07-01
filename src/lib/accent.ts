@@ -48,6 +48,13 @@ export const MONO_PALETTES: PaletteSpec[] = [
   { id: "forest",    label: "Forest",    mode: "mono", primary: "#22C55E", secondary: "#22C55E" },
   { id: "plum",      label: "Plum",      mode: "mono", primary: "#A855F7", secondary: "#A855F7" },
   { id: "rust",      label: "Rust",      mode: "mono", primary: "#DC2626", secondary: "#DC2626" },
+  // 2026 trend MONO palettes — WGSN/Pantone-adjacent hues moving into 2026
+  // (Future Dusk, Digital Lavender, Butter Yellow, Cherry Red, Matcha/Sage).
+  { id: "future-dusk",      label: "Future Dusk",      mode: "mono", primary: "#4E5481", secondary: "#4E5481" },
+  { id: "digital-lavender", label: "Digital Lavender", mode: "mono", primary: "#B39DDB", secondary: "#B39DDB" },
+  { id: "butter-yellow",    label: "Butter Yellow",    mode: "mono", primary: "#EAD07A", secondary: "#EAD07A" },
+  { id: "cherry-red",       label: "Cherry Red",       mode: "mono", primary: "#B31E3A", secondary: "#B31E3A" },
+  { id: "matcha",           label: "Matcha",           mode: "mono", primary: "#8FA96B", secondary: "#8FA96B" },
 ];
 
 /** Dual palettes — primary + secondary, both UNLOCKED (no premium gate). */
@@ -63,6 +70,12 @@ export const DUAL_PALETTES: PaletteSpec[] = [
   { id: "deep-ocean",    label: "Deep Ocean",    mode: "dual", primary: "#0077B6", secondary: "#00F5FF" },
   { id: "royal-velvet",  label: "Royal Velvet",  mode: "dual", primary: "#7209B7", secondary: "#F8961E" },
   { id: "forest-fire",   label: "Forest Fire",   mode: "dual", primary: "#386641", secondary: "#FF8C42" },
+  // 2026 trend DUAL palettes — pairings built on the new-season hues above.
+  { id: "dusk-ember",    label: "Dusk & Ember",   mode: "dual", primary: "#4E5481", secondary: "#FF7A45" },
+  { id: "matcha-clay",   label: "Matcha Clay",    mode: "dual", primary: "#8FA96B", secondary: "#C96F4A" },
+  { id: "lavender-mint", label: "Lavender Mint",  mode: "dual", primary: "#B39DDB", secondary: "#4FD1C5" },
+  { id: "butter-berry",  label: "Butter & Berry", mode: "dual", primary: "#EAD07A", secondary: "#D81E5B" },
+  { id: "slate-coral",   label: "Slate Coral",    mode: "dual", primary: "#5B6C8F", secondary: "#FF6F61" },
 ];
 
 export const ALL_PALETTES: PaletteSpec[] = [...MONO_PALETTES, ...DUAL_PALETTES];

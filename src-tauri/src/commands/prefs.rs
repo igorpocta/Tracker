@@ -55,6 +55,12 @@ pub const ALLOWED_ACCENTS: &[&str] = &[
     "forest",
     "plum",
     "rust",
+    // 2026 trend MONO palettes
+    "future-dusk",
+    "digital-lavender",
+    "butter-yellow",
+    "cherry-red",
+    "matcha",
     // Dual palettes
     "czech",
     "aurora-boreal",
@@ -67,6 +73,12 @@ pub const ALLOWED_ACCENTS: &[&str] = &[
     "deep-ocean",
     "royal-velvet",
     "forest-fire",
+    // 2026 trend DUAL palettes
+    "dusk-ember",
+    "matcha-clay",
+    "lavender-mint",
+    "butter-berry",
+    "slate-coral",
 ];
 /// Default palette mode.
 pub const DEFAULT_PALETTE_MODE: &str = "mono";
@@ -1082,5 +1094,29 @@ mod tests {
         let db = open_db();
         assert!(set_accent_color_inner(&db, "puce").is_err());
         assert!(set_accent_color_inner(&db, "").is_err());
+    }
+
+    #[test]
+    fn set_accent_accepts_2026_trend_palettes() {
+        let db = open_db();
+        for id in [
+            // 5 new MONO
+            "future-dusk",
+            "digital-lavender",
+            "butter-yellow",
+            "cherry-red",
+            "matcha",
+            // 5 new DUAL
+            "dusk-ember",
+            "matcha-clay",
+            "lavender-mint",
+            "butter-berry",
+            "slate-coral",
+        ] {
+            assert!(
+                set_accent_color_inner(&db, id).is_ok(),
+                "should accept {id}"
+            );
+        }
     }
 }
