@@ -25,7 +25,7 @@ Stáhněte balíček z [Releases](https://github.com/igorpocta/Tracker/releases)
 a nainstalujte:
 
 - **macOS** — `.dmg`
-- **Windows** — `.msi`
+- **Windows** — `.exe` (instalátor `Tracker_…-setup.exe`)
 
 Po prvním spuštění:
 

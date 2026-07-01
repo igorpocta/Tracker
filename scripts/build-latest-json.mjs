@@ -70,11 +70,11 @@ for (const [target, { platform, macArch }] of Object.entries(TARGETS)) {
     continue;
   }
 
-  // Locate the signed updater artifact for this target.
+  // Locate the signed updater artifact for this target. Windows ships NSIS
+  // only (the `-setup.exe`); MSI was dropped so install + auto-update use the
+  // same installer type and never produce a duplicate shortcut.
   const sig = files.find((f) =>
-    macArch
-      ? f.endsWith(".app.tar.gz.sig")
-      : f.endsWith("-setup.exe.sig") || f.endsWith(".msi.sig"),
+    macArch ? f.endsWith(".app.tar.gz.sig") : f.endsWith("-setup.exe.sig"),
   );
   if (!sig) {
     console.warn(`↪ no .sig for ${target} — skipping`);

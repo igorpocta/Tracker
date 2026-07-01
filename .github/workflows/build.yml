@@ -93,7 +93,10 @@ jobs:
           - label: Windows (x64)
             platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: msi,nsis
+            # NSIS only: the updater installs NSIS, so shipping MSI too meant an
+            # MSI-installed user got a second (NSIS) install + duplicate shortcut
+            # on first auto-update. One installer type end-to-end = no duplicate.
+            bundles: nsis
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -249,8 +252,6 @@ jobs:
         with:
           name: Tracker-${{ matrix.target }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
 
