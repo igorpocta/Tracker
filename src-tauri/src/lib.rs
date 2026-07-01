@@ -168,6 +168,17 @@ pub fn run() {
             }
             crate::tray_ticker::spawn(handle.clone());
 
+            // Windows: drop the native title bar — it clashes with Tracker's
+            // dark chrome. The frontend renders its own (`WindowTitlebar`:
+            // drag region + min/max/close). Keep the drop-shadow so the
+            // undecorated window still has a visual edge + resize border.
+            // macOS keeps its `Overlay` title bar (traffic lights) untouched.
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+                let _ = w.set_shadow(true);
+            }
+
             // Register the user's global timer-toggle shortcut. Best-effort:
             // when the combo is already held by another app (or the OS refuses
             // it) registration fails and we just log it — the Settings panel

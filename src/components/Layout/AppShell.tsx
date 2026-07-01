@@ -65,6 +65,7 @@ import { StopDialog } from "../Timer/TimerControls";
 import { CommandBar } from "./CommandBar";
 import { IconSidebar } from "./IconSidebar";
 import { StartTrackingBar } from "./StartTrackingBar";
+import { WindowTitlebar } from "./WindowTitlebar";
 import { UpdateBanner } from "../Updater/UpdateBanner";
 import { useUpdaterStore } from "../../stores/updaterStore";
 import { SyncBanner } from "./SyncBanner";
@@ -86,6 +87,16 @@ import { SyncBanner } from "./SyncBanner";
 const IS_MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+
+/**
+ * `true` on Windows. The native OS title bar is disabled there (see
+ * `lib.rs` → `set_decorations(false)`) because it clashes with the dark
+ * chrome, so we render our own `WindowTitlebar` (drag region + min/max/close)
+ * and reserve ~32px of top padding for it, mirroring the macOS Overlay setup.
+ */
+const IS_WINDOWS =
+  typeof navigator !== "undefined" &&
+  /Win/.test(navigator.platform || navigator.userAgent || "");
 
 export interface ShellOutletContext {
   pushToast: (
@@ -462,9 +473,10 @@ export function AppShell() {
 
   return (
     <div
-      className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}`}
+      className={`relative h-screen flex flex-col bg-[var(--bg-app)] text-[var(--text-primary)] ${IS_MAC ? "pt-7" : ""}${IS_WINDOWS ? " pt-8" : ""}`}
     >
       {IS_MAC && <DragStrip />}
+      {IS_WINDOWS && <WindowTitlebar />}
       <div className="flex-1 min-h-0 flex">
         <IconSidebar />
 
