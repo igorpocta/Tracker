@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 
 import { getEarningsVisible, setEarningsVisible } from "../../api/commands";
+import { useT } from "../../i18n";
 import { formatMoney } from "../../lib/format";
 
 export interface SummaryCardsProps {
@@ -21,14 +22,15 @@ export interface SummaryCardsProps {
 }
 
 export function SummaryCards(props: SummaryCardsProps) {
+  const t = useT();
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       {/* Celkový čas + Výdělek tvoří pár (primary/secondary accent) —
           čas vs peníze. Zbylé dvě karty zůstávají neutrální, aby
           hierarchii nezatáhly. */}
-      <BigStatCard label="Celkový čas" value={props.durationLabel} accented />
-      <BigStatCard label="Odpracovaných dní" value={`${props.daysWorked}`} />
-      <BigStatCard label="Dotčených úkolů" value={`${props.issuesTouched}`} />
+      <BigStatCard label={t("misc.summary.totalTime")} value={props.durationLabel} accented />
+      <BigStatCard label={t("misc.summary.daysWorked")} value={`${props.daysWorked}`} />
+      <BigStatCard label={t("misc.summary.issuesTouched")} value={`${props.issuesTouched}`} />
       <EarningsCard
         earnings={props.earnings}
         currency={props.currency}
@@ -70,6 +72,7 @@ function EarningsCard({
   currency: string;
   enabled: boolean;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const visQ = useQuery({
     queryKey: ["earnings-visible"],
@@ -91,12 +94,12 @@ function EarningsCard({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-4 relative">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] text-[var(--text-tertiary)]">Výdělek</div>
+        <div className="text-[11px] text-[var(--text-tertiary)]">{t("misc.summary.earnings")}</div>
         {enabled && (
           <button
             type="button"
             onClick={toggle}
-            aria-label={revealed ? "Skrýt výdělek" : "Zobrazit výdělek"}
+            aria-label={revealed ? t("misc.summary.hideEarnings") : t("misc.summary.showEarnings")}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]
                        transition-colors duration-150"
           >

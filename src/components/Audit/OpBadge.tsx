@@ -19,10 +19,11 @@ import {
 } from "lucide-react";
 
 import type { AuditOp } from "../../api/types";
+import { useT } from "../../i18n";
 
 interface OpVisual {
-  /** Czech label shown in the pill. */
-  label: string;
+  /** i18n key for the label shown in the pill. */
+  labelKey: string;
   /** Token name for the background tint and text color. */
   toneVar: string;
   /** Lucide icon. */
@@ -30,23 +31,23 @@ interface OpVisual {
 }
 
 const OP_VISUALS: Record<string, OpVisual> = {
-  create: { label: "Vytvořeno", toneVar: "--success", Icon: Plus },
-  update: { label: "Změněno", toneVar: "--accent", Icon: Pencil },
-  delete: { label: "Smazáno", toneVar: "--danger", Icon: Trash2 },
-  move: { label: "Přesunuto", toneVar: "--accent-2", Icon: ArrowLeftRight },
+  create: { labelKey: "audit.op.create", toneVar: "--success", Icon: Plus },
+  update: { labelKey: "audit.op.update", toneVar: "--accent", Icon: Pencil },
+  delete: { labelKey: "audit.op.delete", toneVar: "--danger", Icon: Trash2 },
+  move: { labelKey: "audit.op.move", toneVar: "--accent-2", Icon: ArrowLeftRight },
   sync_tombstone: {
-    label: "Smazáno mimo aplikaci",
+    labelKey: "audit.op.syncTombstone",
     toneVar: "--text-tertiary",
     Icon: History,
   },
-  restore: { label: "Obnoveno", toneVar: "--success", Icon: RotateCcw },
-  revert: { label: "Vráceno", toneVar: "--warning", Icon: CornerUpLeft },
-  retry: { label: "Opakováno", toneVar: "--accent", Icon: Check },
-  undo: { label: "Vráceno mazání", toneVar: "--text-secondary", Icon: CornerUpLeft },
+  restore: { labelKey: "audit.op.restore", toneVar: "--success", Icon: RotateCcw },
+  revert: { labelKey: "audit.op.revert", toneVar: "--warning", Icon: CornerUpLeft },
+  retry: { labelKey: "audit.op.retry", toneVar: "--accent", Icon: Check },
+  undo: { labelKey: "audit.op.undo", toneVar: "--text-secondary", Icon: CornerUpLeft },
 };
 
 const FALLBACK: OpVisual = {
-  label: "Akce",
+  labelKey: "audit.op.fallback",
   toneVar: "--text-tertiary",
   Icon: History,
 };
@@ -56,9 +57,11 @@ export interface OpBadgeProps {
 }
 
 export function OpBadge({ op }: OpBadgeProps) {
+  const t = useT();
   const v = OP_VISUALS[op] ?? FALLBACK;
   const tone = `var(${v.toneVar})`;
-  const { Icon, label } = v;
+  const { Icon, labelKey } = v;
+  const label = t(labelKey);
   return (
     <span
       className="inline-flex items-center gap-1 h-5 px-1.5 rounded-[var(--radius-sm)]

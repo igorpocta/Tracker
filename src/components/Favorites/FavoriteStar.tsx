@@ -15,6 +15,7 @@ import {
   removeFavorite,
 } from "../../api/commands";
 import { queryKeys } from "../../api/queryKeys";
+import { useT } from "../../i18n";
 
 export interface FavoriteStarProps {
   issueKey: string;
@@ -48,6 +49,7 @@ export function FavoriteStar({
   size = 14,
   className,
 }: FavoriteStarProps) {
+  const t = useT();
   const queryClient = useQueryClient();
   // Controlled iff `initial` was explicitly passed. We rely on
   // `initial === undefined` as the discriminator rather than a separate
@@ -87,8 +89,8 @@ export function FavoriteStar({
       type="button"
       onClick={toggle}
       aria-pressed={isFav}
-      aria-label={isFav ? "Odebrat z oblíbených" : "Přidat do oblíbených"}
-      title={isFav ? "Odebrat z oblíbených" : "Přidat do oblíbených"}
+      aria-label={isFav ? t("misc.favorite.remove") : t("misc.favorite.add")}
+      title={isFav ? t("misc.favorite.remove") : t("misc.favorite.add")}
       className={
         className ??
         "inline-flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors duration-150"

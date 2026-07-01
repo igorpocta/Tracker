@@ -11,6 +11,8 @@
  */
 import { clsx } from "clsx";
 
+import { useT } from "../../i18n";
+
 export type FilterKey = "all" | "delete" | "update" | "failed";
 
 export interface FilterPillsProps {
@@ -19,14 +21,15 @@ export interface FilterPillsProps {
   onChange: (next: Set<FilterKey>) => void;
 }
 
-const PILLS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "Vše" },
-  { key: "delete", label: "Smazáno" },
-  { key: "update", label: "Změněno" },
-  { key: "failed", label: "Selhalo" },
+const PILLS: { key: FilterKey; labelKey: string }[] = [
+  { key: "all", labelKey: "audit.filter.all" },
+  { key: "delete", labelKey: "audit.filter.delete" },
+  { key: "update", labelKey: "audit.filter.update" },
+  { key: "failed", labelKey: "audit.filter.failed" },
 ];
 
 export function FilterPills({ active, onChange }: FilterPillsProps) {
+  const t = useT();
   const handleClick = (key: FilterKey) => {
     if (key === "all") {
       onChange(new Set(["all"]));
@@ -47,7 +50,7 @@ export function FilterPills({ active, onChange }: FilterPillsProps) {
   return (
     <div
       role="group"
-      aria-label="Filtr historie"
+      aria-label={t("audit.filter.group")}
       className="inline-flex items-center gap-1 p-1 rounded-[var(--radius-md)]"
       style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
     >
@@ -75,7 +78,7 @@ export function FilterPills({ active, onChange }: FilterPillsProps) {
                   }
             }
           >
-            {p.label}
+            {t(p.labelKey)}
           </button>
         );
       })}

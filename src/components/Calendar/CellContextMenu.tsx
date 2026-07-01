@@ -19,6 +19,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+import { useT } from "../../i18n";
+
 export type NonWorkingReason = "vacation" | "holiday" | "personal";
 
 export interface CellContextMenuProps {
@@ -45,10 +47,10 @@ export interface CellContextMenuProps {
   onClose: () => void;
 }
 
-const REASONS: { value: NonWorkingReason; icon: string; label: string }[] = [
-  { value: "vacation", icon: "🏖", label: "Dovolená" },
-  { value: "holiday", icon: "🎉", label: "Svátek" },
-  { value: "personal", icon: "🙅", label: "Osobní" },
+const REASONS: { value: NonWorkingReason; icon: string; labelKey: string }[] = [
+  { value: "vacation", icon: "🏖", labelKey: "misc.cellMenu.reason.vacation" },
+  { value: "holiday", icon: "🎉", labelKey: "misc.cellMenu.reason.holiday" },
+  { value: "personal", icon: "🙅", labelKey: "misc.cellMenu.reason.personal" },
 ];
 
 export function CellContextMenu(props: CellContextMenuProps) {
@@ -63,6 +65,7 @@ export function CellContextMenu(props: CellContextMenuProps) {
     onClose,
   } = props;
 
+  const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
   /** When true the panel shows the reason sub-menu instead of the root items. */
   const [showReasonPicker, setShowReasonPicker] = useState(false);
@@ -101,7 +104,7 @@ export function CellContextMenu(props: CellContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      aria-label="Akce pro den"
+      aria-label={t("misc.cellMenu.aria")}
       data-testid="cell-context-menu"
       className="fixed z-50 min-w-[220px] py-1 rounded-[var(--radius-md)]"
       style={{
@@ -122,14 +125,14 @@ export function CellContextMenu(props: CellContextMenuProps) {
                 onClose();
               }}
             >
-              Označit jako pracovní den
+              {t("misc.cellMenu.markWorking")}
             </MenuItem>
           ) : (
             <MenuItem
               onClick={() => setShowReasonPicker(true)}
               hasChevron
             >
-              Označit jako nepracovní den
+              {t("misc.cellMenu.markNonWorking")}
             </MenuItem>
           )}
           <Separator />
@@ -139,7 +142,7 @@ export function CellContextMenu(props: CellContextMenuProps) {
               onClose();
             }}
           >
-            Detail dne
+            {t("misc.cellMenu.dayDetail")}
           </MenuItem>
         </>
       )}
@@ -150,7 +153,7 @@ export function CellContextMenu(props: CellContextMenuProps) {
             className="px-3 py-1 text-[10px] uppercase tracking-[0.12em]"
             style={{ color: "var(--text-tertiary)" }}
           >
-            Důvod
+            {t("misc.cellMenu.reason")}
           </div>
           {REASONS.map((r) => (
             <MenuItem
@@ -163,12 +166,12 @@ export function CellContextMenu(props: CellContextMenuProps) {
               <span className="mr-2" aria-hidden>
                 {r.icon}
               </span>
-              {r.label}
+              {t(r.labelKey)}
             </MenuItem>
           ))}
           <Separator />
           <MenuItem onClick={() => setShowReasonPicker(false)}>
-            ← Zpět
+            {t("misc.cellMenu.back")}
           </MenuItem>
         </>
       )}

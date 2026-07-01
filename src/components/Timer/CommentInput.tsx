@@ -4,6 +4,8 @@
  */
 import type { ChangeEvent } from "react";
 
+import { useT } from "../../i18n";
+
 export interface CommentInputProps {
   value: string;
   onChange: (next: string) => void;
@@ -18,12 +20,14 @@ export function CommentInput({
   onChange,
   id = "worklog-comment",
   disabled,
-  placeholder = "Co jste dělal/a? (volitelné)",
+  placeholder,
 }: CommentInputProps) {
+  const t = useT();
+  const resolvedPlaceholder = placeholder ?? t("worklog.comment.placeholder");
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-xs font-medium text-[var(--text-secondary)]">
-        Komentář
+        {t("worklog.comment.label")}
       </label>
       <textarea
         id={id}
@@ -31,7 +35,7 @@ export function CommentInput({
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
           onChange(e.target.value)
         }
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         disabled={disabled}
         rows={3}
         className="px-3 py-2 rounded-[var(--radius-md)]

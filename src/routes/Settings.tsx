@@ -16,6 +16,7 @@
 import { clsx } from "clsx";
 import { useSearchParams } from "react-router-dom";
 
+import { useT } from "../i18n";
 import About from "../components/Settings/About";
 import Appearance from "../components/Settings/Appearance";
 import Connection from "../components/Settings/Connection";
@@ -31,18 +32,19 @@ type TabId =
   | "appearance"
   | "about";
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: "connection", label: "Připojení" },
-  { id: "general", label: "Obecné" },
-  { id: "reporting", label: "Reporting" },
-  { id: "goals", label: "Cíle" },
-  { id: "appearance", label: "Vzhled" },
-  { id: "about", label: "O aplikaci" },
+const TABS: { id: TabId; labelKey: string }[] = [
+  { id: "connection", labelKey: "misc.settings.tab.connection" },
+  { id: "general", labelKey: "misc.settings.tab.general" },
+  { id: "reporting", labelKey: "misc.settings.tab.reporting" },
+  { id: "goals", labelKey: "misc.settings.tab.goals" },
+  { id: "appearance", labelKey: "misc.settings.tab.appearance" },
+  { id: "about", labelKey: "misc.settings.tab.about" },
 ];
 
 const TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
 
 export default function Settings() {
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab") ?? "connection";
   const active: TabId = TAB_IDS.has(raw as TabId) ? (raw as TabId) : "connection";
@@ -57,27 +59,27 @@ export default function Settings() {
     <div className="flex w-full h-full">
       {/* Internal sidebar ------------------------------------------------ */}
       <nav
-        aria-label="Sekce nastavení"
+        aria-label={t("misc.settings.navAria")}
         className="w-[220px] shrink-0 px-3 py-5 border-r border-[var(--border-subtle)]
                    flex flex-col gap-0.5"
       >
         <h2 className="text-sm font-semibold text-[var(--text-primary)] px-2 mb-2">
-          Nastavení
+          {t("misc.settings.title")}
         </h2>
-        {TABS.map((t) => (
+        {TABS.map((tab) => (
           <button
-            key={t.id}
+            key={tab.id}
             type="button"
-            onClick={() => setActive(t.id)}
+            onClick={() => setActive(tab.id)}
             className={clsx(
               "text-left px-2 h-8 rounded-[var(--radius-md)] text-sm",
               "transition-colors duration-150",
-              active === t.id
+              active === tab.id
                 ? "bg-[var(--bg-active)] text-[var(--text-primary)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
             )}
           >
-            {t.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </nav>

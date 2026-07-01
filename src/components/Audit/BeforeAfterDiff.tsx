@@ -12,6 +12,7 @@
  * has no "Po") the corresponding row is hidden entirely.
  */
 import type { WorklogRow } from "../../api/types";
+import { useT } from "../../i18n";
 import {
   formatClockTime,
   formatDurationShort,
@@ -35,14 +36,14 @@ export function BeforeAfterDiff({
     <div className="grid grid-cols-[60px_1fr] gap-y-1 text-[12px] mt-2">
       {before && (
         <Row
-          label="Před"
+          labelKey="audit.diff.before"
           row={before}
           changed={changed}
           variant="muted"
         />
       )}
       {after && (
-        <Row label="Po" row={after} changed={changed} variant="primary" />
+        <Row labelKey="audit.diff.after" row={after} changed={changed} variant="primary" />
       )}
       {!after && before && showMissingAsDeleted && (
         <DeletedRow />
@@ -74,16 +75,17 @@ function computeChanged(
 }
 
 function Row({
-  label,
+  labelKey,
   row,
   changed,
   variant,
 }: {
-  label: "Před" | "Po";
+  labelKey: "audit.diff.before" | "audit.diff.after";
   row: WorklogRow;
   changed: ChangedFlags;
   variant: "muted" | "primary";
 }) {
+  const t = useT();
   const textColor =
     variant === "muted" ? "var(--text-tertiary)" : "var(--text-primary)";
   const start = new Date(row.started_at * 1000);
@@ -94,7 +96,7 @@ function Row({
         className="text-[10px] uppercase tracking-[0.06em] pt-0.5"
         style={{ color: "var(--text-tertiary)" }}
       >
-        {label}:
+        {t(labelKey)}:
       </span>
       <div className="flex items-center gap-2 flex-wrap" style={{ color: textColor }}>
         <Cell highlight={changed.duration} className="font-mono tabular-nums">
@@ -128,19 +130,20 @@ function Row({
 }
 
 function DeletedRow() {
+  const t = useT();
   return (
     <>
       <span
         className="text-[10px] uppercase tracking-[0.06em] pt-0.5"
         style={{ color: "var(--text-tertiary)" }}
       >
-        Po:
+        {t("audit.diff.after")}:
       </span>
       <span
         className="text-[12px]"
         style={{ color: "var(--text-tertiary)", fontStyle: "italic" }}
       >
-        — (smazáno)
+        {t("audit.diff.deleted")}
       </span>
     </>
   );

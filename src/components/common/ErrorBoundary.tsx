@@ -13,6 +13,9 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { translate } from "../../i18n";
+import { usePrefsStore } from "../../stores/prefsStore";
+
 interface ErrorBoundaryProps {
   /** Children to render when no error has been captured. */
   children: ReactNode;
@@ -59,16 +62,19 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return this.props.fallback(error, this.reset);
     }
 
+    const lang = usePrefsStore.getState().language;
+
     return (
       <div
         role="alert"
         className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-app)] text-[var(--text-primary)]"
       >
         <div className="max-w-md w-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 shadow-[var(--shadow-md)]">
-          <h1 className="text-lg font-semibold mb-2">Něco se nepovedlo</h1>
+          <h1 className="text-lg font-semibold mb-2">
+            {translate(lang, "common.error.title")}
+          </h1>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
-            Tracker narazil na neočekávanou chybu a nemůže pokračovat.
-            Načtení okna obvykle pomůže.
+            {translate(lang, "common.error.body")}
           </p>
           {error.message && (
             <pre className="text-xs text-[var(--text-tertiary)] bg-[var(--bg-app)] rounded-[var(--radius-sm)] p-3 mb-4 overflow-auto max-h-32 border border-[var(--border-subtle)]">
@@ -81,14 +87,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               onClick={this.reset}
               className="h-8 px-3 text-xs rounded-[var(--radius-md)] border border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
             >
-              Zkusit znovu
+              {translate(lang, "common.error.tryAgain")}
             </button>
             <button
               type="button"
               onClick={this.reload}
               className="h-8 px-3 text-xs rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--accent-text)]"
             >
-              Načíst znovu
+              {translate(lang, "common.error.reload")}
             </button>
           </div>
         </div>

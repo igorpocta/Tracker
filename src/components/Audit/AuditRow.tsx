@@ -10,6 +10,7 @@
 import { Check, X } from "lucide-react";
 
 import type { AuditEntry, WorklogRow } from "../../api/types";
+import { useT, type TFunc } from "../../i18n";
 import { ConfirmButton } from "../common/ConfirmButton";
 import { formatClockTime } from "../../lib/format";
 
@@ -104,6 +105,7 @@ function StatusIndicator({
   success: boolean;
   error?: string | null;
 }) {
+  const t = useT();
   if (success) {
     return (
       <span
@@ -111,7 +113,7 @@ function StatusIndicator({
         style={{ color: "var(--success)" }}
       >
         <Check className="w-3 h-3" aria-hidden />
-        Úspěšně
+        {t("audit.status.success")}
       </span>
     );
   }
@@ -121,7 +123,9 @@ function StatusIndicator({
       style={{ color: "var(--danger)" }}
     >
       <X className="w-3 h-3" aria-hidden />
-      Selhalo{error ? `: ${error}` : ""}
+      {error
+        ? t("audit.status.failedWithError", { error })
+        : t("audit.status.failed")}
     </span>
   );
 }
@@ -141,12 +145,13 @@ function ActionButtons({
   onRevert?: (e: AuditEntry) => Promise<void> | void;
   onRetry?: (e: AuditEntry) => Promise<void> | void;
 }) {
+  const t = useT();
   // Failed → retry button trumps everything.
   if (!entry.success) {
     return (
       <ConfirmButton
-        label="Zkusit znovu"
-        confirmLabel="Opakovat"
+        label={t("audit.action.retry")}
+        confirmLabel={t("audit.action.retryConfirm")}
         variant="secondary"
         disabled={busy}
         onConfirm={async () => {
@@ -161,15 +166,17 @@ function ActionButtons({
         className="text-[10px] italic"
         style={{ color: "var(--text-tertiary)" }}
       >
-        Již obnoveno
+        {t("audit.action.alreadyRestored")}
       </span>
     );
   }
   if (entry.op === "delete" || entry.op === "sync_tombstone") {
     return (
       <ConfirmButton
-        label={`Obnovit ${providerLocative(entry.issue_key)}`}
-        confirmLabel="Obnovit"
+        label={t("audit.action.restore", {
+          where: providerLocative(entry.issue_key, t),
+        })}
+        confirmLabel={t("audit.action.restoreConfirm")}
         variant="primary"
         disabled={busy}
         onConfirm={async () => {
@@ -181,8 +188,8 @@ function ActionButtons({
   if (entry.op === "update") {
     return (
       <ConfirmButton
-        label="Vrátit změnu"
-        confirmLabel="Vrátit"
+        label={t("audit.action.revert")}
+        confirmLabel={t("audit.action.revertConfirm")}
         variant="secondary"
         disabled={busy}
         onConfirm={async () => {
@@ -199,10 +206,10 @@ function ActionButtons({
  * "v Jiře" / "ve Freelu". Pro neznámý prefix (nebo NULL klíč) padá na
  * obecné "v cloudu", ať tlačítko zůstane gramaticky čitelné.
  */
-function providerLocative(issueKey?: string | null): string {
-  if (!issueKey) return "v cloudu";
-  if (issueKey.startsWith("FREELO-")) return "ve Freelu";
-  return "v Jiře";
+function providerLocative(issueKey: string | null | undefined, t: TFunc): string {
+  if (!issueKey) return t("audit.provider.cloud");
+  if (issueKey.startsWith("FREELO-")) return t("audit.provider.freelo");
+  return t("audit.provider.jira");
 }
 
 function parseRow(s: string | null | undefined): WorklogRow | null {

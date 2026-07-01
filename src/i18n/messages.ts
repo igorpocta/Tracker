@@ -12,8 +12,11 @@
  * `export const <ns> = { cs: {...}, en: {...} } as const;`, then import it here
  * and spread it into `cs` / `en` below.
  */
+import { audit } from "./messages/audit";
+import { common } from "./messages/common";
 import { connections } from "./messages/connections";
 import { layout } from "./messages/layout";
+import { misc } from "./messages/misc";
 import { nav } from "./messages/nav";
 import { reports } from "./messages/reports";
 import { routes } from "./messages/routes";
@@ -24,6 +27,7 @@ import { settingsMisc } from "./messages/settingsMisc";
 import { setup } from "./messages/setup";
 import { timeLog } from "./messages/timeLog";
 import { timer } from "./messages/timer";
+import { worklog } from "./messages/worklog";
 
 export type Language = "cs" | "en";
 
@@ -47,6 +51,10 @@ const NAMESPACES = [
   layout,
   timer,
   setup,
+  audit,
+  worklog,
+  misc,
+  common,
 ];
 
 const cs: Catalogue = Object.assign({}, ...NAMESPACES.map((n) => n.cs));

@@ -14,9 +14,11 @@ import { useEffect, useRef } from "react";
 
 import { getPomodoroConfig } from "../api/commands";
 import { queryKeys } from "../api/queryKeys";
+import { useT } from "../i18n";
 import { useTimerStore } from "../stores/timerStore";
 
 export function usePomodoroTimer() {
+  const t = useT();
   const active = useTimerStore((s) => s.active);
   const cfgQ = useQuery({
     queryKey: queryKeys.pomodoroConfig.all(),
@@ -50,15 +52,18 @@ export function usePomodoroTimer() {
 
     workTimerRef.current = window.setTimeout(() => {
       notify(
-        "Pomodoro · čas na pauzu",
-        `Dokončen ${cfg.work_min}min cyklus. Odpočiň ${cfg.break_min} min.`,
+        t("common.pomodoro.breakTitle"),
+        t("common.pomodoro.breakBody", {
+          workMin: cfg.work_min,
+          breakMin: cfg.break_min,
+        }),
       );
 
       breakTimerRef.current = window.setTimeout(
         () => {
           notify(
-            "Pomodoro · zpět do práce",
-            `Konec pauzy. Další ${cfg.work_min}min cyklus se nepustí sám — kdyžtak prodluž.`,
+            t("common.pomodoro.workTitle"),
+            t("common.pomodoro.workBody", { workMin: cfg.work_min }),
           );
         },
         cfg.break_min * 60_000,
@@ -66,7 +71,7 @@ export function usePomodoroTimer() {
     }, remaining);
 
     return clear;
-  }, [active, cfgQ.data]);
+  }, [active, cfgQ.data, t]);
 }
 
 /**

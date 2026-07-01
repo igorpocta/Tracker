@@ -12,7 +12,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { useT } from "../../i18n";
+
 export function WindowTitlebar() {
+  const t = useT();
   const [maximized, setMaximized] = useState(false);
 
   // Keep the maximize/restore affordance in sync with the actual window state.
@@ -54,7 +57,7 @@ export function WindowTitlebar() {
 
   return (
     <div
-      aria-label="Titulní lišta okna"
+      aria-label={t("common.titlebar.label")}
       onMouseDown={onMouseDown}
       data-tauri-drag-region
       className="fixed top-0 left-0 right-0 h-8 z-[9999] flex items-center
@@ -76,16 +79,20 @@ export function WindowTitlebar() {
           { WebkitAppRegion: "no-drag", appRegion: "no-drag" } as React.CSSProperties
         }
       >
-        <TitlebarButton label="Minimalizovat" onClick={minimize}>
+        <TitlebarButton label={t("common.titlebar.minimize")} onClick={minimize}>
           <Minus className="w-3.5 h-3.5" aria-hidden />
         </TitlebarButton>
         <TitlebarButton
-          label={maximized ? "Obnovit" : "Maximalizovat"}
+          label={
+            maximized
+              ? t("common.titlebar.restore")
+              : t("common.titlebar.maximize")
+          }
           onClick={toggleMax}
         >
           <Square className="w-3 h-3" aria-hidden />
         </TitlebarButton>
-        <TitlebarButton label="Zavřít" danger onClick={close}>
+        <TitlebarButton label={t("common.titlebar.close")} danger onClick={close}>
           <X className="w-4 h-4" aria-hidden />
         </TitlebarButton>
       </div>

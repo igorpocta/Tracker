@@ -12,6 +12,7 @@
  *  │ Tempo: budete 87 h pod cílem                                      │
  *  └────────────────────────────────────────────────────────────────────┘
  */
+import { useT } from "../../i18n";
 import { formatDurationShort } from "../../lib/format";
 
 export interface GoalsPredictionProps {
@@ -31,6 +32,7 @@ export function GoalsPrediction({
   workingDaysElapsed,
   workingDaysRemaining,
 }: GoalsPredictionProps) {
+  const t = useT();
   const avgPerWorkingDay =
     workingDaysElapsed > 0 ? actualSeconds / workingDaysElapsed : 0;
   const predictedAdditional = Math.round(avgPerWorkingDay * workingDaysRemaining);
@@ -44,19 +46,23 @@ export function GoalsPrediction({
     <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)]
                     bg-[var(--bg-surface)] p-5">
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-        Predikce konce měsíce
+        {t("misc.prediction.heading")}
       </h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-xs">
         <Row
-          label="Průměr letošního měsíce"
-          value={`${formatDurationShort(Math.round(avgPerWorkingDay))} / den`}
+          label={t("misc.prediction.avgLabel")}
+          value={t("misc.prediction.avgValue", {
+            duration: formatDurationShort(Math.round(avgPerWorkingDay)),
+          })}
         />
         <Row
-          label="Zbývá"
-          value={`${workingDaysRemaining} pracovních dnů`}
+          label={t("misc.prediction.remainingLabel")}
+          value={t("misc.prediction.remainingValue", {
+            days: workingDaysRemaining,
+          })}
         />
         <Row
-          label="Predikce"
+          label={t("misc.prediction.predictionLabel")}
           value={
             <span className="font-mono tabular-nums">
               {formatDurationShort(actualSeconds)} +{" "}
@@ -65,13 +71,15 @@ export function GoalsPrediction({
                 {formatDurationShort(predictedTotal)}
               </span>{" "}
               <span className="text-[var(--text-tertiary)]">
-                (cíl {formatDurationShort(monthlyGoalSeconds)})
+                {t("misc.prediction.goalSuffix", {
+                  duration: formatDurationShort(monthlyGoalSeconds),
+                })}
               </span>
             </span>
           }
         />
         <Row
-          label="Tempo"
+          label={t("misc.prediction.paceLabel")}
           value={
             <span
               className="font-medium"
@@ -85,10 +93,14 @@ export function GoalsPrediction({
               }}
             >
               {diffVsGoal === 0
-                ? "přesně na cíl"
+                ? t("misc.prediction.onTarget")
                 : diffVsGoal < 0
-                  ? `budete ${formatDurationShort(Math.abs(diffVsGoal))} pod cílem`
-                  : `budete ${formatDurationShort(diffVsGoal)} nad cílem`}
+                  ? t("misc.prediction.under", {
+                      duration: formatDurationShort(Math.abs(diffVsGoal)),
+                    })
+                  : t("misc.prediction.over", {
+                      duration: formatDurationShort(diffVsGoal),
+                    })}
             </span>
           }
         />

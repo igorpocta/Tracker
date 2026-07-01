@@ -8,6 +8,8 @@
 import { clsx } from "clsx";
 import { useEffect, useState } from "react";
 
+import { useT } from "../../i18n";
+
 import { Button, type ButtonVariant } from "./Button";
 
 export interface ConfirmButtonProps {
@@ -29,14 +31,17 @@ export interface ConfirmButtonProps {
 
 export function ConfirmButton({
   label,
-  confirmLabel = "Potvrdit",
-  cancelLabel = "Zrušit",
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   variant = "danger",
   disabled = false,
   autoResetMs = 5000,
   className,
 }: ConfirmButtonProps) {
+  const t = useT();
+  const resolvedConfirmLabel = confirmLabel ?? t("common.confirm.confirm");
+  const resolvedCancelLabel = cancelLabel ?? t("common.confirm.cancel");
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -77,7 +82,7 @@ export function ConfirmButton({
           }
         }}
       >
-        {confirmLabel}
+        {resolvedConfirmLabel}
       </Button>
       <Button
         variant="secondary"
@@ -85,7 +90,7 @@ export function ConfirmButton({
         disabled={busy}
         onClick={() => setArmed(false)}
       >
-        {cancelLabel}
+        {resolvedCancelLabel}
       </Button>
     </div>
   );

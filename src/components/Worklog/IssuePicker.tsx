@@ -17,6 +17,7 @@ import { useCallback, useRef, useState } from "react";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
 import { useIssueSearch } from "../../hooks/useIssueSearch";
+import { useT } from "../../i18n";
 
 const LIMIT = 12;
 
@@ -49,6 +50,7 @@ export function IssuePicker({
   renderTrigger,
   className = "relative shrink-0",
 }: IssuePickerProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -85,7 +87,7 @@ export function IssuePicker({
           type="button"
           onClick={toggle}
           disabled={disabled || busy}
-          title="Přiřadit úkol k záznamu"
+          title={t("worklog.picker.assignTitle")}
           className="inline-flex items-center gap-1 px-2 h-6 rounded-full
                      font-mono text-[10px] uppercase tracking-[0.08em]
                      border border-dashed text-[var(--text-tertiary)]
@@ -95,7 +97,7 @@ export function IssuePicker({
           style={{ borderColor: "var(--border-default)" }}
         >
           <Plus className="w-3 h-3" aria-hidden />
-          Přiřadit úkol
+          {t("worklog.picker.assign")}
         </button>
       )}
 
@@ -113,7 +115,7 @@ export function IssuePicker({
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Hledat úkol…"
+              placeholder={t("worklog.picker.searchPlaceholder")}
               className="w-full h-8 px-2 rounded-[var(--radius-sm)]
                          bg-transparent border border-[var(--border-subtle)]
                          text-xs text-[var(--text-primary)]
@@ -122,14 +124,14 @@ export function IssuePicker({
           </div>
           {debounced.length === 0 && results.length > 0 && (
             <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Naposledy trackováno
+              {t("worklog.picker.recent")}
             </div>
           )}
           {results.length === 0 && (
             <div className="px-3 py-3 text-xs text-[var(--text-tertiary)]">
               {debounced.length === 0
-                ? "Začni psát pro vyhledání úkolu."
-                : "Žádné odpovídající úkoly."}
+                ? t("worklog.picker.startTyping")
+                : t("worklog.picker.noMatches")}
             </div>
           )}
           {results.map((iss) => (
@@ -147,7 +149,7 @@ export function IssuePicker({
                 {iss.issue_key}
               </span>
               <span className="truncate flex-1 text-[var(--text-primary)]">
-                {iss.summary || "(bez názvu)"}
+                {iss.summary || t("worklog.picker.noName")}
               </span>
             </button>
           ))}

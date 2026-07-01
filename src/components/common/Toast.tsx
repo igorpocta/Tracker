@@ -11,6 +11,8 @@
 import { AlertCircle, CheckCircle2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useT } from "../../i18n";
+
 export type ToastVariant = "success" | "error" | "info";
 
 /** Optional undo affordance shown next to the close icon. */
@@ -59,6 +61,7 @@ function ToastItem({
   toast: Toast;
   onDismiss: (id: number) => void;
 }) {
+  const t = useT();
   const ttl = toast.ttlMs ?? 4000;
   // Countdown for the undo affordance (e.g. "Vrátit (4)"). Updates every 1s.
   const [secondsLeft, setSecondsLeft] = useState(Math.ceil(ttl / 1000));
@@ -121,7 +124,7 @@ function ToastItem({
         type="button"
         onClick={() => onDismiss(toast.id)}
         className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-        aria-label="Zavřít"
+        aria-label={t("common.toast.close")}
       >
         <X className="w-3.5 h-3.5" aria-hidden />
       </button>

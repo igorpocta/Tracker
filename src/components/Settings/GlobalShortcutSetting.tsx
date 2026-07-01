@@ -14,6 +14,7 @@ import {
   setGlobalShortcut,
   type GlobalShortcutStatus,
 } from "../../api/commands";
+import { useT } from "../../i18n";
 import {
   DEFAULT_GLOBAL_SHORTCUT,
   eventToAccelerator,
@@ -29,6 +30,7 @@ export interface GlobalShortcutSettingProps {
 }
 
 export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps) {
+  const t = useT();
   const [status, setStatus] = useState<GlobalShortcutStatus | null>(null);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -55,21 +57,18 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
         const next = await setGlobalShortcut(accelerator);
         setStatus(next);
         if (!next.registered && next.accelerator.trim().length > 0) {
-          pushToast?.(
-            "error",
-            "Zkratka je nejspíš obsazená jinou aplikací — zkuste jinou.",
-          );
+          pushToast?.("error", t("common.shortcut.taken"));
         }
       } catch (e) {
         pushToast?.(
           "error",
-          typeof e === "string" ? e : "Zkratku se nepodařilo uložit.",
+          typeof e === "string" ? e : t("common.shortcut.saveFailed"),
         );
       } finally {
         setBusy(false);
       }
     },
-    [pushToast],
+    [pushToast, t],
   );
 
   // While recording, capture the next key combo from anywhere in the window.
@@ -104,9 +103,9 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
                      bg-[var(--bg-hover)] text-[var(--text-primary)]"
         >
           {recording
-            ? "Stiskněte kombinaci…"
+            ? t("common.shortcut.press")
             : isDisabled
-              ? "Vypnuto"
+              ? t("common.shortcut.disabled")
               : prettifyAccelerator(accelerator, IS_MAC)}
         </kbd>
 
@@ -125,7 +124,7 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
                        text-[var(--text-secondary)] border border-[var(--border-default)]
                        hover:bg-[var(--bg-hover)] transition-colors duration-150"
           >
-            Zrušit
+            {t("common.shortcut.cancel")}
           </button>
         ) : (
           <button
@@ -137,7 +136,7 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
                        hover:bg-[var(--bg-hover)] transition-colors duration-150
                        disabled:opacity-60"
           >
-            Změnit
+            {t("common.shortcut.change")}
           </button>
         )}
 
@@ -149,7 +148,7 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
                      text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]
                      transition-colors duration-150 disabled:opacity-60"
         >
-          Obnovit výchozí
+          {t("common.shortcut.resetDefault")}
         </button>
 
         {!isDisabled && (
@@ -161,7 +160,7 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
                        text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]
                        transition-colors duration-150 disabled:opacity-60"
           >
-            Vypnout
+            {t("common.shortcut.disable")}
           </button>
         )}
       </div>
@@ -172,14 +171,12 @@ export function GlobalShortcutSetting({ pushToast }: GlobalShortcutSettingProps)
           className="flex items-center gap-1.5 text-xs text-[var(--danger)]"
         >
           <TriangleAlert className="w-3.5 h-3.5 shrink-0" aria-hidden />
-          Zkratka není aktivní — nejspíš ji drží jiná aplikace. Zvolte jinou
-          kombinaci.
+          {t("common.shortcut.notActive")}
         </p>
       )}
 
       <p className="text-[11px] text-[var(--text-tertiary)]">
-        Spustí nebo zastaví časovač odkudkoli v systému — i když je okno
-        Trackeru skryté. Při spuštění bez úkolu se založí nepřiřazený záznam.
+        {t("common.shortcut.hint")}
       </p>
     </div>
   );

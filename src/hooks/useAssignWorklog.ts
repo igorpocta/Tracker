@@ -15,6 +15,7 @@ import { assignWorklogIssue } from "../api/commands";
 import { invalidateWorklogQueries } from "../api/queryKeys";
 import type { WorklogRow } from "../api/types";
 import type { ShellOutletContext } from "../components/Layout/AppShell";
+import { useT } from "../i18n";
 
 export type AssignWorklogFn = (
   row: WorklogRow,
@@ -29,6 +30,7 @@ export type AssignWorklogFn = (
 export function useAssignWorklog(
   pushToast?: ShellOutletContext["pushToast"],
 ): AssignWorklogFn {
+  const t = useT();
   const queryClient = useQueryClient();
   return useCallback(
     async (row: WorklogRow, issueKey: string) => {
@@ -36,14 +38,14 @@ export function useAssignWorklog(
       try {
         await assignWorklogIssue(row.id, issueKey);
         invalidateWorklogQueries(queryClient);
-        pushToast?.("success", `Záznam přiřazen na ${issueKey}.`);
+        pushToast?.("success", t("worklog.assign.success", { issueKey }));
       } catch (e) {
         pushToast?.(
           "error",
-          typeof e === "string" ? e : "Přiřazení úkolu selhalo.",
+          typeof e === "string" ? e : t("worklog.assign.error"),
         );
       }
     },
-    [pushToast, queryClient],
+    [pushToast, queryClient, t],
   );
 }

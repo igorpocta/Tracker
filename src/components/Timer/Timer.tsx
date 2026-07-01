@@ -9,6 +9,7 @@
 import { clsx } from "clsx";
 
 import { useNow } from "../../hooks/useNow";
+import { useT } from "../../i18n";
 import { formatDuration } from "../../lib/format";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
@@ -18,6 +19,7 @@ export interface TimerProps {
 }
 
 export function Timer({ className }: TimerProps) {
+  const t = useT();
   const active = useTimerStore((s) => s.active);
   const now = useNow(active ? 1000 : 60_000);
   const elapsed = elapsedSeconds(active, now);
@@ -31,7 +33,7 @@ export function Timer({ className }: TimerProps) {
         className,
       )}
       aria-live="polite"
-      aria-label={running ? `Uplynulý čas ${formatDuration(elapsed)}` : "Časomíra neběží"}
+      aria-label={running ? t("worklog.timer.elapsed", { duration: formatDuration(elapsed) }) : t("worklog.timer.notRunning")}
     >
       {running ? formatDuration(elapsed) : "--:--:--"}
     </div>

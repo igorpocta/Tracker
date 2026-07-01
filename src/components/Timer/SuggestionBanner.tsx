@@ -17,12 +17,14 @@ import {
   type Suggestion,
 } from "../../api/commands";
 import type { ShellOutletContext } from "../Layout/AppShell";
+import { useT } from "../../i18n";
 import { formatIsoDate } from "../../lib/dates";
 import { useTimerStore } from "../../stores/timerStore";
 
 const DISMISS_KEY_PREFIX = "tracker.suggestion.dismissed:";
 
 export function SuggestionBanner() {
+  const t = useT();
   // `null` outside a router outlet (unit tests / web preview).
   const ctx = useOutletContext<ShellOutletContext | null>();
   const active = useTimerStore((s) => s.active);
@@ -80,7 +82,7 @@ export function SuggestionBanner() {
     } catch (e) {
       ctx?.pushToast?.(
         "error",
-        typeof e === "string" ? e : "Nepodařilo se spustit časomíru.",
+        typeof e === "string" ? e : t("worklog.suggestion.startFailed"),
       );
     }
   };
@@ -110,13 +112,16 @@ export function SuggestionBanner() {
       />
       <div className="flex-1 min-w-0 text-xs">
         <span className="text-[var(--text-primary)]">
-          Začít{" "}
+          {t("worklog.suggestion.start")}{" "}
           <span className="font-mono font-semibold">{top.issue_key}</span>
           {top.summary ? ` — ${top.summary}` : ""}?
         </span>
         <span className="text-[var(--text-tertiary)] ml-1">
-          (před tím v {labelHour(top.bucket_hour)} {top.occurrences}× v
-          posledních 14 dnech)
+          {" "}
+          {t("worklog.suggestion.context", {
+            hour: labelHour(top.bucket_hour),
+            count: top.occurrences,
+          })}
         </span>
       </div>
       <button
@@ -130,13 +135,13 @@ export function SuggestionBanner() {
         }}
       >
         <Play className="w-3 h-3" aria-hidden />
-        Spustit
+        {t("worklog.suggestion.run")}
       </button>
       <button
         type="button"
         onClick={handleDismiss}
-        title="Skrýt pro dnešek"
-        aria-label="Skrýt"
+        title={t("worklog.suggestion.dismissTitle")}
+        aria-label={t("worklog.suggestion.dismiss")}
         className="h-7 w-7 rounded-[var(--radius-sm)] flex items-center justify-center
                    text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]
                    transition-colors duration-150"
