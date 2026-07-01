@@ -48,7 +48,12 @@ import type {
   PaletteMode,
   ThemePref,
 } from "../api/types";
-import { applyPalette, DEFAULT_PALETTE_ID, isDualPalette } from "../lib/accent";
+import {
+  ALL_PALETTES,
+  applyPalette,
+  DEFAULT_PALETTE_ID,
+  isDualPalette,
+} from "../lib/accent";
 
 export const DEFAULT_DAILY_GOAL_SECONDS = 8 * 60 * 60;
 export const DEFAULT_HOURLY_RATE = 0;
@@ -188,8 +193,11 @@ function writeWidgetFormat(f: WidgetFormat): void {
   }
 }
 
-const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
-  // Legacy hues
+/**
+ * Legacy Phase 11–12 hues the backend still accepts for backwards
+ * compatibility but which are no longer offered in the palette picker.
+ */
+const LEGACY_HUES = [
   "blue",
   "indigo",
   "violet",
@@ -200,32 +208,19 @@ const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
   "green",
   "teal",
   "graphite",
-  // Mono palettes
-  "aurora",
-  "trcker",
-  "love",
-  "halloween",
-  // Phase 18B — Item 16: new MONO palettes
-  "mocha",
-  "electric",
-  "forest",
-  "plum",
-  "rust",
-  // Dual palettes
-  "czech",
-  "aurora-boreal",
-  "sakura-night",
-  "cyber-lime",
-  "nordic-fjord",
-  // 2026 additions
-  "tokyo-night",
-  "sunset-drive",
-  "deep-ocean",
-  "royal-velvet",
-  "forest-fire",
+] as const;
+
+/**
+ * Every accent the app recognises. Derived from the canonical palette list in
+ * `accent.ts` (plus the legacy hues) so adding a palette there can never again
+ * silently fall through hydration back to the default.
+ */
+const KNOWN_ACCENTS: ReadonlySet<string> = new Set<string>([
+  ...LEGACY_HUES,
+  ...ALL_PALETTES.map((p) => p.id),
 ]);
 
-function isAccentId(v: string): v is AccentColor {
+export function isAccentId(v: string): v is AccentColor {
   return KNOWN_ACCENTS.has(v);
 }
 

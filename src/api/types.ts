@@ -262,7 +262,19 @@ export type AccentColor =
   | "sunset-drive"
   | "deep-ocean"
   | "royal-velvet"
-  | "forest-fire";
+  | "forest-fire"
+  // 2026 trend MONO palettes
+  | "future-dusk"
+  | "digital-lavender"
+  | "butter-yellow"
+  | "cherry-red"
+  | "matcha"
+  // 2026 trend DUAL palettes
+  | "dusk-ember"
+  | "matcha-clay"
+  | "lavender-mint"
+  | "butter-berry"
+  | "slate-coral";
 
 /**
  * Color palette mode — Mono (single primary) or Dual (primary + secondary).
