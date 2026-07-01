@@ -108,32 +108,30 @@ describe("NonWorkingDaysList", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("paginates at 30 rows per page and advances to the next page", async () => {
-    // 45 entries with unique dates (Jan + Feb 2026) and labels starting from
-    // 100 to avoid prefix collisions (e.g. "Vac-1" matching "Vac-15").
-    const days = Array.from({ length: 45 }, (_, i) => {
-      const day = (i % 28) + 1;
-      const month = Math.floor(i / 28) + 1;
-      return {
-        date: `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-        reason: "personal",
-        label: `Vac-${i + 100}`,
-        created_at: i,
-      };
-    });
+  it("sorts by date descending and paginates at 20 rows per page", async () => {
+    // 25 entries, dates 2026-02-01 … 2026-02-25 (ascending with index i);
+    // labels zero-padded so substring matchers can't collide (Day-05 ≠ Day-15).
+    const days = Array.from({ length: 25 }, (_, i) => ({
+      date: `2026-02-${String(i + 1).padStart(2, "0")}`,
+      reason: "personal",
+      label: `Day-${String(i).padStart(2, "0")}`,
+      created_at: i,
+    }));
     mockInvoke.mockResolvedValueOnce(days);
 
     const user = userEvent.setup();
     renderList();
 
-    // First page: 30 entries (Vac-100 … Vac-129) visible, Vac-130 not yet.
-    // Labels render as `— Vac-NNN` inside their span, so use regex matchers
-    // (substring) — exact-mode would need the surrounding "— " too.
-    await screen.findByText(/Vac-100/);
-    expect(screen.getByText(/Vac-129/)).toBeInTheDocument();
-    expect(screen.queryByText(/Vac-130/)).not.toBeInTheDocument();
+    // Descending: the newest date (25.02) is the FIRST row.
+    await screen.findByText("25.02.2026");
+    const dates = screen.getAllByText(/^\d{2}\.\d{2}\.2026$/);
+    expect(dates[0].textContent).toBe("25.02.2026");
 
-    // Pagination nav present, page indicator says "1 / 2".
+    // Page 1 = the 20 newest (Day-24 … Day-05); Day-04 is on page 2.
+    expect(screen.getByText(/Day-24/)).toBeInTheDocument();
+    expect(screen.getByText(/Day-05/)).toBeInTheDocument();
+    expect(screen.queryByText(/Day-04/)).not.toBeInTheDocument();
+
     expect(
       screen.getByRole("navigation", { name: /Stránkování/ }),
     ).toBeInTheDocument();
@@ -141,9 +139,27 @@ describe("NonWorkingDaysList", () => {
 
     await user.click(screen.getByRole("button", { name: /Další/ }));
 
-    // Second page: Vac-130 onward, Vac-100 gone.
-    await screen.findByText(/Vac-130/);
-    expect(screen.queryByText(/Vac-100/)).not.toBeInTheDocument();
+    // Page 2 = the 5 oldest (Day-04 … Day-00); 01.02 is the last date.
+    await screen.findByText(/Day-00/);
+    expect(screen.getByText("01.02.2026")).toBeInTheDocument();
+    expect(screen.queryByText(/Day-24/)).not.toBeInTheDocument();
     expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument();
+  });
+
+  it("hides pagination at exactly 20 rows (≤ 20 shows no pager)", async () => {
+    const days = Array.from({ length: 20 }, (_, i) => ({
+      date: `2026-02-${String(i + 1).padStart(2, "0")}`,
+      reason: "personal",
+      label: `Day-${String(i).padStart(2, "0")}`,
+      created_at: i,
+    }));
+    mockInvoke.mockResolvedValueOnce(days);
+
+    renderList();
+
+    await screen.findByText(/Day-00/);
+    expect(
+      screen.queryByRole("navigation", { name: /Stránkování/ }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -53,7 +53,7 @@ function weekdayFor(iso: string): string {
   return WEEKDAYS_SHORT[dt.getDay()];
 }
 
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 20;
 
 export function NonWorkingDaysList() {
   const queryClient = useQueryClient();
@@ -89,7 +89,12 @@ export function NonWorkingDaysList() {
     queryClient.invalidateQueries({ queryKey: queryKeys.nonWorkingDays.all() });
   };
 
-  const days: NonWorkingDay[] = q.data ?? [];
+  // Sort by date descending (newest first). Dates are ISO `YYYY-MM-DD`, so a
+  // plain string compare is chronological.
+  const days: NonWorkingDay[] = useMemo(
+    () => [...(q.data ?? [])].sort((a, b) => b.date.localeCompare(a.date)),
+    [q.data],
+  );
   const totalPages = Math.max(1, Math.ceil(days.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageDays = days.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
