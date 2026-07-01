@@ -38,6 +38,8 @@ pub fn run() {
         // plugin for the explicit "restart & finish" step after a download.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // System-wide shortcut to toggle the timer from anywhere.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -150,6 +152,23 @@ pub fn run() {
                 tracing::warn!("popover setup failed: {e}");
             }
             crate::tray_ticker::spawn(handle.clone());
+
+            // Register the user's global timer-toggle shortcut. Best-effort:
+            // when the combo is already held by another app (or the OS refuses
+            // it) registration fails and we just log it — the Settings panel
+            // surfaces the same "not registered" status so the user can pick a
+            // different one. Never fatal.
+            if !crate::commands::shortcuts::apply_global_shortcut(&handle) {
+                let accel = crate::commands::shortcuts::get_global_shortcut_inner(
+                    &app.state::<AppState>().db,
+                )
+                .unwrap_or_default();
+                if !accel.trim().is_empty() {
+                    tracing::warn!(
+                        "global shortcut {accel:?} could not be registered (already in use?)"
+                    );
+                }
+            }
 
             crate::server::start(handle);
 
@@ -384,6 +403,7 @@ pub fn run() {
             commands::worklog::list_sync_runs,
             commands::worklog::split_worklog,
             commands::dashboard::get_jira_dashboard_issues,
+            commands::dashboard::set_dashboard_issue_hidden,
             commands::streaks::get_streaks,
             commands::suggestions::get_suggestions,
             commands::backup::export_backup,
@@ -417,6 +437,8 @@ pub fn run() {
             commands::prefs::set_pomodoro,
             commands::prefs::get_timeline_hours,
             commands::prefs::set_timeline_hours,
+            commands::prefs::get_dashboard_show_hidden,
+            commands::prefs::set_dashboard_show_hidden,
             commands::prefs::list_project_colors,
             commands::prefs::set_project_color,
             commands::prefs::set_widget_format,
@@ -474,6 +496,9 @@ pub fn run() {
             commands::sentry::get_sentry_enabled,
             commands::sentry::set_sentry_enabled,
             commands::sentry::get_install_id,
+            // Global timer-toggle shortcut
+            commands::shortcuts::get_global_shortcut,
+            commands::shortcuts::set_global_shortcut,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

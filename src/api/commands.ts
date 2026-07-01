@@ -512,6 +512,8 @@ export interface JiraDashboardRow {
   created?: string | null;
   /** YYYY-MM-DD or null. */
   due_date?: string | null;
+  /** Locally hidden from the dashboard (per-user preference). */
+  hidden: boolean;
 }
 
 export interface JiraDashboardError {
@@ -533,6 +535,28 @@ export interface JiraDashboardResponse {
  */
 export function getJiraDashboardIssues(): Promise<JiraDashboardResponse> {
   return invoke<JiraDashboardResponse>("get_jira_dashboard_issues");
+}
+
+/** Hide / un-hide a single issue from the dashboard (local, not a Jira change). */
+export function setDashboardIssueHidden(
+  connectionId: number,
+  issueKey: string,
+  hidden: boolean,
+): Promise<void> {
+  return invoke<void>("set_dashboard_issue_hidden", {
+    connectionId,
+    issueKey,
+    hidden,
+  });
+}
+
+/** Persisted "show hidden issues too" dashboard filter (default false). */
+export function getDashboardShowHidden(): Promise<boolean> {
+  return invoke<boolean>("get_dashboard_show_hidden");
+}
+
+export function setDashboardShowHidden(show: boolean): Promise<void> {
+  return invoke<void>("set_dashboard_show_hidden", { show });
 }
 
 /** Poslední neúspěšná fáze syncu per connection. */
@@ -1163,4 +1187,34 @@ export function getSentryEnabled(): Promise<boolean> {
  */
 export function setSentryEnabled(value: boolean): Promise<void> {
   return invoke<void>("set_sentry_enabled", { value });
+}
+
+// -----------------------------------------------------------------------------
+// Global timer-toggle shortcut
+// -----------------------------------------------------------------------------
+
+/**
+ * Current global shortcut plus whether it is actually registered with the OS
+ * right now. `registered === false` with a non-empty `accelerator` means the
+ * combo is already held by another app (or the OS refused it) — surface a
+ * warning. An empty `accelerator` means the shortcut is disabled.
+ */
+export interface GlobalShortcutStatus {
+  accelerator: string;
+  registered: boolean;
+}
+
+/** `get_global_shortcut(): GlobalShortcutStatus` */
+export function getGlobalShortcut(): Promise<GlobalShortcutStatus> {
+  return invoke<GlobalShortcutStatus>("get_global_shortcut");
+}
+
+/**
+ * `set_global_shortcut(accelerator): GlobalShortcutStatus` — persist + (re)register.
+ * Pass an empty string to disable. Rejects (throws) an unparseable accelerator.
+ */
+export function setGlobalShortcut(
+  accelerator: string,
+): Promise<GlobalShortcutStatus> {
+  return invoke<GlobalShortcutStatus>("set_global_shortcut", { accelerator });
 }

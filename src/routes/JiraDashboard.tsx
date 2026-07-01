@@ -6,24 +6,29 @@
  * řádky. Tato komponenta je jenom tabulka se sortovatelnými hlavičkami a
  * avatary u osob.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Eye,
+  EyeOff,
   Loader2,
   Play,
   RefreshCw,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   getJiraDashboardIssues,
   openJiraIssue,
+  setDashboardIssueHidden,
   type JiraDashboardPerson,
+  type JiraDashboardResponse,
   type JiraDashboardRow,
 } from "../api/commands";
 import { PageContainer } from "../components/Layout/PageContainer";
+import { usePrefsStore } from "../stores/prefsStore";
 import { useTimerStore } from "../stores/timerStore";
 
 type SortKey =
@@ -56,6 +61,9 @@ const TOTAL_COLUMN_COUNT = COLUMNS.length + ACTION_COLUMN_COUNT;
 
 export default function JiraDashboard() {
   const [sort, setSort] = useState<SortState>({ key: "issue_key", dir: "asc" });
+  const showHidden = usePrefsStore((s) => s.dashboardShowHidden);
+  const setShowHidden = usePrefsStore((s) => s.setDashboardShowHidden);
+  const queryClient = useQueryClient();
 
   const q = useQuery({
     queryKey: ["jira-dashboard"],
@@ -66,7 +74,11 @@ export default function JiraDashboard() {
   const rows = q.data?.rows ?? [];
   const errors = q.data?.errors ?? [];
 
-  const sortedRows = useMemo(() => sortRows(rows, sort), [rows, sort]);
+  const hiddenCount = useMemo(() => rows.filter((r) => r.hidden).length, [rows]);
+  const shown = useMemo(() => {
+    const base = showHidden ? rows : rows.filter((r) => !r.hidden);
+    return sortRows(base, sort);
+  }, [rows, sort, showHidden]);
 
   const toggle = (key: SortKey) => {
     setSort((cur) =>
@@ -75,6 +87,35 @@ export default function JiraDashboard() {
         : { key, dir: "asc" },
     );
   };
+
+  // Hide / un-hide is optimistic: flip the row in the cache immediately, then
+  // persist. On failure, flip back. Avoids a fresh Jira round-trip per toggle.
+  const toggleHidden = useCallback(
+    (row: JiraDashboardRow) => {
+      const flipTo = (value: boolean) =>
+        queryClient.setQueryData<JiraDashboardResponse>(
+          ["jira-dashboard"],
+          (resp) =>
+            resp
+              ? {
+                  ...resp,
+                  rows: resp.rows.map((r) =>
+                    r.connection_id === row.connection_id &&
+                    r.issue_key === row.issue_key
+                      ? { ...r, hidden: value }
+                      : r,
+                  ),
+                }
+              : resp,
+        );
+      const next = !row.hidden;
+      flipTo(next);
+      setDashboardIssueHidden(row.connection_id, row.issue_key, next).catch(() =>
+        flipTo(!next),
+      );
+    },
+    [queryClient],
+  );
 
   return (
     <PageContainer maxWidth="max-w-[1400px]">
@@ -86,7 +127,7 @@ export default function JiraDashboard() {
           <span className="text-xs text-[var(--text-tertiary)]">
             {q.isLoading
               ? "Načítám…"
-              : `${rows.length} úkol${rows.length === 1 ? "" : "ů"}`}
+              : `${shown.length} úkol${shown.length === 1 ? "" : "ů"}`}
           </span>
         </div>
         <button
@@ -131,6 +172,29 @@ export default function JiraDashboard() {
         </div>
       )}
 
+      {/* Filter bar — persisted "show hidden too" (default off). */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="inline-flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            onChange={(e) => void setShowHidden(e.target.checked)}
+            className="w-4 h-4 accent-[var(--accent)]"
+          />
+          Zobrazit i skryté úkoly
+        </label>
+        {hiddenCount > 0 && (
+          <span className="text-[11px] text-[var(--text-tertiary)]">
+            {hiddenCount}{" "}
+            {hiddenCount === 1
+              ? "skrytý úkol"
+              : hiddenCount <= 4
+                ? "skryté úkoly"
+                : "skrytých úkolů"}
+          </span>
+        )}
+      </div>
+
       <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] overflow-x-auto">
         <table className="w-full text-xs border-collapse">
           <thead>
@@ -149,24 +213,30 @@ export default function JiraDashboard() {
                   onClick={() => toggle(col.key)}
                 />
               ))}
-              <th className="px-3 py-2 text-right font-medium select-none w-12">
+              <th className="px-3 py-2 text-right font-medium select-none w-24">
                 <span className="sr-only">Akce</span>
               </th>
             </tr>
           </thead>
           <tbody>
-            {sortedRows.length === 0 && !q.isLoading && (
+            {shown.length === 0 && !q.isLoading && (
               <tr>
                 <td
                   colSpan={TOTAL_COLUMN_COUNT}
                   className="py-8 text-center text-[var(--text-tertiary)]"
                 >
-                  Žádné úkoly nevyhovují JQL filtru.
+                  {rows.length > 0 && !showHidden
+                    ? "Všechny úkoly jsou skryté. Zapni „Zobrazit i skryté úkoly“."
+                    : "Žádné úkoly nevyhovují JQL filtru."}
                 </td>
               </tr>
             )}
-            {sortedRows.map((r) => (
-              <DashboardRowView key={`${r.connection_id}-${r.issue_key}`} row={r} />
+            {shown.map((r) => (
+              <DashboardRowView
+                key={`${r.connection_id}-${r.issue_key}`}
+                row={r}
+                onToggleHidden={toggleHidden}
+              />
             ))}
           </tbody>
         </table>
@@ -212,7 +282,13 @@ function HeaderCell({
   );
 }
 
-function DashboardRowView({ row }: { row: JiraDashboardRow }) {
+function DashboardRowView({
+  row,
+  onToggleHidden,
+}: {
+  row: JiraDashboardRow;
+  onToggleHidden: (row: JiraDashboardRow) => void;
+}) {
   const onIssueClick = (e: React.MouseEvent) => {
     e.preventDefault();
     void openJiraIssue(row.issue_key);
@@ -220,7 +296,10 @@ function DashboardRowView({ row }: { row: JiraDashboardRow }) {
   return (
     <tr
       className="hover:bg-[var(--accent-soft)] transition-colors duration-100"
-      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+      style={{
+        borderBottom: "1px solid var(--border-subtle)",
+        opacity: row.hidden ? 0.5 : 1,
+      }}
     >
       <td className="px-3 py-2 align-middle">
         <button
@@ -253,10 +332,40 @@ function DashboardRowView({ row }: { row: JiraDashboardRow }) {
       <td className="px-3 py-2 align-middle tabular-nums">
         <DueDate value={row.due_date} />
       </td>
-      <td className="px-3 py-2 align-middle text-right">
-        <StartTimerButton issueKey={row.issue_key} />
+      <td className="px-3 py-2 align-middle">
+        <div className="flex items-center justify-end gap-1.5">
+          <HideButton hidden={row.hidden} onClick={() => onToggleHidden(row)} />
+          <StartTimerButton issueKey={row.issue_key} />
+        </div>
       </td>
     </tr>
+  );
+}
+
+function HideButton({
+  hidden,
+  onClick,
+}: {
+  hidden: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hidden ? "Zobrazit úkol v přehledu" : "Skrýt úkol z přehledu"}
+      aria-label={hidden ? "Zobrazit úkol" : "Skrýt úkol"}
+      className="inline-flex items-center justify-center w-7 h-7 rounded-full
+                 text-[var(--text-tertiary)] border border-transparent
+                 hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]
+                 transition-colors duration-150"
+    >
+      {hidden ? (
+        <Eye className="w-3.5 h-3.5" aria-hidden />
+      ) : (
+        <EyeOff className="w-3.5 h-3.5" aria-hidden />
+      )}
+    </button>
   );
 }
 

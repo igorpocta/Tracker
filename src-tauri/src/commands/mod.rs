@@ -24,6 +24,7 @@ pub mod misc;
 pub mod prefs;
 pub mod rounding;
 pub mod sentry;
+pub mod shortcuts;
 pub mod streaks;
 pub mod suggestions;
 pub mod system_idle;

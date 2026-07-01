@@ -21,7 +21,6 @@ import { useEffect, useState } from "react";
 import {
   listJiraStatuses,
   testConnectionForProvider,
-  testJiraConnection,
   updateConnectionApi,
 } from "../../api/commands";
 import type { ConnectionDto, ProviderUser } from "../../api/types";
@@ -67,6 +66,7 @@ export function EditConnectionDialog({
       : "";
   const initialColor =
     typeof cfg["color"] === "string" ? (cfg["color"] as string) : "";
+  const initialAllowCustomHost = cfg["allow_custom_host"] === true;
 
   const [name, setName] = useState(conn.name);
   const [baseUrl, setBaseUrl] = useState(initialUrl);
@@ -88,6 +88,7 @@ export function EditConnectionDialog({
   /** Hex barva pro toto připojení; prázdný řetězec = "fallback default". */
   const [color, setColor] = useState(initialColor);
   const [colorEnabled, setColorEnabled] = useState(initialColor.length > 0);
+  const [allowCustomHost, setAllowCustomHost] = useState(initialAllowCustomHost);
 
   const isJira = conn.provider === "jira";
   const isFreelo = conn.provider === "freelo";
@@ -143,7 +144,17 @@ export function EditConnectionDialog({
     setTest({ kind: "loading" });
     try {
       if (isJira) {
-        const user = await testJiraConnection(baseUrl, email, secret);
+        // Provider-generic probe so the backend honours `allow_custom_host`
+        // (the legacy `test_jira_connection` hard-codes the cloud allow-list).
+        const user = await testConnectionForProvider({
+          provider: "jira",
+          config: {
+            base_url: baseUrl,
+            email,
+            allow_custom_host: allowCustomHost,
+          },
+          token: secret,
+        });
         setTest({ kind: "ok", user });
       } else {
         const user: ProviderUser = await testConnectionForProvider({
@@ -169,6 +180,7 @@ export function EditConnectionDialog({
       if (isJira) {
         newConfig["base_url"] = baseUrl;
         newConfig["email"] = email;
+        newConfig["allow_custom_host"] = allowCustomHost;
         newConfig["dashboard_enabled"] = dashboardEnabled;
         newConfig["dashboard_jql"] = dashboardJql.trim() || null;
         newConfig["auto_transition_from"] = autoFrom.trim() || null;
@@ -257,6 +269,28 @@ export function EditConnectionDialog({
               if (test.kind !== "idle") setTest({ kind: "idle" });
             }}
           />
+        )}
+
+        {isJira && (
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allowCustomHost}
+              onChange={(e) => {
+                setAllowCustomHost(e.target.checked);
+                if (test.kind !== "idle") setTest({ kind: "idle" });
+              }}
+              className="mt-0.5 accent-[var(--accent)]"
+            />
+            <span className="text-xs text-[var(--text-secondary)]">
+              <span className="font-medium text-[var(--text-primary)]">
+                Vlastní / self-hosted server
+              </span>
+              <br />
+              Zapněte pro on-premise Jiru mimo <code>*.atlassian.net</code>.
+              Ověřte, že URL je důvěryhodná — token se odešle na tento server.
+            </span>
+          </label>
         )}
 
         <Field

@@ -31,6 +31,8 @@ pub struct JiraDashboardRow {
     pub status_category: Option<String>,
     pub created: Option<String>,
     pub due_date: Option<String>,
+    /// Locally hidden from the dashboard (per-user, not a Jira change).
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,7 +104,36 @@ pub async fn get_jira_dashboard_issues(
         }
     }
 
+    // Annotate the locally-hidden rows in one pass. The FE filter decides
+    // whether to render them (default: hidden ones are excluded).
+    let hidden: std::collections::HashSet<(i64, String)> = cache::dashboard_hidden::list(&state.db)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
+    if !hidden.is_empty() {
+        for row in &mut rows {
+            row.hidden = hidden.contains(&(row.connection_id, row.issue_key.clone()));
+        }
+    }
+
     Ok(JiraDashboardResponse { rows, errors })
+}
+
+/// Hide or un-hide a single issue from the dashboard (local preference).
+#[tauri::command]
+pub async fn set_dashboard_issue_hidden(
+    state: tauri::State<'_, AppState>,
+    connection_id: i64,
+    issue_key: String,
+    hidden: bool,
+) -> Result<(), String> {
+    if hidden {
+        cache::dashboard_hidden::hide(&state.db, connection_id, &issue_key)
+            .map_err(|e| e.to_string())
+    } else {
+        cache::dashboard_hidden::unhide(&state.db, connection_id, &issue_key)
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +203,8 @@ fn map_issue_to_dashboard_row(
             .and_then(|c| c.key.clone()),
         created: f.created.clone(),
         due_date: f.duedate.clone(),
+        // Annotated after all rows are collected (see get_jira_dashboard_issues).
+        hidden: false,
     }
 }
 

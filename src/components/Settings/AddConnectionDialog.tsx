@@ -29,7 +29,6 @@ import {
   setFreeloSelectedProjects,
   syncFreeloNow,
   testConnectionForProvider,
-  testJiraConnection,
 } from "../../api/commands";
 import type { ProviderKind, ProviderUser } from "../../api/types";
 import {
@@ -63,6 +62,7 @@ export function AddConnectionDialog({
   const [jiraUrl, setJiraUrl] = useState("");
   const [jiraEmail, setJiraEmail] = useState("");
   const [jiraToken, setJiraToken] = useState("");
+  const [jiraAllowCustomHost, setJiraAllowCustomHost] = useState(false);
   const [freeloEmail, setFreeloEmail] = useState("");
   const [freeloApiKey, setFreeloApiKey] = useState("");
   const [freeloBaseUrl, setFreeloBaseUrl] = useState(
@@ -91,6 +91,7 @@ export function AddConnectionDialog({
     setJiraUrl("");
     setJiraEmail("");
     setJiraToken("");
+    setJiraAllowCustomHost(false);
     setFreeloEmail("");
     setFreeloApiKey("");
     setFreeloBaseUrl("https://api.freelo.io/v1");
@@ -117,7 +118,19 @@ export function AddConnectionDialog({
     setError(null);
     setTest({ kind: "loading" });
     try {
-      const user = await testJiraConnection(jiraUrl, jiraEmail, jiraToken);
+      // Route through the provider-generic probe so the backend honours
+      // `allow_custom_host`; the legacy `test_jira_connection` path hard-codes
+      // the cloud-only allow-list and would reject a self-hosted URL here even
+      // though Save (which does pass the flag) would have accepted it.
+      const user = await testConnectionForProvider({
+        provider: "jira",
+        config: {
+          base_url: jiraUrl,
+          email: jiraEmail,
+          allow_custom_host: jiraAllowCustomHost,
+        },
+        token: jiraToken,
+      });
       setTest({ kind: "ok", user });
     } catch (e) {
       setTest({
@@ -134,7 +147,11 @@ export function AddConnectionDialog({
       await addConnection({
         provider: "jira",
         name: name.trim() || "Jira",
-        config: { base_url: jiraUrl, email: jiraEmail },
+        config: {
+          base_url: jiraUrl,
+          email: jiraEmail,
+          allow_custom_host: jiraAllowCustomHost,
+        },
         token: jiraToken,
       });
       onSaved();
@@ -315,6 +332,26 @@ export function AddConnectionDialog({
                 if (test.kind !== "idle") setTest({ kind: "idle" });
               }}
             />
+
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={jiraAllowCustomHost}
+                onChange={(e) => {
+                  setJiraAllowCustomHost(e.target.checked);
+                  if (test.kind !== "idle") setTest({ kind: "idle" });
+                }}
+                className="mt-0.5 accent-[var(--accent)]"
+              />
+              <span className="text-xs text-[var(--text-secondary)]">
+                <span className="font-medium text-[var(--text-primary)]">
+                  Vlastní / self-hosted server
+                </span>
+                <br />
+                Zapněte pro on-premise Jiru mimo <code>*.atlassian.net</code>.
+                Ověřte, že URL je důvěryhodná — token se odešle na tento server.
+              </span>
+            </label>
 
             <div className="flex items-center gap-3 flex-wrap">
               <button

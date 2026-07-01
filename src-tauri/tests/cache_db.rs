@@ -334,7 +334,7 @@ fn migration_runner_replays_idempotently_on_reopen() {
         .unwrap();
     assert!(exists, "row from before reopen should still exist");
 
-    // schema_migrations should record every applied version (1..=16 at the
+    // schema_migrations should record every applied version (1..=17 at the
     // time of writing — keep this in lockstep with `migrations/`).
     let mut stmt = conn
         .prepare("SELECT version FROM schema_migrations ORDER BY version ASC")
@@ -346,7 +346,7 @@ fn migration_runner_replays_idempotently_on_reopen() {
         .unwrap();
     assert_eq!(
         versions,
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     );
 }
 

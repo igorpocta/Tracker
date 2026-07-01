@@ -90,6 +90,9 @@ pub const DEFAULT_SMART_SUGGESTIONS_ENABLED: bool = true;
 /// A "full day" preset is simply `0..24`.
 pub const DEFAULT_TIMELINE_START_HOUR: i64 = 6;
 pub const DEFAULT_TIMELINE_END_HOUR: i64 = 22;
+/// Default for the Jira-dashboard "show hidden issues too" filter — off, so
+/// hidden issues stay out of the way until the user opts to see them.
+pub const DEFAULT_DASHBOARD_SHOW_HIDDEN: bool = false;
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -106,6 +109,7 @@ const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
 const KEY_SMART_SUGGESTIONS_ENABLED: &str = "smart_suggestions_enabled";
 const KEY_TIMELINE_START_HOUR: &str = "timeline_start_hour";
 const KEY_TIMELINE_END_HOUR: &str = "timeline_end_hour";
+const KEY_DASHBOARD_SHOW_HIDDEN: &str = "dashboard_show_hidden";
 /// Auto-sync interval, in seconds. `0` means "manual only" (the background
 /// loop skips fetching). The DB stores the integer as a string.
 pub const KEY_AUTO_SYNC_INTERVAL: &str = "auto_sync_interval_seconds";
@@ -393,6 +397,24 @@ pub fn set_timeline_hours_inner(db: &Db, hours: &TimelineHours) -> Result<(), St
     Ok(())
 }
 
+// ----- Jira dashboard: show-hidden filter -----
+
+pub fn get_dashboard_show_hidden_inner(db: &Db) -> Result<bool, String> {
+    match cache::settings::get(db, KEY_DASHBOARD_SHOW_HIDDEN).map_err(|e| e.to_string())? {
+        Some(v) => match v.as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Ok(DEFAULT_DASHBOARD_SHOW_HIDDEN),
+        },
+        None => Ok(DEFAULT_DASHBOARD_SHOW_HIDDEN),
+    }
+}
+
+pub fn set_dashboard_show_hidden_inner(db: &Db, show: bool) -> Result<(), String> {
+    let v = if show { "true" } else { "false" };
+    cache::settings::set(db, KEY_DASHBOARD_SHOW_HIDDEN, v).map_err(|e| e.to_string())
+}
+
 // ----- Accent color -----
 
 pub fn get_accent_color_inner(db: &Db) -> Result<String, String> {
@@ -588,6 +610,22 @@ pub async fn set_timeline_hours(
 ) -> Result<(), String> {
     set_timeline_hours_inner(&state.db, &hours)?;
     let _ = app.emit("prefs-changed", "timeline_hours");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_dashboard_show_hidden(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    get_dashboard_show_hidden_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_dashboard_show_hidden(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    show: bool,
+) -> Result<(), String> {
+    set_dashboard_show_hidden_inner(&state.db, show)?;
+    let _ = app.emit("prefs-changed", "dashboard_show_hidden");
     Ok(())
 }
 

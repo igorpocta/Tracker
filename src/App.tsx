@@ -9,11 +9,18 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { getInstallId, getSentryEnabled, hasConfig } from "./api/commands";
+import {
+  getInstallId,
+  getSentryEnabled,
+  getTimerState,
+  hasConfig,
+} from "./api/commands";
 import type { NavigateTarget } from "./api/types";
 import { AppShell } from "./components/Layout/AppShell";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { initSentry } from "./lib/sentry";
+import { toggleTimer } from "./lib/toggleTimer";
+import { useTimerStore } from "./stores/timerStore";
 import Audit from "./routes/Audit";
 import Calendar from "./routes/Calendar";
 import Goals from "./routes/Goals";
@@ -100,6 +107,7 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <NavigationBridge />
+          <GlobalShortcutBridge />
           <Routes>
             {/* Setup wizard is rendered outside the AppShell so it owns the
                 full window. */}
@@ -160,6 +168,48 @@ function BootSplash() {
       </div>
     </div>
   );
+}
+
+/**
+ * Listens for the backend `global-shortcut-triggered` event (fired by the
+ * system-wide hotkey) and toggles the timer: stop if one is running, otherwise
+ * start an unassigned timer. Reuses the same store path as every other timer
+ * surface so the tray/popover stay in sync via the emitted `timer-*` events.
+ *
+ * Mounted at the app root so it stays live even when the main window is hidden
+ * (Tauri keeps the webview alive), which is the whole point of a global bind.
+ */
+function GlobalShortcutBridge() {
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+
+    listen("global-shortcut-triggered", () => {
+      void toggleTimer({
+        isBusy: () => useTimerStore.getState().busy,
+        getActive: () => getTimerState(),
+        start: () => useTimerStore.getState().start(""),
+        stop: () => useTimerStore.getState().stop(),
+      });
+    })
+      .then((u) => {
+        if (cancelled) {
+          u();
+        } else {
+          unlisten = u;
+        }
+      })
+      .catch(() => {
+        /* best-effort in non-Tauri contexts (tests, web build). */
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  return null;
 }
 
 /**

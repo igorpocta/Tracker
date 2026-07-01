@@ -2,6 +2,7 @@ pub mod activity;
 pub mod audit;
 pub mod calendar;
 pub mod connections;
+pub mod dashboard_hidden;
 pub mod db;
 pub mod favorites;
 pub mod issues;

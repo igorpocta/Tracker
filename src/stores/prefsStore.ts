@@ -18,6 +18,7 @@ import {
   getAccentColor,
   getCurrency,
   getDailyGoal,
+  getDashboardShowHidden,
   getDayTimelineVisible,
   getDensity,
   getFontSize,
@@ -29,6 +30,7 @@ import {
   setAppIcon as invokeSetAppIcon,
   setCurrency as invokeSetCurrency,
   setDailyGoal as invokeSetDailyGoal,
+  setDashboardShowHidden as invokeSetDashboardShowHidden,
   setDayTimelineVisible as invokeSetDayTimelineVisible,
   setDensity as invokeSetDensity,
   setFontSize as invokeSetFontSize,
@@ -59,6 +61,7 @@ export const DEFAULT_CURRENCY: Currency = "CZK";
 export const DEFAULT_DAY_TIMELINE_VISIBLE = true;
 export const DEFAULT_TIMELINE_START_HOUR = 6;
 export const DEFAULT_TIMELINE_END_HOUR = 22;
+export const DEFAULT_DASHBOARD_SHOW_HIDDEN = false;
 
 /** Widget time display format. */
 export type WidgetFormat = "HH:MM:SS" | "Hh Mm" | "0.0h";
@@ -90,6 +93,8 @@ export interface PrefsStoreState {
   /** First / last hour shown on the day timeline axis (`0..24`). */
   timelineStartHour: number;
   timelineEndHour: number;
+  /** Jira dashboard: whether hidden issues are shown in the table. */
+  dashboardShowHidden: boolean;
   /** True until the first hydrate completes — used to avoid flicker. */
   hydrated: boolean;
   error: string | null;
@@ -108,6 +113,7 @@ export interface PrefsStoreActions {
   setPaletteMode: (mode: PaletteMode) => Promise<void>;
   setDayTimelineVisible: (visible: boolean) => Promise<void>;
   setTimelineHours: (startHour: number, endHour: number) => Promise<void>;
+  setDashboardShowHidden: (show: boolean) => Promise<void>;
   setAppIcon: (icon: string) => Promise<void>;
 }
 
@@ -251,6 +257,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   dayTimelineVisible: DEFAULT_DAY_TIMELINE_VISIBLE,
   timelineStartHour: DEFAULT_TIMELINE_START_HOUR,
   timelineEndHour: DEFAULT_TIMELINE_END_HOUR,
+  dashboardShowHidden: DEFAULT_DASHBOARD_SHOW_HIDDEN,
   hydrated: false,
   error: null,
 
@@ -267,6 +274,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         paletteModeRaw,
         dayTimelineVisible,
         timelineHours,
+        dashboardShowHidden,
       ] = await Promise.all([
         getDailyGoal(),
         getHourlyRate(),
@@ -281,6 +289,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
           start_hour: DEFAULT_TIMELINE_START_HOUR,
           end_hour: DEFAULT_TIMELINE_END_HOUR,
         })),
+        getDashboardShowHidden().catch(() => DEFAULT_DASHBOARD_SHOW_HIDDEN),
       ]);
       const accent: AccentColor = isAccentId(accentRaw)
         ? accentRaw
@@ -312,6 +321,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         dayTimelineVisible,
         timelineStartHour: timelineHours.start_hour,
         timelineEndHour: timelineHours.end_hour,
+        dashboardShowHidden,
         hydrated: true,
         error: null,
       });
@@ -421,6 +431,15 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
       await invokeSetTimelineHours({ start_hour: startHour, end_hour: endHour });
     } catch {
       set(prev);
+    }
+  },
+
+  setDashboardShowHidden: async (show) => {
+    set({ dashboardShowHidden: show });
+    try {
+      await invokeSetDashboardShowHidden(show);
+    } catch {
+      set({ dashboardShowHidden: !show });
     }
   },
 

@@ -39,6 +39,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
         16,
         include_str!("../../migrations/0016_active_timer_connection.sql"),
     ),
+    (
+        17,
+        include_str!("../../migrations/0017_dashboard_hidden_issues.sql"),
+    ),
 ];
 
 pub fn run(db: &Db) -> Result<(), DbError> {

@@ -44,6 +44,7 @@ import { usePrefsStore } from "../../stores/prefsStore";
 import type { ShellOutletContext } from "../Layout/AppShell";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
+import { GlobalShortcutSetting } from "./GlobalShortcutSetting";
 import { SettingsCard } from "./SettingsCard";
 
 const LS_TIME_INPUT_KEY = "tracker.timeInput";
@@ -306,6 +307,13 @@ export default function General() {
             </select>
           </label>
         </div>
+      </Section>
+
+      <Section
+        title="Globální klávesová zkratka"
+        description="Systémová zkratka pro spuštění / zastavení časovače odkudkoli — funguje i mimo Tracker a když je okno skryté."
+      >
+        <GlobalShortcutSetting pushToast={pushToast} />
       </Section>
 
       <Section
