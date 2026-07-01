@@ -44,6 +44,7 @@ import { usePrefsStore } from "../../stores/prefsStore";
 import type { ShellOutletContext } from "../Layout/AppShell";
 import { Button } from "../common/Button";
 import { ConfirmButton } from "../common/ConfirmButton";
+import { SettingsCard } from "./SettingsCard";
 
 const LS_TIME_INPUT_KEY = "tracker.timeInput";
 
@@ -221,7 +222,7 @@ export default function General() {
   };
 
   return (
-    <div className="flex flex-col gap-8 w-full">
+    <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Obecné
@@ -296,11 +297,7 @@ export default function General() {
               value={rndInterval}
               onChange={(e) => void updateRndInterval(Number(e.target.value))}
               disabled={rndMode === "none"}
-              className="h-8 px-2 rounded-[var(--radius-md)] bg-transparent
-                         border border-[var(--border-subtle)] text-sm
-                         text-[var(--text-primary)] focus:outline-none
-                         focus:border-[var(--border-default)] transition-colors duration-150
-                         disabled:opacity-50"
+              className="ui-select"
             >
               <option value={1}>1 minuta</option>
               <option value={5}>5 minut</option>
@@ -382,10 +379,7 @@ export default function General() {
                 Math.min(120, Math.max(1, Number(e.target.value) || 5)),
               )
             }
-            className="w-28 h-8 px-2 rounded-[var(--radius-md)] bg-transparent
-                       border border-[var(--border-subtle)] text-sm
-                       text-[var(--text-primary)] focus:outline-none
-                       focus:border-[var(--border-default)] transition-colors duration-150 tabular-nums"
+            className="ui-input w-28 tabular-nums"
           />
         </label>
       </Section>
@@ -397,10 +391,7 @@ export default function General() {
         <select
           value={reindex}
           onChange={(e) => updateReindex(e.target.value as ReindexInterval)}
-          className="w-full h-9 px-3 rounded-[var(--radius-md)] bg-transparent
-                     border border-[var(--border-subtle)] text-sm
-                     text-[var(--text-primary)] focus:outline-none
-                     focus:border-[var(--border-default)] transition-colors duration-150"
+          className="ui-select w-full"
         >
           {(Object.keys(REINDEX_LABEL) as ReindexInterval[]).map((k) => (
             <option key={k} value={k}>
@@ -441,11 +432,7 @@ export default function General() {
                   onChange={(e) =>
                     setPurgeDays(Math.max(1, Number(e.target.value) || 1))
                   }
-                  className="w-24 h-8 px-2 rounded-[var(--radius-md)] bg-transparent
-                             border border-[var(--border-subtle)] text-sm
-                             text-[var(--text-primary)] focus:outline-none
-                             focus:border-[var(--border-default)]
-                             transition-colors duration-150 tabular-nums"
+                  className="ui-input w-24 tabular-nums"
                 />
                 <span className="text-xs text-[var(--text-tertiary)]">dní</span>
               </div>
@@ -604,15 +591,9 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section>
-      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
-      {description && (
-        <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 mb-3">
-          {description}
-        </p>
-      )}
+    <SettingsCard title={title} description={description}>
       {children}
-    </section>
+    </SettingsCard>
   );
 }
 
@@ -634,8 +615,8 @@ function ToggleCard({
       className="rounded-[var(--radius-lg)] p-4 text-left transition-colors duration-150
                  border"
       style={{
-        background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-        borderColor: active ? "var(--accent)" : "var(--border-subtle)",
+        background: active ? "var(--accent-soft)" : "var(--bg-app)",
+        borderColor: active ? "var(--accent)" : "var(--border-default)",
       }}
     >
       <div className="h-12 mb-3 flex items-center">{children}</div>

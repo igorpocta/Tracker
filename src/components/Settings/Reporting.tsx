@@ -18,6 +18,7 @@ import {
   parseRateInput,
 } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
+import { SettingsCard } from "./SettingsCard";
 
 const CURRENCIES: { value: Currency; label: string }[] = [
   { value: "CZK", label: "CZK — Česká koruna" },
@@ -75,7 +76,7 @@ export default function Reporting() {
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Reporting
@@ -87,47 +88,35 @@ export default function Reporting() {
         </p>
       </header>
 
-      <section>
-        <label className="block text-sm font-semibold text-[var(--text-primary)] mb-2">
-          Hodinová sazba
-        </label>
+      <SettingsCard
+        title="Hodinová sazba"
+        description="Ponechte prázdné a karta výdělků se úplně skryje."
+      >
         <input
           type="text"
           inputMode="decimal"
+          aria-label="Hodinová sazba"
           value={rateStr}
           onChange={(e) => handleRateChange(e.target.value)}
           onBlur={handleRateBlur}
           placeholder="0"
           aria-invalid={rateError != null}
           aria-describedby={rateError ? "rate-error" : undefined}
-          className="w-full h-9 px-3 rounded-[var(--radius-md)]
-                     bg-transparent border border-[var(--border-subtle)] text-sm
-                     text-[var(--text-primary)] focus:outline-none
-                     focus:border-[var(--border-default)] transition-colors duration-150
-                     aria-[invalid=true]:border-[var(--danger,#dc2626)]"
+          className="ui-input w-full aria-[invalid=true]:border-[var(--danger,#dc2626)]"
         />
-        {rateError ? (
+        {rateError && (
           <p id="rate-error" className="text-[11px] text-[var(--danger,#dc2626)] mt-2">
             {rateError}
           </p>
-        ) : (
-          <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-            Ponechte prázdné a karta výdělků se úplně skryje.
-          </p>
         )}
-      </section>
+      </SettingsCard>
 
-      <section>
-        <label className="block text-sm font-semibold text-[var(--text-primary)] mb-2">
-          Měna
-        </label>
+      <SettingsCard title="Měna">
         <select
           value={currency}
           onChange={(e) => void setCurrency(e.target.value as Currency)}
-          className="w-full h-9 px-3 rounded-[var(--radius-md)]
-                     bg-transparent border border-[var(--border-subtle)] text-sm
-                     text-[var(--text-primary)] focus:outline-none
-                     focus:border-[var(--border-default)] transition-colors duration-150"
+          aria-label="Měna"
+          className="ui-select w-full"
         >
           {CURRENCIES.map((c) => (
             <option key={c.value} value={c.value}>
@@ -135,7 +124,7 @@ export default function Reporting() {
             </option>
           ))}
         </select>
-      </section>
+      </SettingsCard>
     </div>
   );
 }

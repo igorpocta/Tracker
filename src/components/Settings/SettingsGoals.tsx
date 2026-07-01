@@ -17,6 +17,7 @@ import { firstError, goalSliderHoursSchema } from "../../lib/validation";
 import { usePrefsStore } from "../../stores/prefsStore";
 
 import { NonWorkingDaysList } from "./NonWorkingDaysList";
+import { SettingsCard } from "./SettingsCard";
 import { WorkingWeekMask } from "./WorkingWeekMask";
 
 const MIN_HOURS = 1;
@@ -29,22 +30,22 @@ export default function SettingsGoals() {
   const hours = Math.max(MIN_HOURS, Math.min(MAX_HOURS, goalSeconds / 3600));
 
   return (
-    <div className="flex flex-col gap-8 w-full">
+    <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Cíle
         </h2>
       </header>
 
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold text-[var(--text-primary)]">
-            Denní cíl hodin
-          </span>
+      <SettingsCard
+        title="Denní cíl hodin"
+        description="Kolik hodin chcete denně odpracovat. Používá se v sekci Cíle."
+        action={
           <span className="text-lg font-semibold text-[var(--accent)] tabular-nums">
             {hours}h
           </span>
-        </div>
+        }
+      >
         <input
           type="range"
           min={MIN_HOURS}
@@ -71,16 +72,19 @@ export default function SettingsGoals() {
           <span>{MIN_HOURS}h</span>
           <span>{MAX_HOURS}h</span>
         </div>
-        <p className="text-[11px] text-[var(--text-tertiary)] mt-3">
-          Kolik hodin chcete denně odpracovat. Používá se v sekci Cíle.
-        </p>
-      </section>
+      </SettingsCard>
 
-      <WorkingWeekMask />
+      <SettingsCard>
+        <WorkingWeekMask />
+      </SettingsCard>
 
-      <NonWorkingDaysList />
+      <SettingsCard>
+        <NonWorkingDaysList />
+      </SettingsCard>
 
-      <PomodoroSection />
+      <SettingsCard>
+        <PomodoroSection />
+      </SettingsCard>
     </div>
   );
 }
@@ -199,10 +203,7 @@ function NumberField({
           const n = Number(e.target.value);
           if (Number.isFinite(n) && n >= min && n <= max) onChange(n);
         }}
-        className="h-8 px-2 rounded-[var(--radius-md)] bg-transparent
-                   border border-[var(--border-subtle)] text-sm
-                   text-[var(--text-primary)] focus:outline-none
-                   focus:border-[var(--border-default)]"
+        className="ui-input tabular-nums"
       />
     </label>
   );

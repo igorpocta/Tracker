@@ -86,6 +86,11 @@ pub struct AppState {
     /// Serialises retry/push flows for local-only worklogs so concurrent
     /// callers cannot POST the same row upstream twice.
     pub worklog_push_lock: Mutex<()>,
+    /// `true` while a `refresh_cache` (issue reindex) is running. Guards
+    /// against overlapping reindexes fired from the tray, ⌘I and the command
+    /// bar all at once — the second caller is rejected instead of hammering
+    /// the provider with duplicate pulls.
+    pub reindex_in_progress: std::sync::atomic::AtomicBool,
 
     // ----- Legacy single-Jira shims (Phase 17 → 18A bridge) -------------------
     /// Last-known Jira configuration loaded from disk, if any. Phase 18A:
@@ -103,6 +108,7 @@ impl AppState {
             connections: RwLock::new(Vec::new()),
             activity_recorder: ActivityRecorder::new(),
             worklog_push_lock: Mutex::new(()),
+            reindex_in_progress: std::sync::atomic::AtomicBool::new(false),
             jira_config: RwLock::new(None),
             jira_client: RwLock::new(None),
         }

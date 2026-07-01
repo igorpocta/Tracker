@@ -24,6 +24,7 @@ import {
   getHourlyRate,
   getPaletteMode,
   getTheme,
+  getTimelineHours,
   setAccentColor as invokeSetAccentColor,
   setAppIcon as invokeSetAppIcon,
   setCurrency as invokeSetCurrency,
@@ -34,6 +35,7 @@ import {
   setHourlyRate as invokeSetHourlyRate,
   setPaletteMode as invokeSetPaletteMode,
   setTheme as invokeSetTheme,
+  setTimelineHours as invokeSetTimelineHours,
   setWidgetFormat as invokeSetWidgetFormat,
 } from "../api/commands";
 import type {
@@ -55,6 +57,8 @@ export const DEFAULT_ACCENT: AccentColor = DEFAULT_PALETTE_ID as AccentColor;
 export const DEFAULT_PALETTE_MODE: PaletteMode = "mono";
 export const DEFAULT_CURRENCY: Currency = "CZK";
 export const DEFAULT_DAY_TIMELINE_VISIBLE = true;
+export const DEFAULT_TIMELINE_START_HOUR = 6;
+export const DEFAULT_TIMELINE_END_HOUR = 22;
 
 /** Widget time display format. */
 export type WidgetFormat = "HH:MM:SS" | "Hh Mm" | "0.0h";
@@ -83,6 +87,9 @@ export interface PrefsStoreState {
   paletteMode: PaletteMode;
   /** Whether to render the DayTimeline on the Time Log route. */
   dayTimelineVisible: boolean;
+  /** First / last hour shown on the day timeline axis (`0..24`). */
+  timelineStartHour: number;
+  timelineEndHour: number;
   /** True until the first hydrate completes — used to avoid flicker. */
   hydrated: boolean;
   error: string | null;
@@ -100,6 +107,7 @@ export interface PrefsStoreActions {
   setAccent: (accent: AccentColor) => Promise<void>;
   setPaletteMode: (mode: PaletteMode) => Promise<void>;
   setDayTimelineVisible: (visible: boolean) => Promise<void>;
+  setTimelineHours: (startHour: number, endHour: number) => Promise<void>;
   setAppIcon: (icon: string) => Promise<void>;
 }
 
@@ -241,6 +249,8 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
   accent: DEFAULT_ACCENT,
   paletteMode: DEFAULT_PALETTE_MODE,
   dayTimelineVisible: DEFAULT_DAY_TIMELINE_VISIBLE,
+  timelineStartHour: DEFAULT_TIMELINE_START_HOUR,
+  timelineEndHour: DEFAULT_TIMELINE_END_HOUR,
   hydrated: false,
   error: null,
 
@@ -256,6 +266,7 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         currencyRaw,
         paletteModeRaw,
         dayTimelineVisible,
+        timelineHours,
       ] = await Promise.all([
         getDailyGoal(),
         getHourlyRate(),
@@ -266,6 +277,10 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         getCurrency().catch(() => DEFAULT_CURRENCY as string),
         getPaletteMode().catch(() => DEFAULT_PALETTE_MODE as string),
         getDayTimelineVisible().catch(() => DEFAULT_DAY_TIMELINE_VISIBLE),
+        getTimelineHours().catch(() => ({
+          start_hour: DEFAULT_TIMELINE_START_HOUR,
+          end_hour: DEFAULT_TIMELINE_END_HOUR,
+        })),
       ]);
       const accent: AccentColor = isAccentId(accentRaw)
         ? accentRaw
@@ -295,6 +310,8 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
         currency,
         paletteMode,
         dayTimelineVisible,
+        timelineStartHour: timelineHours.start_hour,
+        timelineEndHour: timelineHours.end_hour,
         hydrated: true,
         error: null,
       });
@@ -390,6 +407,21 @@ export const usePrefsStore = create<PrefsStore>((set) => ({
       /* swallow — best-effort; the UI state is still authoritative */
     }
     set({ dayTimelineVisible: visible });
+  },
+
+  setTimelineHours: async (startHour, endHour) => {
+    // Optimistic — the timeline reads these live. Revert on backend rejection
+    // (validation) so the UI never shows an invalid window as saved.
+    const prev = {
+      timelineStartHour: usePrefsStore.getState().timelineStartHour,
+      timelineEndHour: usePrefsStore.getState().timelineEndHour,
+    };
+    set({ timelineStartHour: startHour, timelineEndHour: endHour });
+    try {
+      await invokeSetTimelineHours({ start_hour: startHour, end_hour: endHour });
+    } catch {
+      set(prev);
+    }
   },
 
   setAppIcon: async (icon) => {

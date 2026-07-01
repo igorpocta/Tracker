@@ -419,6 +419,20 @@ export function setPomodoroConfig(config: PomodoroConfig): Promise<void> {
   return invoke<void>("set_pomodoro", { config });
 }
 
+/** Visible window of the day timeline. `start_hour` 0–23, `end_hour` 1–24. */
+export interface TimelineHours {
+  start_hour: number;
+  end_hour: number;
+}
+
+export function getTimelineHours(): Promise<TimelineHours> {
+  return invoke<TimelineHours>("get_timeline_hours");
+}
+
+export function setTimelineHours(hours: TimelineHours): Promise<void> {
+  return invoke<void>("set_timeline_hours", { hours });
+}
+
 /** Volitelná barva per projekt key (např. `DEV`, `FREELO-P-12`). */
 export interface ProjectColor {
   project_key: string;

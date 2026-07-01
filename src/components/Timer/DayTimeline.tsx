@@ -22,10 +22,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorklogRow } from "../../api/types";
 import { formatHHMM } from "../../lib/dates";
 import { formatDurationShort } from "../../lib/format";
+import { usePrefsStore } from "../../stores/prefsStore";
 
-/** First hour shown on the axis. */
+/** Default first/last hour on the axis — used when no explicit window is
+ *  passed to the exported helpers (keeps their older call-sites + tests
+ *  working). The live component reads the configured window from prefs. */
 const START_HOUR = 6;
-/** Last hour shown (exclusive). */
 const END_HOUR = 22;
 
 const ROW_HEIGHT = 28;
@@ -82,6 +84,9 @@ export function DayTimeline({
   onSplitRequest,
   onCreateRequest,
 }: DayTimelineProps) {
+  // Configured axis window (Nastavení → Vzhled). Falls back to 6–22.
+  const startHour = usePrefsStore((s) => s.timelineStartHour);
+  const endHour = usePrefsStore((s) => s.timelineEndHour);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Reference NA BEZPADDINGOVÝ container kolem canvasu. Měřit přímo vnější
   // kartu (`p-3`) by vracelo `clientWidth` včetně paddingu, takže by canvas
@@ -100,8 +105,8 @@ export function DayTimeline({
   // popiscích bez nutnosti znovu sahat na DOM při renderu.
   const cssWidthRef = useRef(0);
 
-  // Segmenty se přepočítají při změně rows / day.
-  segmentsRef.current = buildSegments(rows, day);
+  // Segmenty se přepočítají při změně rows / day / okna osy.
+  segmentsRef.current = buildSegments(rows, day, startHour, endHour);
 
   // Canvas highlight depends only on WHICH segment is hovered, not the cursor's
   // x within it. Deriving the index keeps `draw` from being rebuilt (and the
@@ -126,7 +131,7 @@ export function DayTimeline({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const totalHours = END_HOUR - START_HOUR;
+    const totalHours = endHour - startHour;
     const hourW = cssWidth / totalHours;
     const accent = readCssVar("--accent") || "#14B8A6";
     const accentHover = readCssVar("--accent-hover") || accent;
@@ -144,10 +149,10 @@ export function DayTimeline({
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
     for (let i = 0; i < totalHours; i++) {
-      ctx.fillText(String(START_HOUR + i), i * hourW + 2, 0);
+      ctx.fillText(String(startHour + i), i * hourW + 2, 0);
     }
     ctx.textAlign = "right";
-    ctx.fillText(String(END_HOUR), cssWidth - 2, 0);
+    ctx.fillText(String(endHour), cssWidth - 2, 0);
     ctx.textAlign = "left";
 
     // Track background.
@@ -216,7 +221,7 @@ export function DayTimeline({
         ctx.fillRect(x2 - 0.5, trackY, 1, ROW_HEIGHT);
       }
     }
-  }, [drag, hoveredSeg]);
+  }, [drag, hoveredSeg, startHour, endHour]);
 
   // Redraw při změně props i okenní velikosti.
   useEffect(() => {
@@ -234,7 +239,7 @@ export function DayTimeline({
     const canvas = canvasRef.current;
     if (!canvas) return -1;
     const cssWidth = canvas.clientWidth;
-    const totalHours = END_HOUR - START_HOUR;
+    const totalHours = endHour - startHour;
     if (canvasY < AXIS_HEIGHT || canvasY > AXIS_HEIGHT + ROW_HEIGHT) return -1;
     for (let i = 0; i < segmentsRef.current.length; i++) {
       const s = segmentsRef.current[i];
@@ -243,7 +248,7 @@ export function DayTimeline({
       if (canvasX >= x && canvasX <= x + w) return i;
     }
     return -1;
-  }, []);
+  }, [startHour, endHour]);
 
   return (
     <div
@@ -278,7 +283,10 @@ export function DayTimeline({
               // Prázdné místo v tracku → ukaž čas pod kurzorem (jen když lze
               // zakládat nové záznamy).
               if (inTrack && onCreateRequest) {
-                setCursor({ x, timeMs: canvasXToTimeMs(x, rect.width, day) });
+                setCursor({
+                  x,
+                  timeMs: canvasXToTimeMs(x, rect.width, day, startHour, endHour),
+                });
               } else if (cursor) {
                 setCursor(null);
               }
@@ -330,6 +338,8 @@ export function DayTimeline({
                     x,
                     e.currentTarget.clientWidth,
                     day,
+                    startHour,
+                    endHour,
                   );
                   onSplitRequest(seg.row, splitAtMs);
                 } else if (seg && onSelect) {
@@ -342,11 +352,15 @@ export function DayTimeline({
                     Math.min(drag.startCanvasX, x),
                     cssWidth,
                     day,
+                    startHour,
+                    endHour,
                   );
                   const endMs = canvasXToTimeMs(
                     Math.max(drag.startCanvasX, x),
                     cssWidth,
                     day,
+                    startHour,
+                    endHour,
                   );
                   onCreateRequest(startMs, endMs);
                 }
@@ -370,7 +384,13 @@ export function DayTimeline({
           <CursorTime x={cursor.x} timeMs={cursor.timeMs} />
         )}
         {drag?.kind === "create" && (
-          <CreateDragLabel drag={drag} day={day} cssWidth={cssWidthRef.current} />
+          <CreateDragLabel
+            drag={drag}
+            day={day}
+            cssWidth={cssWidthRef.current}
+            startHour={startHour}
+            endHour={endHour}
+          />
         )}
       </div>
       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
@@ -482,14 +502,18 @@ function CreateDragLabel({
   drag,
   day,
   cssWidth,
+  startHour,
+  endHour,
 }: {
   drag: CreateDragState;
   day: Date;
   cssWidth: number;
+  startHour: number;
+  endHour: number;
 }) {
   if (cssWidth <= 0) return null;
-  const startMs = canvasXToTimeMs(drag.startCanvasX, cssWidth, day);
-  const endMs = canvasXToTimeMs(drag.currentCanvasX, cssWidth, day);
+  const startMs = canvasXToTimeMs(drag.startCanvasX, cssWidth, day, startHour, endHour);
+  const endMs = canvasXToTimeMs(drag.currentCanvasX, cssWidth, day, startHour, endHour);
   const centerX = (drag.startCanvasX + drag.currentCanvasX) / 2;
   return (
     <TimelineBubble
@@ -580,8 +604,10 @@ export function canvasXToTimeMs(
   canvasX: number,
   cssWidth: number,
   day: Date,
+  startHour = START_HOUR,
+  endHour = END_HOUR,
 ): number {
-  const totalHours = END_HOUR - START_HOUR;
+  const totalHours = endHour - startHour;
   const frac = Math.max(0, Math.min(1, canvasX / cssWidth));
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
@@ -591,7 +617,7 @@ export function canvasXToTimeMs(
   // `invalid type: floating point, expected i64`. Sub-ms precision is
   // meaningless for wall-clock worklogs anyway.
   return Math.round(
-    dayStart.getTime() + (START_HOUR + frac * totalHours) * 3_600_000,
+    dayStart.getTime() + (startHour + frac * totalHours) * 3_600_000,
   );
 }
 
@@ -606,11 +632,16 @@ export function formatRangeLabel(startMs: number, endMs: number): string {
   return `${formatHHMM(new Date(a))} – ${formatHHMM(new Date(b))} · ${dur}`;
 }
 
-export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {
+export function buildSegments(
+  rows: WorklogRow[],
+  day: Date,
+  startHour = START_HOUR,
+  endHour = END_HOUR,
+): Segment[] {
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
-  const windowStartMs = dayStart.getTime() + START_HOUR * 3_600_000;
-  const windowEndMs = dayStart.getTime() + END_HOUR * 3_600_000;
+  const windowStartMs = dayStart.getTime() + startHour * 3_600_000;
+  const windowEndMs = dayStart.getTime() + endHour * 3_600_000;
 
   const out: Segment[] = [];
   for (const r of rows) {
@@ -634,13 +665,15 @@ export function buildSegments(rows: WorklogRow[], day: Date): Segment[] {
 export function bucketize(
   rows: WorklogRow[],
   day: Date,
+  startHour = START_HOUR,
+  endHour = END_HOUR,
 ): { hour: number; fill: number }[] {
   const dayStart = new Date(day);
   dayStart.setHours(0, 0, 0, 0);
   const start = dayStart.getTime();
   const end = start + 86_400_000;
 
-  const minutes = new Array<number>(END_HOUR - START_HOUR).fill(0);
+  const minutes = new Array<number>(endHour - startHour).fill(0);
   for (const r of rows) {
     const a = r.started_at * 1000;
     const b = a + r.duration_s * 1000;
@@ -655,14 +688,14 @@ export function bucketize(
       const hourEnd = new Date(d);
       hourEnd.setMinutes(60, 0, 0);
       const slice = Math.min(clampB, hourEnd.getTime()) - cursor;
-      if (hour >= START_HOUR && hour < END_HOUR) {
-        minutes[hour - START_HOUR] = Math.min(
+      if (hour >= startHour && hour < endHour) {
+        minutes[hour - startHour] = Math.min(
           60,
-          minutes[hour - START_HOUR] + slice / 60_000,
+          minutes[hour - startHour] + slice / 60_000,
         );
       }
       cursor += slice;
     }
   }
-  return minutes.map((m, i) => ({ hour: START_HOUR + i, fill: m / 60 }));
+  return minutes.map((m, i) => ({ hour: startHour + i, fill: m / 60 }));
 }

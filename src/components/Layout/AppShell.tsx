@@ -152,6 +152,9 @@ export function AppShell() {
     }
   }, [queryClient]);
 
+  // Guards a manual reindex against overlapping triggers (⌘I / command bar).
+  const reindexingRef = useRef(false);
+
   // ---- toast notifications -------------------------------------------------
   const toastIdRef = useRef(1);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -177,6 +180,11 @@ export function AppShell() {
   // provider, refresh the search/recent caches, and toast the outcome — a
   // silent no-op (the old behaviour) read as "the button doesn't work".
   const reindex = useCallback(async () => {
+    // Ignore repeat triggers (⌘I / command bar / tray) while one is in
+    // flight — the backend also rejects overlap, but this keeps the double
+    // press a silent no-op instead of an error toast.
+    if (reindexingRef.current) return;
+    reindexingRef.current = true;
     try {
       const n = await refreshCache();
       queryClient.invalidateQueries({ queryKey: queryKeys.recentIssues.all() });
@@ -187,6 +195,8 @@ export function AppShell() {
       );
     } catch (e) {
       pushToast("error", typeof e === "string" ? e : "Reindexace selhala.");
+    } finally {
+      reindexingRef.current = false;
     }
   }, [queryClient, pushToast]);
 

@@ -415,6 +415,8 @@ pub fn run() {
             commands::prefs::set_smart_suggestions_enabled,
             commands::prefs::get_pomodoro,
             commands::prefs::set_pomodoro,
+            commands::prefs::get_timeline_hours,
+            commands::prefs::set_timeline_hours,
             commands::prefs::list_project_colors,
             commands::prefs::set_project_color,
             commands::prefs::set_widget_format,

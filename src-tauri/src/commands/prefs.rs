@@ -86,6 +86,10 @@ pub const DEFAULT_EARNINGS_VISIBLE: bool = true;
 /// Time Log route. Defaults to `true` per product spec; the user opts out
 /// in Settings → Obecné.
 pub const DEFAULT_SMART_SUGGESTIONS_ENABLED: bool = true;
+/// Default day-timeline window: 06:00–22:00 (the historical fixed range).
+/// A "full day" preset is simply `0..24`.
+pub const DEFAULT_TIMELINE_START_HOUR: i64 = 6;
+pub const DEFAULT_TIMELINE_END_HOUR: i64 = 22;
 
 const KEY_DAILY_GOAL: &str = "daily_goal_seconds";
 const KEY_WIDGET_FORMAT: &str = "widget_format";
@@ -100,6 +104,8 @@ const KEY_PALETTE_MODE: &str = "palette_mode";
 const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
 const KEY_EARNINGS_VISIBLE: &str = "earnings_visible";
 const KEY_SMART_SUGGESTIONS_ENABLED: &str = "smart_suggestions_enabled";
+const KEY_TIMELINE_START_HOUR: &str = "timeline_start_hour";
+const KEY_TIMELINE_END_HOUR: &str = "timeline_end_hour";
 /// Auto-sync interval, in seconds. `0` means "manual only" (the background
 /// loop skips fetching). The DB stores the integer as a string.
 pub const KEY_AUTO_SYNC_INTERVAL: &str = "auto_sync_interval_seconds";
@@ -337,6 +343,56 @@ pub fn set_pomodoro_inner(db: &Db, cfg: &PomodoroConfig) -> Result<(), String> {
     Ok(())
 }
 
+// ----- Day-timeline hour window -----
+
+/// The visible window of the day timeline. `start_hour` in `0..=23`,
+/// `end_hour` in `1..=24`, `start_hour < end_hour`. "Full day" is `0..24`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TimelineHours {
+    pub start_hour: i64,
+    pub end_hour: i64,
+}
+
+pub fn get_timeline_hours_inner(db: &Db) -> Result<TimelineHours, String> {
+    let start_hour = cache::settings::get(db, KEY_TIMELINE_START_HOUR)
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_TIMELINE_START_HOUR);
+    let end_hour = cache::settings::get(db, KEY_TIMELINE_END_HOUR)
+        .map_err(|e| e.to_string())?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_TIMELINE_END_HOUR);
+    // Defensive: never hand the UI an inverted / out-of-range window even if
+    // the stored values were somehow corrupted — fall back to the default.
+    if !(0..=23).contains(&start_hour) || !(1..=24).contains(&end_hour) || start_hour >= end_hour {
+        return Ok(TimelineHours {
+            start_hour: DEFAULT_TIMELINE_START_HOUR,
+            end_hour: DEFAULT_TIMELINE_END_HOUR,
+        });
+    }
+    Ok(TimelineHours {
+        start_hour,
+        end_hour,
+    })
+}
+
+pub fn set_timeline_hours_inner(db: &Db, hours: &TimelineHours) -> Result<(), String> {
+    if !(0..=23).contains(&hours.start_hour) {
+        return Err("Počáteční hodina časové osy musí být 0–23".to_string());
+    }
+    if !(1..=24).contains(&hours.end_hour) {
+        return Err("Koncová hodina časové osy musí být 1–24".to_string());
+    }
+    if hours.start_hour >= hours.end_hour {
+        return Err("Počáteční hodina musí být menší než koncová".to_string());
+    }
+    cache::settings::set(db, KEY_TIMELINE_START_HOUR, &hours.start_hour.to_string())
+        .map_err(|e| e.to_string())?;
+    cache::settings::set(db, KEY_TIMELINE_END_HOUR, &hours.end_hour.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ----- Accent color -----
 
 pub fn get_accent_color_inner(db: &Db) -> Result<String, String> {
@@ -514,6 +570,24 @@ pub async fn set_pomodoro(
 ) -> Result<(), String> {
     set_pomodoro_inner(&state.db, &config)?;
     let _ = app.emit("prefs-changed", "pomodoro");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_timeline_hours(
+    state: tauri::State<'_, AppState>,
+) -> Result<TimelineHours, String> {
+    get_timeline_hours_inner(&state.db)
+}
+
+#[tauri::command]
+pub async fn set_timeline_hours(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    hours: TimelineHours,
+) -> Result<(), String> {
+    set_timeline_hours_inner(&state.db, &hours)?;
+    let _ = app.emit("prefs-changed", "timeline_hours");
     Ok(())
 }
 
@@ -747,6 +821,71 @@ mod tests {
         // Leak the tempdir so the file outlives this helper; tests are short.
         std::mem::forget(dir);
         Db::open(&path).unwrap()
+    }
+
+    #[test]
+    fn timeline_hours_default_round_trip_and_validation() {
+        let db = open_db();
+        // Default window.
+        let def = get_timeline_hours_inner(&db).unwrap();
+        assert_eq!((def.start_hour, def.end_hour), (6, 22));
+
+        // Custom window round-trips.
+        set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: 8,
+                end_hour: 18,
+            },
+        )
+        .unwrap();
+        let got = get_timeline_hours_inner(&db).unwrap();
+        assert_eq!((got.start_hour, got.end_hour), (8, 18));
+
+        // Full day is valid.
+        set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: 0,
+                end_hour: 24,
+            },
+        )
+        .unwrap();
+        assert_eq!(get_timeline_hours_inner(&db).unwrap().end_hour, 24);
+
+        // Invalid: equal / inverted / out of range.
+        assert!(set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: 10,
+                end_hour: 10
+            }
+        )
+        .is_err());
+        assert!(set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: 12,
+                end_hour: 8
+            }
+        )
+        .is_err());
+        assert!(set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: -1,
+                end_hour: 24
+            }
+        )
+        .is_err());
+        assert!(set_timeline_hours_inner(
+            &db,
+            &TimelineHours {
+                start_hour: 0,
+                end_hour: 25
+            }
+        )
+        .is_err());
     }
 
     #[test]

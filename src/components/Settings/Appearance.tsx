@@ -29,6 +29,7 @@ import {
   type PaletteSpec,
 } from "../../lib/accent";
 import { usePrefsStore } from "../../stores/prefsStore";
+import { SettingsCard } from "./SettingsCard";
 
 const THEME_OPTIONS: { value: ThemePref; label: string; icon: React.ReactNode }[] = [
   { value: "light", label: "Světlý", icon: <Sun className="w-4 h-4" aria-hidden /> },
@@ -43,22 +44,24 @@ export default function Appearance() {
   const setAccent = usePrefsStore((s) => s.setAccent);
   const paletteMode = usePrefsStore((s) => s.paletteMode);
   const setPaletteMode = usePrefsStore((s) => s.setPaletteMode);
+  const timelineStartHour = usePrefsStore((s) => s.timelineStartHour);
+  const timelineEndHour = usePrefsStore((s) => s.timelineEndHour);
+  const setTimelineHours = usePrefsStore((s) => s.setTimelineHours);
 
   const palettes = paletteMode === "dual" ? DUAL_PALETTES : MONO_PALETTES;
 
   return (
-    <div className="flex flex-col gap-8 w-full">
+    <div className="flex flex-col gap-5 w-full max-w-3xl">
       <header>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
           Vzhled
         </h2>
       </header>
 
-      {/* Theme picker --------------------------------------------------- */}
-      <section>
-        <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
-          Motiv
-        </h3>
+      <SettingsCard
+        title="Motiv"
+        description="Světlý, tmavý, nebo podle nastavení systému."
+      >
         <div className="grid grid-cols-3 gap-3">
           {THEME_OPTIONS.map((opt) => (
             <ThemeCard
@@ -70,16 +73,18 @@ export default function Appearance() {
             />
           ))}
         </div>
-      </section>
+      </SettingsCard>
 
-      {/* Palettes ------------------------------------------------------- */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-            Barevná paleta
-          </h3>
-          <PaletteModeToggle value={paletteMode} onChange={(m) => void setPaletteMode(m)} />
-        </div>
+      <SettingsCard
+        title="Barevná paleta"
+        description="Barva zvýraznění v celé aplikaci."
+        action={
+          <PaletteModeToggle
+            value={paletteMode}
+            onChange={(m) => void setPaletteMode(m)}
+          />
+        }
+      >
         <div className="grid grid-cols-3 gap-3">
           {palettes.map((p) => (
             <PaletteCard
@@ -90,7 +95,107 @@ export default function Appearance() {
             />
           ))}
         </div>
-      </section>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Časová osa dne"
+        description="Rozsah hodin na časové ose nad záznamy. Celý den ukáže 0–24, vlastní rozsah se hodí, když pracujete jen v části dne."
+      >
+        <TimelineRangeControl
+          startHour={timelineStartHour}
+          endHour={timelineEndHour}
+          onChange={(s, e) => void setTimelineHours(s, e)}
+        />
+      </SettingsCard>
+    </div>
+  );
+}
+
+/** Two-hours (0–24) day-timeline window picker with a full-day preset. */
+function TimelineRangeControl({
+  startHour,
+  endHour,
+  onChange,
+}: {
+  startHour: number;
+  endHour: number;
+  onChange: (startHour: number, endHour: number) => void;
+}) {
+  const isFullDay = startHour === 0 && endHour === 24;
+  const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
+  // Constrain the option lists so `start < end` always holds without silent
+  // auto-bumps: `od` offers 0..end-1, `do` offers start+1..24.
+  const startOptions = Array.from({ length: endHour }, (_, h) => h);
+  const endOptions = Array.from({ length: 24 - startHour }, (_, i) => startHour + 1 + i);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div
+        className="inline-flex items-center rounded-full p-0.5 text-xs self-start"
+        style={{ background: "var(--bg-active)" }}
+      >
+        {(
+          [
+            { full: true, label: "Celý den (0–24)" },
+            { full: false, label: "Vlastní rozsah" },
+          ] as const
+        ).map((opt) => {
+          const active = opt.full === isFullDay;
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              onClick={() => {
+                if (opt.full) onChange(0, 24);
+                // Switching to custom from full-day seeds a sensible window.
+                else if (isFullDay) onChange(6, 22);
+              }}
+              className="px-3 h-6 rounded-full transition-colors duration-150"
+              style={
+                active
+                  ? { background: "var(--accent-soft)", color: "var(--accent)" }
+                  : { color: "var(--text-tertiary)" }
+              }
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {!isFullDay && (
+        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+          <label className="flex items-center gap-1.5">
+            <span>Od</span>
+            <select
+              className="ui-select"
+              value={startHour}
+              onChange={(e) => onChange(Number(e.target.value), endHour)}
+            >
+              {startOptions.map((h) => (
+                <option key={h} value={h}>
+                  {hh(h)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="text-[var(--text-tertiary)]">–</span>
+          <label className="flex items-center gap-1.5">
+            <span>Do</span>
+            <select
+              className="ui-select"
+              value={endHour}
+              onChange={(e) => onChange(startHour, Number(e.target.value))}
+            >
+              {endOptions.map((h) => (
+                <option key={h} value={h}>
+                  {hh(h)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
     </div>
   );
 }
@@ -113,8 +218,8 @@ function ThemeCard({
       className="flex flex-col items-center justify-center gap-2 h-20
                  rounded-[var(--radius-lg)] border transition-colors duration-150"
       style={{
-        background: active ? "var(--accent-soft)" : "var(--bg-surface)",
-        borderColor: active ? "var(--accent)" : "var(--border-subtle)",
+        background: active ? "var(--accent-soft)" : "var(--bg-app)",
+        borderColor: active ? "var(--accent)" : "var(--border-default)",
         color: active ? "var(--accent)" : "var(--text-primary)",
       }}
     >
@@ -180,13 +285,13 @@ function PaletteCard({
       className="relative rounded-[var(--radius-lg)] p-3 text-left transition-colors duration-150
                  border"
       style={{
-        background: "var(--bg-surface)",
-        borderColor: active ? palette.primary : "var(--border-subtle)",
+        background: "var(--bg-app)",
+        borderColor: active ? palette.primary : "var(--border-default)",
         boxShadow: active ? `0 0 0 1px ${palette.primary}` : undefined,
       }}
     >
       <div className="rounded-[var(--radius-md)] p-3 flex flex-col gap-1.5"
-           style={{ background: "var(--bg-app)" }}>
+           style={{ background: "var(--bg-surface)" }}>
         <PaletteBar color={palette.primary} width="55%" tone="solid" />
         <PaletteBar
           color={isDual ? palette.secondary : palette.primary}

@@ -62,6 +62,26 @@ pub async fn refresh_cache(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<usize, String> {
+    use std::sync::atomic::Ordering;
+
+    // Reject a second reindex while one is already running. `compare_exchange`
+    // flips the flag false→true atomically; the guard resets it on every exit
+    // path (including early returns / errors / the `?` below).
+    if state
+        .reindex_in_progress
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("Reindexace už probíhá.".to_string());
+    }
+    struct ReindexGuard<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for ReindexGuard<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let _reindex_guard = ReindexGuard(&state.reindex_in_progress);
+
     let jiras: Vec<(i64, crate::jira::JiraClient)> = {
         let conns = state.connections.read().unwrap_or_else(|e| e.into_inner());
         conns
