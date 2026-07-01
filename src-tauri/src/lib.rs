@@ -26,6 +26,21 @@ use crate::state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single-instance MUST be the first plugin registered. When the user
+        // launches Tracker again (double-click, Start-menu, another shortcut),
+        // the second process fires this handler in the ALREADY-running instance
+        // and then exits — so there is never a second window/tray. We surface
+        // the existing main window instead of silently doing nothing.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            } else {
+                let _ = crate::popover::open_main(app);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_deep_link::init())
