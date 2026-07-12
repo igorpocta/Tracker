@@ -170,13 +170,12 @@ pub fn run() {
 
             // Windows: drop the native title bar — it clashes with Tracker's
             // dark chrome. The frontend renders its own (`WindowTitlebar`:
-            // drag region + min/max/close). Keep the drop-shadow so the
-            // undecorated window still has a visual edge + resize border.
+            // drag region + min/max/close). Same helper runs on every rebuild
+            // of the main window (see `popover::ensure_main_window`) so a
+            // reopened window can't resurrect the native bar. No-op elsewhere;
             // macOS keeps its `Overlay` title bar (traffic lights) untouched.
-            #[cfg(windows)]
             if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_decorations(false);
-                let _ = w.set_shadow(true);
+                crate::popover::apply_main_window_chrome(&w);
             }
 
             // Register the user's global timer-toggle shortcut. Best-effort:
