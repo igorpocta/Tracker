@@ -181,8 +181,10 @@ const FOCUS_RULE_ID_START = 1000;
 const FOCUS_POLL_WAIT_SECONDS = 25;
 /** Consecutive failures before we tear the rules down. */
 const FOCUS_FAILURES_BEFORE_CLEAR = 2;
-/** Backoff after a failed poll, so an unreachable bridge isn't hammered. */
-const FOCUS_RETRY_DELAY_MS = 5000;
+/** First backoff step; each further failure doubles it. */
+const FOCUS_RETRY_BASE_MS = 2000;
+/** Failures to absorb in-loop before handing back to the alarm. */
+const FOCUS_MAX_RETRIES = 3;
 /** Redirect rules need host access to the sites they act on. */
 const FOCUS_ORIGINS = ["*://*/*"];
 
@@ -270,8 +272,19 @@ async function focusSyncOnce(waitSeconds) {
  * Long-poll until the browser kills this worker. Guarded so the alarm can
  * fire freely without stacking loops.
  *
- * Without site access there is nothing to poll for, so the loop exits rather
- * than spinning — `permissions.onAdded` and the alarm bring it back.
+ * The loop gives up rather than retrying forever. A worker that keeps a timer
+ * running never becomes idle, so a fixed retry meant Tracker not being
+ * installed -- or simply not running -- cost the user battery indefinitely,
+ * on a machine that was doing nothing with Focus mode at all. Handing back to
+ * the one-minute alarm costs nothing while the worker sleeps, and a bridge
+ * that comes back is picked up within that minute.
+ *
+ * The backoff still absorbs a short blip in-loop, so restarting Tracker
+ * reconnects in seconds rather than at the next alarm.
+ *
+ * `focusFailures` is shared with the rule teardown deliberately: both want
+ * "how many consecutive failures", and it survives loop restarts, so a bridge
+ * that stays down settles into one attempt per alarm tick.
  */
 async function focusLoop() {
   if (focusLoopRunning) return;
@@ -279,8 +292,12 @@ async function focusLoop() {
   try {
     for (;;) {
       const outcome = await focusSyncOnce(FOCUS_POLL_WAIT_SECONDS);
+      // Without site access there is nothing to poll for; `permissions.onAdded`
+      // brings us back.
       if (outcome === "no-permission") return;
-      if (outcome === "error") await sleep(FOCUS_RETRY_DELAY_MS);
+      if (outcome === "ok") continue;
+      if (focusFailures > FOCUS_MAX_RETRIES) return;
+      await sleep(FOCUS_RETRY_BASE_MS * 2 ** (focusFailures - 1));
     }
   } finally {
     focusLoopRunning = false;
