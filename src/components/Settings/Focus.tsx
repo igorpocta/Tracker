@@ -48,6 +48,9 @@ const DURATIONS = [0, 25, 45, 50, 60, 90, 120];
 /** The extension is considered connected if it called us in the last 2 min. */
 const HEARTBEAT_FRESH_SECONDS = 120;
 
+/** How often the panel re-checks that status while it is open. */
+const HEARTBEAT_POLL_MS = 15_000;
+
 const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 export default function Focus() {
@@ -63,13 +66,33 @@ export default function Focus() {
   useEffect(() => {
     getFocusSettings().then(setSettings).catch(() => setSettings(null));
     listFocusRules().then(setRules).catch(() => setRules([]));
-    getExtensionLastHeartbeat()
-      .then((seen) =>
-        setExtensionFresh(
-          seen != null && Date.now() / 1000 - seen < HEARTBEAT_FRESH_SECONDS,
-        ),
-      )
-      .catch(() => setExtensionFresh(null));
+  }, []);
+
+  // Kept live rather than sampled once: the panel is where someone lands when
+  // blocking isn't working, and a status frozen at mount is worse than none —
+  // installing the extension while the page is open would leave it reading
+  // "not connected" indefinitely. The extension long-polls every 25s, so a
+  // 15s cadence catches a state change within one heartbeat either way.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      getExtensionLastHeartbeat()
+        .then((seen) => {
+          if (cancelled) return;
+          setExtensionFresh(
+            seen != null && Date.now() / 1000 - seen < HEARTBEAT_FRESH_SECONDS,
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setExtensionFresh(null);
+        });
+    };
+    check();
+    const id = window.setInterval(check, HEARTBEAT_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
 
   const reloadShortcuts = useCallback(() => {
