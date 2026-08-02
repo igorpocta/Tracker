@@ -98,6 +98,11 @@ pub struct AppState {
     /// browser extension's long-poll returns immediately instead of waiting
     /// out its timeout.
     pub focus_notify: std::sync::Arc<tokio::sync::Notify>,
+    /// Serialises focus start/stop. The toggle has to read the session state
+    /// and then act on it, and the sidebar, the popover and the settings panel
+    /// can all fire at once — without this, two toggles that both observe
+    /// "stopped" would both start a session.
+    pub focus_toggle_lock: std::sync::Mutex<()>,
 
     // ----- Legacy single-Jira shims (Phase 17 → 18A bridge) -------------------
     /// Last-known Jira configuration loaded from disk, if any. Phase 18A:
@@ -118,6 +123,7 @@ impl AppState {
             reindex_in_progress: std::sync::atomic::AtomicBool::new(false),
             focus: RwLock::new(crate::focus::engine::FocusRuntime::default()),
             focus_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+            focus_toggle_lock: std::sync::Mutex::new(()),
             jira_config: RwLock::new(None),
             jira_client: RwLock::new(None),
         }

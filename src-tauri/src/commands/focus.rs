@@ -117,6 +117,12 @@ pub async fn toggle_focus(
     state: tauri::State<'_, AppState>,
     duration_minutes: Option<i64>,
 ) -> Result<FocusStateDto, String> {
+    // Held across the whole read-then-act sequence. `start` and `stop` are
+    // synchronous, so nothing awaits while the guard is alive.
+    let _serialised = state
+        .focus_toggle_lock
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     if engine::is_active(&state) {
         engine::stop(&app, &state)
     } else {
