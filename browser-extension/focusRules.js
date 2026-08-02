@@ -111,8 +111,12 @@ function redirectAction(blockedPage) {
  * and `localhost` with any subdomain. Digits are matched explicitly so a
  * lookalike domain such as `127.foo.com` does not slip through.
  */
+const LOOPBACK_HOST =
+  "(?:127\\.\\d+\\.\\d+\\.\\d+|0\\.0\\.0\\.0|(?:[^/?#]*\\.)?localhost|\\[::1\\])";
+const LOOPBACK_FILTER = `^https?://${LOOPBACK_HOST}(?::\\d+)?(?:[/?#].*)?$`;
+
 function loopbackRule(id) {
-  const host = "(?:127\\.\\d+\\.\\d+\\.\\d+|0\\.0\\.0\\.0|(?:[^/?#]*\\.)?localhost|\\[::1\\])";
+  const host = LOOPBACK_HOST;
   return {
     id,
     priority: LOOPBACK_PRIORITY,
@@ -122,6 +126,40 @@ function loopbackRule(id) {
       resourceTypes: RESOURCE_TYPES,
     },
   };
+}
+
+/** Does `url` fall under any of these patterns? */
+function anyMatch(patterns, url) {
+  return (patterns || []).some((pattern) => {
+    const regex = patternToRegex(pattern);
+    return regex ? new RegExp(regex).test(url) : false;
+  });
+}
+
+/**
+ * Would this URL be blocked right now? `"block"` or `"allow"`.
+ *
+ * `declarativeNetRequest` only ever sees a *request*, so a tab that was
+ * already loaded when the rules changed is never re-evaluated — it just sits
+ * there on a page that is now blocked. This is the same decision the DNR
+ * rules encode, exposed so the worker can sweep open tabs and close that gap.
+ *
+ * Precedence matches the desktop: loopback, then allow, then block, then the
+ * strict catch-all.
+ */
+export function decideUrl(state, url) {
+  if (!state || !state.active) return "allow";
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return "allow";
+  if (new RegExp(LOOPBACK_FILTER).test(url)) return "allow";
+  if (anyMatch(state.allow, url)) return "allow";
+  if (anyMatch(state.block, url)) return "block";
+  const armed = (state.allow || []).some((p) => patternToRegex(p));
+  return state.strict_sites && armed ? "block" : "allow";
+}
+
+/** Where a blocked `url` should be sent. */
+export function blockedUrlFor(state, url) {
+  return `${state.blocked_page}?u=${encodeURIComponent(url)}`;
 }
 
 /**

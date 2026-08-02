@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALLOW_PRIORITY,
+  blockedUrlFor,
+  decideUrl,
   BLOCK_PRIORITY,
   CATCH_ALL_PRIORITY,
   LOOPBACK_PRIORITY,
@@ -195,5 +197,55 @@ describe("buildFocusRules", () => {
     for (const rule of rules) {
       expect(rule.condition.resourceTypes).toEqual(["main_frame"]);
     }
+  });
+});
+
+describe("decideUrl", () => {
+  // The bridge expands patterns before they reach the browser, so a domain
+  // arrives as `*.domain`. These are the shapes the extension really sees.
+  const active = { ...BASE, block: ["*.qadata.cz"], allow: [] };
+
+  it("blocks a page a loaded tab may already be sitting on", () => {
+    expect(decideUrl(active, "https://www.qadata.cz/")).toBe("block");
+    expect(decideUrl(active, "https://qadata.cz/x")).toBe("block");
+  });
+
+  it("leaves everything else alone", () => {
+    expect(decideUrl(active, "https://example.com/")).toBe("allow");
+  });
+
+  it("never touches the block page itself", () => {
+    expect(decideUrl(active, "http://127.0.0.1:27420/blocked?u=x")).toBe("allow");
+  });
+
+  it("ignores tabs that are not http(s)", () => {
+    // `chrome://`, `about:` and friends come back from `tabs.query` too.
+    expect(decideUrl(active, "chrome://extensions")).toBe("allow");
+    expect(decideUrl(active, undefined)).toBe("allow");
+  });
+
+  it("does nothing while no session is running", () => {
+    expect(decideUrl({ ...active, active: false }, "https://www.qadata.cz/")).toBe("allow");
+  });
+
+  it("lets an allow rule win over a block rule", () => {
+    const state = { ...active, allow: ["www.qadata.cz"] };
+    expect(decideUrl(state, "https://www.qadata.cz/")).toBe("allow");
+    expect(decideUrl(state, "https://mail.qadata.cz/")).toBe("block");
+  });
+
+  it("blocks everything unlisted in strict mode, but only once armed", () => {
+    const armed = { ...BASE, strict_sites: true, allow: ["*.atlassian.net"] };
+    expect(decideUrl(armed, "https://news.ycombinator.com/")).toBe("block");
+    expect(decideUrl(armed, "https://team.atlassian.net/x")).toBe("allow");
+
+    const unarmed = { ...BASE, strict_sites: true, allow: [] };
+    expect(decideUrl(unarmed, "https://news.ycombinator.com/")).toBe("allow");
+  });
+
+  it("carries the original URL to the block page, encoded", () => {
+    expect(blockedUrlFor(active, "https://x.com/a?b=1&c=2")).toBe(
+      "http://127.0.0.1:27420/blocked?u=https%3A%2F%2Fx.com%2Fa%3Fb%3D1%26c%3D2",
+    );
   });
 });

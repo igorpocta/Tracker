@@ -16,7 +16,7 @@
  * It also owns Focus mode's web blocking — see the section at the bottom.
  */
 
-import { buildFocusRules } from "./focusRules.js";
+import { blockedUrlFor, buildFocusRules, decideUrl } from "./focusRules.js";
 
 const BASE = "http://127.0.0.1:27420";
 
@@ -221,6 +221,42 @@ async function applyFocusState(state) {
     removeRuleIds: existing.map((r) => r.id),
     addRules,
   });
+  await sweepOpenTabs(state);
+}
+
+/**
+ * Redirect tabs that are *already* sitting on a blocked page.
+ *
+ * `declarativeNetRequest` only ever sees a request. A tab loaded before the
+ * rules changed is never re-requested, so it stays on the blocked page until
+ * something navigates it — which is why starting a session appeared to do
+ * nothing until the browser was restarted and every restored tab navigated
+ * afresh.
+ *
+ * Runs whenever the ruleset changes, so it covers both "Focus just started"
+ * and "a rule was just added". Background tabs included: the desktop's
+ * AppleScript path can only reach the frontmost window's active tab, so this
+ * is the only thing that catches the rest.
+ */
+async function sweepOpenTabs(state) {
+  if (!state || !state.active) return;
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    // No tabs permission / API unavailable — the rules still cover every
+    // future navigation.
+    return;
+  }
+  for (const tab of tabs) {
+    if (!tab.id || !tab.url) continue;
+    if (decideUrl(state, tab.url) !== "block") continue;
+    try {
+      await chrome.tabs.update(tab.id, { url: blockedUrlFor(state, tab.url) });
+    } catch {
+      /* tab closed mid-sweep */
+    }
+  }
 }
 
 /**
