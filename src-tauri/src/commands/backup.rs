@@ -69,28 +69,55 @@ fn export_inner(db: &Db) -> Result<BackupBundle, rusqlite::Error> {
             &conn,
             "SELECT id, occurred_at, op, issue_key, worklog_id, before_json, after_json, success, error, source_audit_id FROM audit_log",
         )?,
-        favorite_issues: dump_table(
+        favorite_issues: dump_optional_table(
             &conn,
+            "favorite_issues",
             "SELECT issue_key, connection_id, added_at FROM favorite_issues",
-        )
-        // favorite_issues může neexistovat v starší DB — tolerujeme.
-        .unwrap_or_default(),
-        daily_activity: dump_table(
+        )?,
+        daily_activity: dump_optional_table(
             &conn,
+            "daily_activity",
             "SELECT date, active_seconds, inactive_seconds FROM daily_activity",
-        )
-        .unwrap_or_default(),
-        non_working_days: dump_table(
+        )?,
+        non_working_days: dump_optional_table(
             &conn,
+            "non_working_days",
             "SELECT date, reason, label, created_at FROM non_working_days",
-        )
-        .unwrap_or_default(),
+        )?,
     };
     Ok(BackupBundle {
         version: BACKUP_VERSION,
         generated_at: chrono::Utc::now().timestamp(),
         tables,
     })
+}
+
+/// Is `table` present in this database?
+fn table_exists(conn: &rusqlite::Connection, table: &str) -> Result<bool, rusqlite::Error> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n != 0)
+}
+
+/// Dump a table that a sufficiently old database might not have yet.
+///
+/// Absence is checked explicitly rather than inferred from a failed query.
+/// The previous `unwrap_or_default()` could not tell "this database predates
+/// the table" from "the read failed", so a locked database or an unreadable
+/// row produced a backup that looked complete and silently held nothing --
+/// which the destructive import would then write over the real data.
+fn dump_optional_table(
+    conn: &rusqlite::Connection,
+    table: &str,
+    sql: &str,
+) -> Result<Vec<Value>, rusqlite::Error> {
+    if !table_exists(conn, table)? {
+        return Ok(Vec::new());
+    }
+    dump_table(conn, sql)
 }
 
 /// Read all rows from a SELECT and convert to `Vec<serde_json::Value>` keyed
@@ -360,6 +387,36 @@ mod tests {
         // Sync helper přes import_inner — kontrola version je v Tauri wrapperu,
         // ale tady jen ujistíme, že prázdný bundle projde DELETE bez paniky.
         assert!(import_inner(&db, &bundle).is_ok());
+    }
+
+    #[test]
+    fn export_omits_a_table_the_database_does_not_have() {
+        let db = open_db();
+        seed_connection_issue_worklog(&db);
+        {
+            let conn = db.pool().get().unwrap();
+            conn.execute("DROP TABLE favorite_issues", []).unwrap();
+        }
+
+        let bundle = export_inner(&db).unwrap();
+        assert!(bundle.tables.favorite_issues.is_empty());
+        // A missing optional table must not cost us the rest of the backup.
+        assert_eq!(bundle.tables.worklogs.len(), 1);
+        assert_eq!(bundle.tables.connections.len(), 1);
+    }
+
+    #[test]
+    fn export_carries_optional_tables_that_do_exist() {
+        let db = open_db();
+        let conn_id = seed_connection_issue_worklog(&db);
+        crate::cache::favorites::add(&db, "ACME-1", Some(conn_id)).unwrap();
+
+        let bundle = export_inner(&db).unwrap();
+        assert_eq!(
+            bundle.tables.favorite_issues.len(),
+            1,
+            "a present table must be exported, not silently emptied"
+        );
     }
 
     #[test]
