@@ -8,6 +8,7 @@
 //! The window is created lazily on first use and then reused — building a
 //! webview costs far more than showing one.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use tauri::{
@@ -38,6 +39,12 @@ pub struct OverlayNotice {
 
 type Cooldown = std::sync::Mutex<Option<(String, i64)>>;
 static LAST_FLASH: OnceLock<Cooldown> = OnceLock::new();
+
+/// Incremented per banner shown. The auto-hide task captures its own value and
+/// stands down if a newer banner has replaced it — otherwise blocking a second
+/// app within the display window meant the first banner's timer cut the second
+/// one short.
+static FLASH_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn cooldown() -> &'static Cooldown {
     LAST_FLASH.get_or_init(|| std::sync::Mutex::new(None))
@@ -136,10 +143,14 @@ pub fn flash<R: Runtime>(app: &AppHandle<R>, notice: OverlayNotice, now_ms: i64)
         let _ = handle.emit_to(OVERLAY_LABEL, "focus-overlay:notice", &notice);
         let _ = win.show();
 
+        let seq = claim_banner();
         let hide_handle = win.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(OVERLAY_VISIBLE_MS)).await;
-            let _ = hide_handle.hide();
+            // A newer banner owns the window now; leave it alone.
+            if owns_banner(seq) {
+                let _ = hide_handle.hide();
+            }
         });
     });
     if let Err(e) = dispatched {
@@ -147,8 +158,22 @@ pub fn flash<R: Runtime>(app: &AppHandle<R>, notice: OverlayNotice, now_ms: i64)
     }
 }
 
+/// Take ownership of the banner, returning the token the auto-hide task must
+/// still hold when it fires.
+fn claim_banner() -> u64 {
+    FLASH_SEQ.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Is `seq` still the banner on screen?
+fn owns_banner(seq: u64) -> bool {
+    FLASH_SEQ.load(Ordering::SeqCst) == seq
+}
+
 /// Hide the banner immediately (session ended).
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
+    // Retire any pending auto-hide too, so a task scheduled a moment ago can't
+    // fire against a banner the next session puts up.
+    claim_banner();
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.hide();
     }
@@ -181,6 +206,28 @@ mod tests {
         reset_throttle();
         assert!(should_flash("Slack", 1_000));
         assert!(should_flash("Discord", 1_100));
+    }
+
+    #[test]
+    fn a_superseded_banner_declines_to_hide_the_new_one() {
+        let _guard = serial();
+        let first = claim_banner();
+        assert!(owns_banner(first));
+        let second = claim_banner();
+        // The first banner's timer is now stale and must stand down; without
+        // this, blocking a second app cut the second banner short.
+        assert!(!owns_banner(first));
+        assert!(owns_banner(second));
+    }
+
+    #[test]
+    fn claiming_the_banner_retires_every_earlier_token() {
+        let _guard = serial();
+        let stale = claim_banner();
+        for _ in 0..3 {
+            claim_banner();
+        }
+        assert!(!owns_banner(stale));
     }
 
     #[test]
