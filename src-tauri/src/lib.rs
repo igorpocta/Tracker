@@ -203,9 +203,6 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 crate::focus::engine::restore(&handle, &state);
             }
-            // Build the (hidden) overlay window here, on the main thread —
-            // enforcement runs on a blocking worker and must not create it.
-            crate::focus::overlay::prewarm(&handle);
             crate::focus::engine::spawn(handle.clone());
 
             crate::server::start(handle);

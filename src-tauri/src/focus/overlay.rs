@@ -72,17 +72,6 @@ pub fn reset_throttle() {
     *guard = None;
 }
 
-/// Build the overlay window up front, from `setup` — i.e. on the main thread.
-///
-/// Enforcement runs on a blocking worker, and creating a webview off the main
-/// thread is platform-dependent at best. Doing it here also means the first
-/// blocked app gets an instant banner instead of waiting for a webview boot.
-pub fn prewarm<R: Runtime>(app: &AppHandle<R>) {
-    if let Err(e) = ensure_window(app) {
-        tracing::warn!("focus overlay: could not pre-create window: {e}");
-    }
-}
-
 fn ensure_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         return Ok(win);
@@ -124,29 +113,38 @@ fn position_top_center<R: Runtime>(win: &tauri::WebviewWindow<R>) {
 
 /// Show the banner for `notice`, then hide it again after a couple of seconds.
 /// Throttled per app name; safe to call on every engine tick.
+///
+/// The whole body is hopped onto the main thread. Enforcement runs on a
+/// blocking worker, and building a webview off the main thread is
+/// platform-dependent at best — which is why the window is created here, on
+/// first use, rather than eagerly at startup: a user who never touches Focus
+/// mode should not carry a webview process for the life of the app.
 pub fn flash<R: Runtime>(app: &AppHandle<R>, notice: OverlayNotice, now_ms: i64) {
     if !should_flash(&notice.app_name, now_ms) {
         return;
     }
-    let win = match ensure_window(app) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::warn!("focus overlay: window unavailable: {e}");
-            return;
-        }
-    };
-    position_top_center(&win);
-    // The webview may still be booting on the very first flash; emitting
-    // before `show` is fine because the frontend also fetches the last notice
-    // on mount.
-    let _ = app.emit_to(OVERLAY_LABEL, "focus-overlay:notice", &notice);
-    let _ = win.show();
+    let handle = app.clone();
+    let dispatched = app.run_on_main_thread(move || {
+        let win = match ensure_window(&handle) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!("focus overlay: window unavailable: {e}");
+                return;
+            }
+        };
+        position_top_center(&win);
+        let _ = handle.emit_to(OVERLAY_LABEL, "focus-overlay:notice", &notice);
+        let _ = win.show();
 
-    let handle = win.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(OVERLAY_VISIBLE_MS)).await;
-        let _ = handle.hide();
+        let hide_handle = win.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(OVERLAY_VISIBLE_MS)).await;
+            let _ = hide_handle.hide();
+        });
     });
+    if let Err(e) = dispatched {
+        tracing::warn!("focus overlay: could not reach the main thread: {e}");
+    }
 }
 
 /// Hide the banner immediately (session ended).
