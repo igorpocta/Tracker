@@ -549,6 +549,7 @@ pub fn run() {
             commands::focus::set_focus_rule_action,
             commands::focus::delete_focus_rule,
             commands::focus::list_running_apps,
+            commands::focus::get_focus_overlay_notice,
             commands::focus::list_focus_shortcuts,
             commands::focus::open_dnd_settings,
         ])

@@ -40,6 +40,11 @@ pub struct OverlayNotice {
 type Cooldown = std::sync::Mutex<Option<(String, i64)>>;
 static LAST_FLASH: OnceLock<Cooldown> = OnceLock::new();
 
+/// Most recent notice, so a webview that boots *after* the event was emitted
+/// can still render the right text. The window is built on first use, so the
+/// very first banner of a session always loses that race.
+static LAST_NOTICE: OnceLock<std::sync::Mutex<Option<OverlayNotice>>> = OnceLock::new();
+
 /// Incremented per banner shown. The auto-hide task captures its own value and
 /// stands down if a newer banner has replaced it — otherwise blocking a second
 /// app within the display window meant the first banner's timer cut the second
@@ -48,6 +53,18 @@ static FLASH_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn cooldown() -> &'static Cooldown {
     LAST_FLASH.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn last_notice_slot() -> &'static std::sync::Mutex<Option<OverlayNotice>> {
+    LAST_NOTICE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// The notice the overlay should be showing, for a webview asking on mount.
+pub fn last_notice() -> Option<OverlayNotice> {
+    last_notice_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 /// Should we show the banner for `app_name` at `now_ms`? Also records the
@@ -130,6 +147,10 @@ pub fn flash<R: Runtime>(app: &AppHandle<R>, notice: OverlayNotice, now_ms: i64)
     if !should_flash(&notice.app_name, now_ms) {
         return;
     }
+    // Recorded before the hop so it is already in place by the time a
+    // freshly-built webview asks for it.
+    *last_notice_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(notice.clone());
+
     let handle = app.clone();
     let dispatched = app.run_on_main_thread(move || {
         let win = match ensure_window(&handle) {

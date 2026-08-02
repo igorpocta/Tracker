@@ -8,6 +8,7 @@ use chrono::Utc;
 
 use crate::cache::{self, focus::FocusRuleRow};
 use crate::focus::engine::{self, FocusSettings, FocusStateDto};
+use crate::focus::overlay::OverlayNotice;
 use crate::focus::{apps, notify, rules};
 use crate::state::AppState;
 
@@ -255,6 +256,16 @@ pub async fn list_running_apps() -> Result<Vec<RunningAppDto>, String> {
         .collect();
     listed.sort_by_key(|a| a.name.to_lowercase());
     Ok(listed)
+}
+
+/// The banner the overlay window should be showing.
+///
+/// The overlay webview is built on first use, so the event announcing the
+/// first blocked app of a session is emitted before anything is listening.
+/// Fetching on mount closes that gap.
+#[tauri::command]
+pub async fn get_focus_overlay_notice() -> Result<Option<OverlayNotice>, String> {
+    Ok(crate::focus::overlay::last_notice())
 }
 
 /// macOS Shortcuts the user can bind to Focus start/stop. Empty elsewhere.

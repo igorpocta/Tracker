@@ -18,6 +18,7 @@ import type {
   FocusRuleAction,
   FocusRuleKind,
   FocusRuleMode,
+  FocusOverlayNotice,
   FocusSettings,
   FocusState,
   FontSizePref,
@@ -1325,4 +1326,13 @@ export function listFocusShortcuts(): Promise<string[]> {
 /** `open_dnd_settings(): ()` — opens the OS Do Not Disturb page. */
 export function openDndSettings(): Promise<void> {
   return invoke<void>("open_dnd_settings");
+}
+
+/**
+ * `get_focus_overlay_notice(): FocusOverlayNotice | null` — what the overlay
+ * should be showing. The overlay webview is built on first use, so it can miss
+ * the event announcing the first blocked app of a session.
+ */
+export function getFocusOverlayNotice(): Promise<FocusOverlayNotice | null> {
+  return invoke<FocusOverlayNotice | null>("get_focus_overlay_notice");
 }

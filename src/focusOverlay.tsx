@@ -15,18 +15,13 @@ import { ShieldBan } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 
-import { getAccentColor, getTheme } from "./api/commands";
-import type { ThemePref } from "./api/types";
+import { getAccentColor, getFocusOverlayNotice, getTheme } from "./api/commands";
+import type { FocusOverlayNotice, ThemePref } from "./api/types";
 import { useT } from "./i18n";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { applyPalette } from "./lib/accent";
 
 import "./index.css";
-
-interface OverlayNotice {
-  app_name: string;
-  killed: boolean;
-}
 
 function applyThemeAttr(theme: ThemePref): void {
   if (typeof document === "undefined") return;
@@ -54,13 +49,23 @@ async function hydrateAppearance(): Promise<void> {
 
 export function FocusOverlay() {
   const t = useT();
-  const [notice, setNotice] = useState<OverlayNotice | null>(null);
+  const [notice, setNotice] = useState<FocusOverlayNotice | null>(null);
 
   useEffect(() => {
     void hydrateAppearance();
+    // This window is built the first time a session blocks something, so the
+    // event announcing that first block is emitted before React is listening.
+    // Ask for it instead of showing a generic banner.
+    getFocusOverlayNotice()
+      .then((current) => {
+        if (current) setNotice((shown) => shown ?? current);
+      })
+      .catch(() => {
+        /* non-Tauri context — the generic banner is fine */
+      });
   }, []);
 
-  useTauriEvent<OverlayNotice>("focus-overlay:notice", (payload) => {
+  useTauriEvent<FocusOverlayNotice>("focus-overlay:notice", (payload) => {
     if (payload) setNotice(payload);
   });
 

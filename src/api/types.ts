@@ -362,3 +362,10 @@ export interface RunningApp {
   /** Safe-listed apps can't be blocked — the UI explains why. */
   protected: boolean;
 }
+
+/** The banner the Focus overlay window is showing. */
+export interface FocusOverlayNotice {
+  app_name: string;
+  /** `true` when the app was terminated rather than hidden. */
+  killed: boolean;
+}
