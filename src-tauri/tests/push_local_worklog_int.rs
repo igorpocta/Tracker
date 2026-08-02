@@ -1,3 +1,14 @@
+//! Skipped on Windows: these three targets are the only ones that build a
+//! Tauri app (`tauri::test::mock_app`), which drags the webview2 imports into
+//! the test binary. The Windows loader then refuses to start it with
+//! `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) — the process dies before a
+//! single test runs, so nothing here is actually failing.
+//!
+//! What they cover is platform-neutral (HTTP handlers, push, dedup) and the
+//! macOS leg runs all of it. The Windows leg exists to compile the Win32 code
+//! in `focus/apps.rs` and friends, and it still does that.
+#![cfg(not(windows))]
+
 //! Regression test for concurrent retry paths pushing the same local worklog.
 //!
 //! Startup flush, periodic auto-sync, the manual "Synchronizovat" action and
