@@ -314,11 +314,19 @@ pub fn restore<R: Runtime>(app: &AppHandle<R>, state: &AppState) {
         let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
         return;
     }
+    // Re-engage silencing the same way `start` does. The previous run turned
+    // Do Not Disturb off on its way out, so a restored session that skipped
+    // this would claim to be running while notifications kept arriving.
+    let settings = load_settings(&state.db);
+    let engaged =
+        settings.block_notifications && notify::run_focus_shortcut(settings.shortcut_on.as_deref());
+
     {
         let mut guard = state.focus.write().unwrap_or_else(|e| e.into_inner());
         guard.active = true;
         guard.started_at = Some(now);
         guard.ends_at = if ends_at == 0 { None } else { Some(ends_at) };
+        guard.dnd_undo_shortcut = undo_shortcut_for(&settings, engaged);
     }
     bump_generation(app, state);
     tracing::info!("focus: restored an in-progress session");

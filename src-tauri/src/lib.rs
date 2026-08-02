@@ -557,7 +557,18 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {
+        .run(|app_handle, event| {
+            // Ukončení appky s běžící Focus relací nesmí nechat systém v
+            // režimu Nerušit — nic jiného už ho zpátky nevypne. Tvrdý pád
+            // nebo SIGKILL tohle pochopitelně neošetří; tam relaci obnoví
+            // `focus::engine::restore` při dalším startu a Nerušit zapne
+            // znovu, takže se stavy zase sejdou.
+            if matches!(&event, tauri::RunEvent::Exit) {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    crate::focus::engine::shutdown(&state);
+                }
+            }
+
             // macOS-specifický fix: klik na dock ikonu (případně otevření
             // appky když je už spuštěná) emituje `RunEvent::Reopen`. Pokud
             // všechna naše okna jsou skryta (typicky uživatel zavřel main
@@ -571,10 +582,10 @@ pub fn run() {
             if let tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
-            } = _event
+            } = &event
             {
-                if !has_visible_windows {
-                    let _ = crate::popover::open_main(_app_handle);
+                if !*has_visible_windows {
+                    let _ = crate::popover::open_main(app_handle);
                 }
             }
         });
