@@ -65,18 +65,6 @@ mod imp {
     pub fn kill_pid(pid: i64) -> bool {
         app_for_pid(pid).map(|app| app.terminate()).unwrap_or(false)
     }
-
-    /// Is an app with this bundle identifier currently running? Used to avoid
-    /// AppleScript-ing a browser that isn't open — `tell application "Safari"`
-    /// would *launch* it.
-    pub fn is_running(bundle_id: &str) -> bool {
-        let ws = NSWorkspace::sharedWorkspace();
-        ws.runningApplications().iter().any(|app| {
-            app.bundleIdentifier()
-                .map(|b| b.to_string().eq_ignore_ascii_case(bundle_id))
-                .unwrap_or(false)
-        })
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -275,10 +263,6 @@ mod imp {
             ok != 0
         }
     }
-
-    pub fn is_running(_bundle_id: &str) -> bool {
-        false
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -299,9 +283,6 @@ mod imp {
         false
     }
     pub fn kill_pid(_pid: i64) -> bool {
-        false
-    }
-    pub fn is_running(_bundle_id: &str) -> bool {
         false
     }
 }
@@ -325,10 +306,4 @@ pub fn hide_pid(pid: i64) -> bool {
 /// Ask an application to quit. Falls back to `false` when we lack the rights.
 pub fn kill_pid(pid: i64) -> bool {
     imp::kill_pid(pid)
-}
-
-/// macOS only: is an app with this bundle id running? Always `false`
-/// elsewhere.
-pub fn is_running(bundle_id: &str) -> bool {
-    imp::is_running(bundle_id)
 }

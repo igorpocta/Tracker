@@ -11,7 +11,9 @@
 //! Two constraints shape the implementation:
 //!
 //! * `tell application "Safari"` **launches** Safari if it isn't running, so
-//!   every call is gated on [`super::apps::is_running`] first.
+//!   these functions may only be aimed at a browser already known to be up.
+//!   The engine satisfies that by only ever driving the *frontmost*
+//!   application.
 //! * The first Apple Event to a given app raises a system permission prompt
 //!   that blocks `osascript` until the user answers. Every invocation is
 //!   therefore bounded by a timeout so one unanswered dialog can't wedge the
@@ -112,12 +114,12 @@ mod imp {
     const OSASCRIPT_TIMEOUT: Duration = Duration::from_millis(1500);
     const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-    /// Run an AppleScript, returning trimmed stdout on success.
+    /// Run an AppleScript to completion, bounded by [`OSASCRIPT_TIMEOUT`].
     ///
-    /// A timeout kills the child and yields `None` — the caller treats that
-    /// as "couldn't tell", which is the safe direction: we never block a page
-    /// we failed to inspect.
-    pub fn run_osascript(script: &str) -> Option<String> {
+    /// A timeout kills the child and yields `None` — callers treat that as
+    /// "couldn't tell", which is the safe direction: we never block a page we
+    /// failed to inspect.
+    fn exec(script: &str) -> Option<std::process::Output> {
         let mut child = Command::new("osascript")
             .arg("-e")
             .arg(script)
@@ -144,7 +146,12 @@ mod imp {
             }
         }
 
-        let output = child.wait_with_output().ok()?;
+        child.wait_with_output().ok()
+    }
+
+    /// Trimmed stdout, or `None` when the script failed or printed nothing.
+    pub fn run_osascript(script: &str) -> Option<String> {
+        let output = exec(script)?;
         if !output.status.success() {
             return None;
         }
@@ -155,6 +162,12 @@ mod imp {
             Some(text)
         }
     }
+
+    /// Did the script run cleanly? For scripts whose success is an empty
+    /// stdout, which [`run_osascript`] cannot distinguish from failure.
+    pub fn run_osascript_ok(script: &str) -> bool {
+        exec(script).is_some_and(|output| output.status.success())
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -162,30 +175,33 @@ mod imp {
     pub fn run_osascript(_script: &str) -> Option<String> {
         None
     }
+    pub fn run_osascript_ok(_script: &str) -> bool {
+        false
+    }
 }
 
-/// URL of the front window's active tab, or `None` if the browser isn't
-/// running, has no window, or refused the Apple Event.
+/// URL of the front window's active tab, or `None` if the browser has no
+/// window or refused the Apple Event.
+///
+/// **The caller must already know the browser is running.** Every caller
+/// reaches this through [`browser_for_bundle`] on the *frontmost* application,
+/// which is proof enough; probing again would enumerate every running
+/// application once per second for no new information. The guard still matters
+/// in principle — `tell application "Safari"` launches Safari — but a browser
+/// that is in the foreground is, definitionally, already up.
 pub fn read_active_url(browser: &BrowserApp) -> Option<String> {
-    if !super::apps::is_running(browser.bundle_id) {
-        return None;
-    }
     imp::run_osascript(&read_script(browser))
 }
 
-/// Point the front window's active tab at `url`. Returns whether the script
-/// ran; `missing value` and other AppleScript quirks surface as `false`.
+/// Point the front window's active tab at `url`. Same precondition as
+/// [`read_active_url`].
+///
+/// Reports the script's exit status rather than re-reading the tab to confirm.
+/// The re-read cost a second Apple Event and lied anyway: the tab has not
+/// committed the new URL by the time the write returns, so a successful
+/// redirect routinely looked like a failure.
 pub fn set_active_url(browser: &BrowserApp, url: &str) -> bool {
-    if !super::apps::is_running(browser.bundle_id) {
-        return false;
-    }
-    // A successful `set` produces no output, so an empty stdout is expected —
-    // `run_osascript` maps that to `None`. Distinguish by re-reading instead
-    // of trusting the return value.
-    imp::run_osascript(&write_script(browser, url));
-    read_active_url(browser)
-        .map(|current| current.starts_with(url))
-        .unwrap_or(false)
+    imp::run_osascript_ok(&write_script(browser, url))
 }
 
 #[cfg(test)]

@@ -415,6 +415,10 @@ fn enforce_app<R: Runtime>(app: &AppHandle<R>, ident: &rules::AppIdent, action: 
 /// front tab and rewrite it when blocked. Everywhere else this is the
 /// extension's job.
 fn enforce_browser(front: &rules::AppIdent, enabled_rules: &[FocusRuleRow], strict_sites: bool) {
+    // Cheapest check first: with nothing to block, never spend an Apple Event.
+    if !rules::site_checks_needed(enabled_rules, strict_sites) {
+        return;
+    }
     let Some(bundle) = front.bundle_id.as_deref() else {
         return;
     };

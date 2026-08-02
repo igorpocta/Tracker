@@ -306,6 +306,21 @@ pub fn site_matches(host: &str, path: &str, pattern: &str) -> bool {
     path.starts_with(&p_path)
 }
 
+/// Can any site rule possibly fire? When not, the engine skips inspecting the
+/// browser at all.
+///
+/// Worth the check because reading the front tab costs an Apple Event — a
+/// spawned process, once per second for as long as a browser is in front.
+/// Someone who only blocks apps should pay nothing for the website half.
+pub fn site_checks_needed(rules: &[FocusRuleRow], strict: bool) -> bool {
+    if strict && has_enabled_allow(rules, "site") {
+        return true;
+    }
+    rules
+        .iter()
+        .any(|r| r.kind == "site" && r.mode == "block" && r.enabled)
+}
+
 /// Decide whether a URL may be visited during a focus session.
 pub fn decide_site(url: &str, rules: &[FocusRuleRow], strict: bool) -> SiteDecision {
     let Some((host, path)) = split_url(url) else {
@@ -491,6 +506,34 @@ mod tests {
             decide_site("https://reddit.com/r/aww", &rules, false),
             SiteDecision::Blocked
         );
+    }
+
+    #[test]
+    fn no_site_rules_means_no_browser_inspection() {
+        assert!(!site_checks_needed(&[], false));
+        assert!(
+            !site_checks_needed(&[], true),
+            "unarmed strict changes nothing"
+        );
+        let app_only = vec![rule("app", "block", "slack", "hide")];
+        assert!(!site_checks_needed(&app_only, false));
+    }
+
+    #[test]
+    fn a_site_rule_or_armed_strict_mode_requires_inspection() {
+        let blocked = vec![rule("site", "block", "reddit.com", "hide")];
+        assert!(site_checks_needed(&blocked, false));
+        let allowed = vec![rule("site", "allow", "atlassian.net", "hide")];
+        assert!(site_checks_needed(&allowed, true));
+        // An allow rule on its own, without strict mode, blocks nothing.
+        assert!(!site_checks_needed(&allowed, false));
+    }
+
+    #[test]
+    fn a_disabled_site_rule_does_not_require_inspection() {
+        let mut disabled = rule("site", "block", "reddit.com", "hide");
+        disabled.enabled = false;
+        assert!(!site_checks_needed(&[disabled], false));
     }
 
     #[test]
