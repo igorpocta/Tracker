@@ -68,6 +68,17 @@ pub fn list_enabled(db: &Db) -> Result<Vec<FocusRuleRow>, DbError> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
+/// A single rule by id, or `None` when it has been deleted.
+pub fn get(db: &Db, id: i64) -> Result<Option<FocusRuleRow>, DbError> {
+    let conn = db.pool().get()?;
+    let sql = format!("SELECT {SELECT_COLUMNS} WHERE id = ?1");
+    match conn.query_row(&sql, [id], map_row) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Insert a rule, or update the existing row with the same
 /// `(kind, mode, pattern)`. Returns the row id either way.
 pub fn upsert(db: &Db, rule: NewFocusRule<'_>, now: i64) -> Result<i64, DbError> {
@@ -179,6 +190,14 @@ mod tests {
         assert_eq!(enabled.len(), 1);
         assert_eq!(enabled[0].pattern, "x.com");
         assert_eq!(list(&db).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn get_returns_the_row_or_none() {
+        let db = open_db();
+        let id = upsert(&db, rule("site", "block", "reddit.com"), 100).unwrap();
+        assert_eq!(get(&db, id).unwrap().unwrap().pattern, "reddit.com");
+        assert!(get(&db, id + 999).unwrap().is_none());
     }
 
     #[test]

@@ -213,6 +213,16 @@ pub async fn set_focus_rule_action(
     action: String,
 ) -> Result<Vec<FocusRuleRow>, String> {
     let action = require_one_of(&action, ACTIONS, "akce")?;
+    // `action` only means anything for an application. `add_focus_rule`
+    // already forces site rules to `hide`; without the same check here the two
+    // entry points disagree and a site rule could carry a `kill` the engine
+    // silently ignores.
+    let rule = cache::focus::get(&state.db, id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Pravidlo neexistuje.".to_string())?;
+    if rule.kind != "app" {
+        return Err("Akci lze nastavit jen u pravidla pro aplikaci.".into());
+    }
     cache::focus::set_action(&state.db, id, &action).map_err(|e| e.to_string())?;
     engine::bump_generation(&app, &state);
     cache::focus::list(&state.db).map_err(|e| e.to_string())
