@@ -107,6 +107,16 @@ describe("buildFocusRules", () => {
     expect(BLOCK_PRIORITY).toBeGreaterThan(CATCH_ALL_PRIORITY);
   });
 
+  it("omits the catch-all while nothing is allowed through it", () => {
+    const rules = buildFocusRules({ ...BASE, strict_sites: true, allow: [] });
+    expect(rules.some((r) => r.priority === CATCH_ALL_PRIORITY)).toBe(false);
+  });
+
+  it("omits the catch-all when every allow pattern was unusable", () => {
+    const rules = buildFocusRules({ ...BASE, strict_sites: true, allow: ["nonsense"] });
+    expect(rules.some((r) => r.priority === CATCH_ALL_PRIORITY)).toBe(false);
+  });
+
   it("omits the catch-all outside strict mode", () => {
     const rules = buildFocusRules({ ...BASE, block: ["reddit.com"] });
     expect(rules.some((r) => r.priority === CATCH_ALL_PRIORITY)).toBe(false);

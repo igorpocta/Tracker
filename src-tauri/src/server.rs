@@ -586,12 +586,16 @@ fn focus_rules_response(app_state: &AppState) -> FocusRulesResponse {
             .collect()
     };
 
+    let allow = collect("allow");
     FocusRulesResponse {
         active: runtime.active,
         generation: runtime.generation,
-        strict_sites: settings.strict_sites,
+        // The *effective* flag, not the stored one. An empty allow-list means
+        // the user hasn't filled it in yet, and publishing strict mode anyway
+        // would have the extension redirect every page they open.
+        strict_sites: settings.strict_sites && !allow.is_empty(),
         block: collect("block"),
-        allow: collect("allow"),
+        allow,
         blocked_page: format!("http://127.0.0.1:{SERVER_PORT}/blocked"),
     }
 }

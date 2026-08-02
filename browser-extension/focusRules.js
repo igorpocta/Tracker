@@ -130,9 +130,11 @@ export function buildFocusRules(state, startId = 1) {
   let nextId = startId;
   const rules = [loopbackRule(nextId++)];
 
+  let allowed = 0;
   for (const pattern of state.allow || []) {
     const regexFilter = patternToRegex(pattern);
     if (!regexFilter) continue;
+    allowed += 1;
     rules.push({
       id: nextId++,
       priority: ALLOW_PRIORITY,
@@ -152,7 +154,11 @@ export function buildFocusRules(state, startId = 1) {
     });
   }
 
-  if (state.strict_sites) {
+  // The catch-all is only safe once something is allowed through it. The
+  // desktop already withholds `strict_sites` until then; this repeats the
+  // check locally so a stale or hand-crafted payload can't strand the browser
+  // with every navigation redirected.
+  if (state.strict_sites && allowed > 0) {
     rules.push({
       id: nextId++,
       priority: CATCH_ALL_PRIORITY,

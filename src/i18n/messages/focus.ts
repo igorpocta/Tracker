@@ -29,7 +29,7 @@ export const focus = {
       "Tracker zasahuje jen do aplikace, kterou právě přepnete do popředí. Systémové aplikace jsou chráněné a zablokovat je nelze.",
     "focus.settings.strictApps": "Povolit jen vybrané aplikace",
     "focus.settings.strictAppsHint":
-      "Vše ostatní se schová. V tomto režimu se nikdy nic neukončuje, jen skrývá.",
+      "Vše ostatní se schová. V tomto režimu se nikdy nic neukončuje, jen skrývá. Dokud je seznam povolených prázdný, režim se neuplatní.",
     "focus.settings.pickApp": "Vybrat ze spuštěných",
     "focus.settings.appPlaceholder": "com.slack.Slack nebo slack.exe",
     "focus.settings.protected": "chráněná",
@@ -40,7 +40,7 @@ export const focus = {
       "Zadejte doménu (reddit.com) nebo doménu s cestou (reddit.com/r/rust). Subdomény se počítají automaticky.",
     "focus.settings.strictSites": "Povolit jen vybrané weby",
     "focus.settings.strictSitesHint":
-      "Vše ostatní skončí na blokovací stránce, kde se povolené weby zobrazí jako dlaždice.",
+      "Vše ostatní skončí na blokovací stránce, kde se povolené weby zobrazí jako dlaždice. Dokud je seznam povolených prázdný, režim se neuplatní.",
     "focus.settings.sitePlaceholder": "reddit.com",
     "focus.settings.extensionOk": "Rozšíření prohlížeče je připojené.",
     "focus.settings.extensionMissing":
@@ -96,7 +96,7 @@ export const focus = {
       "Tracker only touches the app you just brought to the front. System apps are protected and cannot be blocked.",
     "focus.settings.strictApps": "Allow only the selected apps",
     "focus.settings.strictAppsHint":
-      "Everything else gets hidden. This mode never terminates anything.",
+      "Everything else gets hidden. This mode never terminates anything, and stays inert while the allow list is empty.",
     "focus.settings.pickApp": "Pick from running apps",
     "focus.settings.appPlaceholder": "com.slack.Slack or slack.exe",
     "focus.settings.protected": "protected",
@@ -106,7 +106,7 @@ export const focus = {
       "Enter a domain (reddit.com) or a domain with a path (reddit.com/r/rust). Subdomains are included automatically.",
     "focus.settings.strictSites": "Allow only the selected sites",
     "focus.settings.strictSitesHint":
-      "Everything else lands on the block page, which lists the allowed sites as tiles.",
+      "Everything else lands on the block page, which lists the allowed sites as tiles. Stays inert while the allow list is empty.",
     "focus.settings.sitePlaceholder": "reddit.com",
     "focus.settings.extensionOk": "The browser extension is connected.",
     "focus.settings.extensionMissing":

@@ -156,6 +156,19 @@ pub fn app_matches(app: &AppIdent, pattern: &str) -> bool {
     false
 }
 
+/// Is there at least one enabled `allow` rule of this kind?
+///
+/// Strict mode hinges on this. An empty allow-list does not mean "allow
+/// nothing" — it means the user flipped the switch before filling the list in,
+/// and honouring it literally would hide every window on the machine one per
+/// second (or block every site) with no hint as to why. Treating it as "not
+/// configured yet" is the only reading that isn't a trap.
+fn has_enabled_allow(rules: &[FocusRuleRow], kind: &str) -> bool {
+    rules
+        .iter()
+        .any(|r| r.kind == kind && r.mode == "allow" && r.enabled)
+}
+
 /// Decide what to do with the app the user just brought to the foreground.
 ///
 /// Strict mode never escalates to [`AppAction::Kill`] — an allow-list is a
@@ -165,6 +178,7 @@ pub fn decide_app(app: &AppIdent, rules: &[FocusRuleRow], strict: bool) -> AppDe
     if is_safe_app(app) {
         return AppDecision::Allowed;
     }
+    let strict = strict && has_enabled_allow(rules, "app");
 
     let app_rules = rules.iter().filter(|r| r.kind == "app" && r.enabled);
 
@@ -301,6 +315,7 @@ pub fn decide_site(url: &str, rules: &[FocusRuleRow], strict: bool) -> SiteDecis
     if is_loopback_host(&host) {
         return SiteDecision::Allowed;
     }
+    let strict = strict && has_enabled_allow(rules, "site");
 
     let mut blocked = false;
     for rule in rules.iter().filter(|r| r.kind == "site" && r.enabled) {
@@ -479,13 +494,42 @@ mod tests {
     }
 
     #[test]
-    fn loopback_is_never_blocked_even_in_strict_mode() {
+    fn strict_mode_is_inert_until_the_allow_list_has_an_entry() {
+        // Flipping the switch before filling the list in must not hide every
+        // app on the machine.
+        let unknown = app("com.example.Whatever", "whatever.exe", "Whatever");
+        assert_eq!(decide_app(&unknown, &[], true), AppDecision::Allowed);
         assert_eq!(
-            decide_site("http://127.0.0.1:27420/blocked", &[], true),
+            decide_site("https://news.ycombinator.com", &[], true),
+            SiteDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn a_disabled_allow_rule_does_not_arm_strict_mode() {
+        let mut allow = rule("app", "allow", "com.apple.Terminal", "hide");
+        allow.enabled = false;
+        let unknown = app("com.example.Whatever", "whatever.exe", "Whatever");
+        assert_eq!(decide_app(&unknown, &[allow], true), AppDecision::Allowed);
+    }
+
+    #[test]
+    fn an_allow_rule_of_the_other_kind_does_not_arm_strict_mode() {
+        // A site allow-list says nothing about which apps are permitted.
+        let rules = vec![rule("site", "allow", "atlassian.net", "hide")];
+        let unknown = app("com.example.Whatever", "whatever.exe", "Whatever");
+        assert_eq!(decide_app(&unknown, &rules, true), AppDecision::Allowed);
+    }
+
+    #[test]
+    fn loopback_is_never_blocked_even_in_strict_mode() {
+        let rules = vec![rule("site", "allow", "atlassian.net", "hide")];
+        assert_eq!(
+            decide_site("http://127.0.0.1:27420/blocked", &rules, true),
             SiteDecision::Allowed
         );
         assert_eq!(
-            decide_site("http://localhost:1420/", &[], true),
+            decide_site("http://localhost:1420/", &rules, true),
             SiteDecision::Allowed
         );
     }
@@ -524,21 +568,23 @@ mod tests {
     #[test]
     fn strict_mode_hides_but_never_kills() {
         let unknown = app("com.example.Whatever", "whatever.exe", "Whatever");
+        let rules = vec![rule("app", "allow", "com.apple.Terminal", "kill")];
         assert_eq!(
-            decide_app(&unknown, &[], true),
+            decide_app(&unknown, &rules, true),
             AppDecision::Blocked(AppAction::Hide)
         );
     }
 
     #[test]
     fn safe_list_apps_survive_strict_mode() {
+        let rules = vec![rule("app", "allow", "com.example.Nothing", "hide")];
         for ident in [
             app("com.apple.finder", "", "Finder"),
             app("", "explorer.exe", "Windows Explorer"),
             app("com.tracker.app", "tracker.exe", "Tracker"),
         ] {
             assert_eq!(
-                decide_app(&ident, &[], true),
+                decide_app(&ident, &rules, true),
                 AppDecision::Allowed,
                 "{ident:?} must never be blocked"
             );
