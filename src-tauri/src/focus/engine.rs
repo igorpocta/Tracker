@@ -12,6 +12,7 @@
 //! sweep at session start, which matches explicit `block` + `kill` rules only
 //! and never runs in strict mode.
 
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -182,6 +183,57 @@ pub fn save_settings(db: &Db, settings: &FocusSettings) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Rule snapshot cache
+// -----------------------------------------------------------------------------
+
+/// Settings plus enabled rules, as one immutable unit.
+type Snapshot = Arc<(FocusSettings, Vec<FocusRuleRow>)>;
+
+/// Cached snapshot, keyed by the generation it was loaded at.
+///
+/// The enforcement tick needs both on every pass, once a second. Loading them
+/// meant seven SQLite round-trips per second for the life of a session --
+/// `load_settings` alone takes six connections out of the pool, one per key --
+/// to re-read values that change a handful of times a day.
+///
+/// `generation` is the invalidation key because it already exists for the
+/// browser extension's long-poll, and every path that touches settings or
+/// rules bumps it. Anything that ever writes `app_settings` or `focus_rules`
+/// without going through `bump_generation` would go unnoticed here.
+static SNAPSHOT: OnceLock<RwLock<Option<(u64, Snapshot)>>> = OnceLock::new();
+
+fn snapshot_cell() -> &'static RwLock<Option<(u64, Snapshot)>> {
+    SNAPSHOT.get_or_init(|| RwLock::new(None))
+}
+
+/// Return the cached snapshot for `generation`, calling `load` only when the
+/// cache is empty or stale.
+fn snapshot_for(generation: u64, load: impl FnOnce() -> Snapshot) -> Snapshot {
+    {
+        let guard = snapshot_cell().read().unwrap_or_else(|e| e.into_inner());
+        if let Some((cached_at, snapshot)) = guard.as_ref() {
+            if *cached_at == generation {
+                return snapshot.clone();
+            }
+        }
+    }
+    let loaded = load();
+    *snapshot_cell().write().unwrap_or_else(|e| e.into_inner()) =
+        Some((generation, loaded.clone()));
+    loaded
+}
+
+/// Settings + enabled rules as of `generation`, from cache when possible.
+fn rules_snapshot(state: &AppState, generation: u64) -> Snapshot {
+    snapshot_for(generation, || {
+        Arc::new((
+            load_settings(&state.db),
+            cache::focus::list_enabled(&state.db).unwrap_or_default(),
+        ))
+    })
 }
 
 // -----------------------------------------------------------------------------
@@ -363,25 +415,25 @@ pub fn tick<R: Runtime>(app: &AppHandle<R>) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
-    let snapshot = runtime_snapshot(&state);
-    if !snapshot.active {
+    let session = runtime_snapshot(&state);
+    if !session.active {
         return;
     }
 
     let now = now_s();
-    if snapshot.ends_at.is_some_and(|end| now >= end) {
+    if session.ends_at.is_some_and(|end| now >= end) {
         let _ = stop(app, &state);
         return;
     }
 
-    let settings = load_settings(&state.db);
-    let enabled_rules = cache::focus::list_enabled(&state.db).unwrap_or_default();
+    let snapshot = rules_snapshot(&state, session.generation);
+    let (settings, enabled_rules) = (&snapshot.0, &snapshot.1);
 
     let Some(front) = apps::frontmost_app() else {
         return;
     };
 
-    match rules::decide_app(&front, &enabled_rules, settings.strict_apps) {
+    match rules::decide_app(&front, enabled_rules, settings.strict_apps) {
         AppDecision::Blocked(action) => {
             enforce_app(app, &front, action);
             // The app is on its way out; inspecting its tabs would be moot.
@@ -390,7 +442,7 @@ pub fn tick<R: Runtime>(app: &AppHandle<R>) {
         AppDecision::Allowed => {}
     }
 
-    enforce_browser(&front, &enabled_rules, settings.strict_sites);
+    enforce_browser(&front, enabled_rules, settings.strict_sites);
 }
 
 fn enforce_app<R: Runtime>(app: &AppHandle<R>, ident: &rules::AppIdent, action: AppAction) {
@@ -533,6 +585,57 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_settings(&db).shortcut_on, None);
+    }
+
+    /// The snapshot cache is process-global, so these must not interleave.
+    static SNAPSHOT_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn snapshot_serial() -> std::sync::MutexGuard<'static, ()> {
+        SNAPSHOT_SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn probe_snapshot(tag: &str) -> Snapshot {
+        Arc::new((
+            FocusSettings {
+                shortcut_on: Some(tag.to_string()),
+                ..FocusSettings::default()
+            },
+            Vec::new(),
+        ))
+    }
+
+    #[test]
+    fn a_snapshot_is_loaded_once_per_generation() {
+        let _guard = snapshot_serial();
+        *snapshot_cell().write().unwrap() = None;
+
+        let mut loads = 0;
+        for _ in 0..5 {
+            snapshot_for(7, || {
+                loads += 1;
+                probe_snapshot("seven")
+            });
+        }
+        assert_eq!(
+            loads, 1,
+            "a steady generation must not re-read the database"
+        );
+    }
+
+    #[test]
+    fn a_new_generation_reloads_the_snapshot() {
+        let _guard = snapshot_serial();
+        *snapshot_cell().write().unwrap() = None;
+
+        let first = snapshot_for(1, || probe_snapshot("one"));
+        assert_eq!(first.0.shortcut_on.as_deref(), Some("one"));
+
+        let second = snapshot_for(2, || probe_snapshot("two"));
+        assert_eq!(
+            second.0.shortcut_on.as_deref(),
+            Some("two"),
+            "a bumped generation must invalidate the cache"
+        );
     }
 
     #[test]
