@@ -304,3 +304,61 @@ export interface CacheStats {
   issues: number;
   worklogs_local: number;
 }
+
+// -----------------------------------------------------------------------------
+// Focus mode
+// -----------------------------------------------------------------------------
+
+/** `app` rules match a bundle id / executable, `site` rules match a domain. */
+export type FocusRuleKind = "app" | "site";
+/** `allow` always wins over `block` — that's how exceptions are expressed. */
+export type FocusRuleMode = "block" | "allow";
+/** What happens to a blocked app. Ignored for `site` rules. */
+export type FocusRuleAction = "hide" | "kill";
+
+export interface FocusRule {
+  id: number;
+  kind: FocusRuleKind;
+  mode: FocusRuleMode;
+  /** Bundle id / executable name, or `domain[/path-prefix]`. */
+  pattern: string;
+  label: string | null;
+  action: FocusRuleAction;
+  enabled: boolean;
+  created_at: number;
+}
+
+export interface FocusSettings {
+  /** Allow-list mode for apps: block everything not explicitly allowed. */
+  strict_apps: boolean;
+  /** Allow-list mode for websites. */
+  strict_sites: boolean;
+  block_notifications: boolean;
+  /** macOS Shortcut run when a session starts. */
+  shortcut_on: string | null;
+  /** macOS Shortcut run when a session ends. */
+  shortcut_off: string | null;
+  /** Minutes pre-filled in the start control. `0` = open-ended. */
+  default_duration_min: number;
+}
+
+/** Session state plus the settings, flattened by the backend into one object. */
+export interface FocusState extends FocusSettings {
+  active: boolean;
+  /** Unix seconds. */
+  started_at: number | null;
+  /** Unix seconds, `null` for an open-ended session. */
+  ends_at: number | null;
+  /** Bumped on every session or rule change. */
+  generation: number;
+}
+
+/** One entry in the "pick an app to block" list. */
+export interface RunningApp {
+  /** The value that should become the rule pattern. */
+  pattern: string;
+  name: string;
+  pid: number;
+  /** Safe-listed apps can't be blocked — the UI explains why. */
+  protected: boolean;
+}

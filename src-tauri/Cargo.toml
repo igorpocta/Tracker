@@ -92,6 +92,9 @@ objc2-app-kit = { version = "0.3", features = [
     "NSImage",
     "NSEvent",
     "NSResponder",
+    # Focus mode: foreground-app detection + hide/terminate enforcement.
+    "NSWorkspace",
+    "NSRunningApplication",
 ] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
 # Pro popover global mouse monitor — RcBlock pro NSEvent handler block.

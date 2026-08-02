@@ -15,6 +15,7 @@
 import { audit } from "./messages/audit";
 import { common } from "./messages/common";
 import { connections } from "./messages/connections";
+import { focus } from "./messages/focus";
 import { layout } from "./messages/layout";
 import { misc } from "./messages/misc";
 import { nav } from "./messages/nav";
@@ -41,6 +42,7 @@ type Catalogue = Record<string, string>;
 
 const NAMESPACES = [
   nav,
+  focus,
   settings,
   settingsGeneral,
   settingsMisc,

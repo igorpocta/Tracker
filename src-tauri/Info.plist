@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Text systémového dotazu, který macOS zobrazí, až se Tracker poprvé
+       pokusí ovládnout Safari nebo Chrome. Bez tohoto klíče se aplikace při
+       prvním Apple Eventu tvrdě ukončí. Merguje se do vygenerovaného
+       Info.plist při buildu (Tauri v2). -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Tracker potřebuje ovládat prohlížeč, aby v režimu Focus mohl přesměrovat blokované stránky.</string>
+</dict>
+</plist>

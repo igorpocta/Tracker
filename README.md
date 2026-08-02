@@ -22,6 +22,9 @@ zvolíte.
 - **Motivace a přehled** — denní cíl, streaks, kalendář pracovních dnů.
 - **Reporty** s grafy a exportem do XLSX.
 - **Idle detekce** ve stylu Toggl (Keep / Discard / Discard & Continue).
+- **Focus mode** — schová rozptylující aplikace, přesměruje blokované weby na
+  místní stránku a ztlumí notifikace. Spouští se z bočního panelu i z popoveru,
+  pravidla se nastavují v **Nastavení → Focus**.
 - **Automatické aktualizace** — podepsané, s potvrzením uživatele.
 - **České rozhraní** a dynamická ikona podle zvolené barevné palety.
 

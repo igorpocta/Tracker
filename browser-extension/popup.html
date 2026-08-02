@@ -23,6 +23,19 @@
       <button id="stop" class="btn" disabled>■ Zastavit</button>
     </section>
 
+    <section id="focus" class="card">
+      <div class="row">
+        <span class="muted">Blokování webů (Focus)</span>
+        <span id="focus-badge" class="badge badge-idle">…</span>
+      </div>
+      <button id="focus-grant" class="btn" hidden>Povolit blokování webů</button>
+      <p class="hint">
+        Focus mode přesměruje blokované stránky na místní stránku Trackeru.
+        Prohlížeč k tomu potřebuje přístup ke všem webům — povolení udělíte
+        tlačítkem výše. Pravidla se nastavují v Trackeru → Nastavení → Focus.
+      </p>
+    </section>
+
     <details id="settings">
       <summary>Nastavení</summary>
       <label class="muted" for="token">Bridge token (z Trackeru)</label>

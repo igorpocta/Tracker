@@ -50,9 +50,36 @@ a klikni **Povolit tento host**. Prohlížeč se zeptá na povolení pro tuto do
 a detekce úkolů se na ní zapne (dynamická registrace content-scriptu, přežije
 restart). Přidané hosty lze v popupu zase odebrat.
 
+## Focus mode — blokování webů
+
+Rozšíření zároveň vynucuje pravidla **Focus mode**. Blokovanou stránku
+přesměruje na `http://127.0.0.1:27420/blocked`, kde Tracker ukáže odpočet a
+dlaždice s povolenými weby.
+
+1. V Trackeru otevři **Nastavení → Focus** a přidej blokované (nebo povolené)
+   domény.
+2. V popupu rozšíření klikni na **Povolit blokování webů**. Prohlížeč se zeptá
+   na přístup ke všem stránkám — bez něj přesměrování fungovat nemůže.
+3. Focus spusť v Trackeru (boční panel nebo popover u hodin). Pravidla se
+   propíšou do prohlížeče do jedné sekundy.
+
+Blokování zajišťuje `declarativeNetRequest`, takže funguje i když je service
+worker uspaný.
+
+**Když Tracker neběží, rozšíření všechna pravidla smaže.** Jinak by vypnutá
+aplikace nechala prohlížeč přesměrovávat na adresu, která už neodpovídá.
+Rozšíření se proto pravidelně ptá, jestli je bridge naživu, a po dvou
+neúspěších se vypne. Focus mode je nástroj sebekázně, ne zámek.
+
+Safari extension neexistuje — na macOS ho Tracker obchází přes AppleScript a
+přepisuje URL aktivního tabu přímo. Stejná záloha funguje i pro Chrome na
+macOS, kdyby rozšíření nebylo nainstalované.
+
 ## Poznámky / omezení
 
 - Standardní matches: `*.atlassian.net`; další hosty se přidávají za běhu (viz výše).
 - Endpointy bridge: `GET /status`, `GET /timer-state`, `GET|POST /visible-ticket`,
-  `POST /start-timer`, `POST /stop-timer` (viz `src-tauri/src/server.rs`).
+  `POST /start-timer`, `POST /stop-timer`, `GET /focus/state` (viz
+  `src-tauri/src/server.rs`). Blokovací stránka `GET /blocked` a `GET /focus/ping`
+  token nevyžadují — volá je prohlížeč, kterému token předat nelze.
 - Token se ukládá do `chrome.storage.local` rozšíření, nikam jinam se neposílá.

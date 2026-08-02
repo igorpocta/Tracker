@@ -64,6 +64,7 @@ export default defineConfig(async ({ mode }) => {
         input: {
           main: resolve(__dirname, "index.html"),
           popover: resolve(__dirname, "popover.html"),
+          focusOverlay: resolve(__dirname, "focus-overlay.html"),
         },
       },
     },

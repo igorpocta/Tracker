@@ -43,6 +43,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
         17,
         include_str!("../../migrations/0017_dashboard_hidden_issues.sql"),
     ),
+    (18, include_str!("../../migrations/0018_focus_mode.sql")),
 ];
 
 pub fn run(db: &Db) -> Result<(), DbError> {

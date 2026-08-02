@@ -10,6 +10,8 @@
  *   │  ⏰  No timer running                         │
  *   │      Click an issue to start tracking         │
  *   ├──────────────────────────────────────────────┤
+ *   │  ⛨  Focus mode            [ Spustit Focus ]  │
+ *   ├──────────────────────────────────────────────┤
  *   │  RECENT                                       │
  *   │  [DEV-792]  Portál – Synchronizace…           │
  *   │  [DEV-304]  Úpravy ZZJ v OKO                  │
@@ -22,7 +24,14 @@
  * (`src-tauri/src/popover.rs::setup`) — no JS blur handler required.
  */
 import { emitTo } from "@tauri-apps/api/event";
-import { Clock, ExternalLink, LogOut, Settings as SettingsIcon } from "lucide-react";
+import {
+  Clock,
+  ExternalLink,
+  LogOut,
+  Settings as SettingsIcon,
+  Shield,
+  ShieldBan,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 
@@ -40,10 +49,12 @@ import {
 } from "./api/commands";
 import type { ActiveTimerState, IssueRow, ThemePref, WorklogRow } from "./api/types";
 import { useT } from "./i18n";
+import { useFocusSession } from "./hooks/useFocusSession";
 import { useNow } from "./hooks/useNow";
 import { useTauriEvent } from "./hooks/useTauriEvent";
 import { applyPalette } from "./lib/accent";
 import { dayOverlapSeconds, todayEndUnixS, todayStartUnixS } from "./lib/dates";
+import { formatRemaining } from "./lib/focus";
 import { formatDuration } from "./lib/format";
 import { elapsedSeconds } from "./stores/timerStore";
 
@@ -215,6 +226,8 @@ export function Popover() {
 
       <StatusCard active={active} />
 
+      <FocusRow />
+
       <RecentList recent={recent} busy={busy} onPick={startForIssue} />
 
       {error && (
@@ -229,6 +242,58 @@ export function Popover() {
 }
 
 // -----------------------------------------------------------------------------
+
+/**
+ * Focus mode start/stop, mirroring the sidebar button. Same backend command
+ * and the same `focus-changed` broadcast, so the two surfaces can't disagree.
+ */
+function FocusRow() {
+  const t = useT();
+  const { active, busy, remainingSeconds, toggle } = useFocusSession();
+
+  return (
+    <div className="px-4 py-2 flex items-center gap-2.5 border-t border-[var(--border-subtle)]">
+      <span
+        className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
+        style={{
+          background: active ? "var(--accent-soft)" : "var(--bg-active)",
+          color: active ? "var(--accent)" : "var(--text-tertiary)",
+        }}
+      >
+        {active ? (
+          <ShieldBan className="w-4 h-4" aria-hidden />
+        ) : (
+          <Shield className="w-4 h-4" aria-hidden />
+        )}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-medium leading-tight">{t("focus.title")}</div>
+        <div className="text-[11px] leading-tight text-[var(--text-tertiary)] truncate">
+          {active
+            ? remainingSeconds != null
+              ? t("focus.remaining", { time: formatRemaining(remainingSeconds) })
+              : t("focus.openEnded")
+            : t("focus.idle")}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        disabled={busy}
+        aria-label={t("focus.toggleAria")}
+        aria-pressed={active}
+        className="shrink-0 h-7 px-2.5 rounded-[var(--radius-md)] text-[11px] font-medium
+                   border transition-colors duration-150 disabled:cursor-progress"
+        style={{
+          borderColor: active ? "var(--accent)" : "var(--border-default)",
+          color: active ? "var(--accent)" : "var(--text-secondary)",
+        }}
+      >
+        {active ? t("focus.stop") : t("focus.start")}
+      </button>
+    </div>
+  );
+}
 
 function Header({
   todayRows,

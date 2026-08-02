@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="cs" data-window="focus-overlay">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tracker — Focus</title>
+    <style>
+      /* Transparent + decorationless window: the inner card carries the
+         background, corners and shadow, exactly like the popover. The window
+         is also click-through (set from Rust), so nothing here should try to
+         be interactive. */
+      html, body, #root {
+        background: transparent !important;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/focusOverlay.tsx"></script>
+  </body>
+</html>

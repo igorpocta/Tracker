@@ -18,6 +18,7 @@ pub mod config;
 pub mod connections;
 pub mod dashboard;
 pub mod favorites;
+pub mod focus;
 pub mod freelo;
 pub mod issues;
 pub mod misc;

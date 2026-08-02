@@ -12,7 +12,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { getPomodoroConfig } from "../api/commands";
+import { getFocusState, getPomodoroConfig } from "../api/commands";
 import { queryKeys } from "../api/queryKeys";
 import { useT } from "../i18n";
 import { useTimerStore } from "../stores/timerStore";
@@ -51,7 +51,7 @@ export function usePomodoroTimer() {
     const remaining = Math.max(1_000, workMs - elapsedMs);
 
     workTimerRef.current = window.setTimeout(() => {
-      notify(
+      void notify(
         t("common.pomodoro.breakTitle"),
         t("common.pomodoro.breakBody", {
           workMin: cfg.work_min,
@@ -61,7 +61,7 @@ export function usePomodoroTimer() {
 
       breakTimerRef.current = window.setTimeout(
         () => {
-          notify(
+          void notify(
             t("common.pomodoro.workTitle"),
             t("common.pomodoro.workBody", { workMin: cfg.work_min }),
           );
@@ -75,14 +75,34 @@ export function usePomodoroTimer() {
 }
 
 /**
+ * Je zapnutý Focus mode s tlumením notifikací?
+ *
+ * Ptáme se až v okamžiku odeslání, ne při naplánování — pomodoro interval
+ * běží desítky minut a uživatel mezitím Focus klidně zapne nebo vypne.
+ * Systémové Nerušit umíme zapnout jen přes uživatelovu zkratku (a na Windows
+ * vůbec), takže vlastní notifikace musíme potlačit sami.
+ */
+async function notificationsSuppressed(): Promise<boolean> {
+  try {
+    const state = await getFocusState();
+    return state.active && state.block_notifications;
+  } catch {
+    // Mimo Tauri (testy, web build) nebo při restartu backendu — radši
+    // notifikaci pošleme, než abychom ji tiše zahodili.
+    return false;
+  }
+}
+
+/**
  * Send a browser-level desktop notification. Tauri webview vystavuje Web
  * Notifications API, takže nepotřebujeme extra plugin.
  *
  * Pokud uživatel notifikace nepovolil, request si je rovnou vyžádá. Při
  * dalším volání už jen pošleme.
  */
-function notify(title: string, body: string) {
+async function notify(title: string, body: string) {
   if (typeof Notification === "undefined") return;
+  if (await notificationsSuppressed()) return;
   const send = () => {
     try {
       new Notification(title, { body });

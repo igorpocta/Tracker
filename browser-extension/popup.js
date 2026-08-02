@@ -180,6 +180,51 @@ $("add-host").addEventListener("click", async () => {
   renderHosts();
 });
 
+// ---- Focus mode ------------------------------------------------------------
+
+/**
+ * Reflect whether web blocking can actually work. Two things have to be true:
+ * the extension needs site access, and the desktop has to be reachable —
+ * without the latter the background worker clears its rules by design.
+ */
+async function refreshFocus() {
+  const badge = $("focus-badge");
+  const grant = $("focus-grant");
+  const res = await send({ type: "focus-status" });
+  if (!res.ok || !res.data) {
+    badge.textContent = "neznámé";
+    badge.className = "badge badge-idle";
+    grant.hidden = false;
+    return;
+  }
+  const { permission, rules } = res.data;
+  grant.hidden = permission;
+  if (!permission) {
+    badge.textContent = "bez povolení";
+    badge.className = "badge badge-err";
+  } else if (rules > 0) {
+    badge.textContent = "blokuje";
+    badge.className = "badge badge-ok";
+  } else {
+    badge.textContent = "připraveno";
+    badge.className = "badge badge-idle";
+  }
+}
+
+$("focus-grant").addEventListener("click", async () => {
+  // Must be the first await in the handler — permission requests are only
+  // allowed while the user gesture is still live.
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: ["*://*/*"] });
+  } catch (e) {
+    setMsg(String((e && e.message) || e), "err");
+    return;
+  }
+  setMsg(granted ? "Blokování webů povoleno." : "Povolení zamítnuto.", granted ? "ok" : "err");
+  refreshFocus();
+});
+
 // Prefill the token field (masked) if one is stored.
 chrome.storage.local.get("token").then(({ token }) => {
   if (token) $("token").value = token;
@@ -187,3 +232,4 @@ chrome.storage.local.get("token").then(({ token }) => {
 
 renderHosts();
 refresh();
+refreshFocus();

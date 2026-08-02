@@ -20,6 +20,7 @@ export const misc = {
     "misc.settings.tab.general": "Obecné",
     "misc.settings.tab.reporting": "Reporting",
     "misc.settings.tab.goals": "Cíle",
+    "misc.settings.tab.focus": "Focus",
     "misc.settings.tab.appearance": "Vzhled",
     "misc.settings.tab.about": "O aplikaci",
 
@@ -67,6 +68,7 @@ export const misc = {
     "misc.settings.tab.general": "General",
     "misc.settings.tab.reporting": "Reporting",
     "misc.settings.tab.goals": "Goals",
+    "misc.settings.tab.focus": "Focus",
     "misc.settings.tab.appearance": "Appearance",
     "misc.settings.tab.about": "About",
 

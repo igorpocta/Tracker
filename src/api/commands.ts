@@ -14,6 +14,12 @@ import type {
   CacheStats,
   ConnectionDto,
   DensityPref,
+  FocusRule,
+  FocusRuleAction,
+  FocusRuleKind,
+  FocusRuleMode,
+  FocusSettings,
+  FocusState,
   FontSizePref,
   FreeloProjectDto,
   IssueRow,
@@ -22,6 +28,7 @@ import type {
   MoveWorklogResult,
   ProviderUser,
   RefreshAllResult,
+  RunningApp,
   SaveConfigArgs,
   ThemePref,
   VisibleTicket,
@@ -1226,4 +1233,96 @@ export function setGlobalShortcut(
   accelerator: string,
 ): Promise<GlobalShortcutStatus> {
   return invoke<GlobalShortcutStatus>("set_global_shortcut", { accelerator });
+}
+
+// -----------------------------------------------------------------------------
+// Focus mode
+// -----------------------------------------------------------------------------
+
+/** `get_focus_state(): FocusState` — session state merged with the settings. */
+export function getFocusState(): Promise<FocusState> {
+  return invoke<FocusState>("get_focus_state");
+}
+
+/**
+ * `start_focus(duration_minutes?): FocusState` — omit the duration to use the
+ * configured default; `0` means "until I stop it".
+ */
+export function startFocus(durationMinutes?: number | null): Promise<FocusState> {
+  return invoke<FocusState>("start_focus", { durationMinutes: durationMinutes ?? null });
+}
+
+/** `stop_focus(): FocusState` */
+export function stopFocus(): Promise<FocusState> {
+  return invoke<FocusState>("stop_focus");
+}
+
+/** `toggle_focus(duration_minutes?): FocusState` — backs the one-button surfaces. */
+export function toggleFocus(durationMinutes?: number | null): Promise<FocusState> {
+  return invoke<FocusState>("toggle_focus", { durationMinutes: durationMinutes ?? null });
+}
+
+/** `get_focus_settings(): FocusSettings` */
+export function getFocusSettings(): Promise<FocusSettings> {
+  return invoke<FocusSettings>("get_focus_settings");
+}
+
+/** `set_focus_settings(settings): FocusSettings` — returns the stored result. */
+export function setFocusSettings(settings: FocusSettings): Promise<FocusSettings> {
+  return invoke<FocusSettings>("set_focus_settings", { settings });
+}
+
+/** `list_focus_rules(): FocusRule[]` */
+export function listFocusRules(): Promise<FocusRule[]> {
+  return invoke<FocusRule[]>("list_focus_rules");
+}
+
+/**
+ * `add_focus_rule(...): FocusRule[]` — upserts on `(kind, mode, pattern)` and
+ * returns the full list so the caller doesn't need a second round-trip.
+ */
+export function addFocusRule(args: {
+  kind: FocusRuleKind;
+  mode: FocusRuleMode;
+  pattern: string;
+  label?: string | null;
+  action?: FocusRuleAction | null;
+}): Promise<FocusRule[]> {
+  return invoke<FocusRule[]>("add_focus_rule", {
+    kind: args.kind,
+    mode: args.mode,
+    pattern: args.pattern,
+    label: args.label ?? null,
+    action: args.action ?? null,
+  });
+}
+
+/** `set_focus_rule_enabled(id, enabled): FocusRule[]` */
+export function setFocusRuleEnabled(id: number, enabled: boolean): Promise<FocusRule[]> {
+  return invoke<FocusRule[]>("set_focus_rule_enabled", { id, enabled });
+}
+
+/** `set_focus_rule_action(id, action): FocusRule[]` */
+export function setFocusRuleAction(id: number, action: FocusRuleAction): Promise<FocusRule[]> {
+  return invoke<FocusRule[]>("set_focus_rule_action", { id, action });
+}
+
+/** `delete_focus_rule(id): FocusRule[]` */
+export function deleteFocusRule(id: number): Promise<FocusRule[]> {
+  return invoke<FocusRule[]>("delete_focus_rule", { id });
+}
+
+/** `list_running_apps(): RunningApp[]` — candidates for the rule picker. */
+export function listRunningApps(): Promise<RunningApp[]> {
+  return invoke<RunningApp[]>("list_running_apps");
+}
+
+/** `list_focus_shortcuts(): string[]` — macOS Shortcuts; empty elsewhere. */
+export function listFocusShortcuts(): Promise<string[]> {
+  return invoke<string[]>("list_focus_shortcuts");
+}
+
+/** `open_dnd_settings(): ()` — opens the OS Do Not Disturb page. */
+export function openDndSettings(): Promise<void> {
+  return invoke<void>("open_dnd_settings");
 }

@@ -8,6 +8,7 @@
  *   │ 📅  │  ← Kalendář
  *   │ 🎯  │  ← Cíle
  *   │ ··  │
+ *   │ ⛨   │  ← Focus mode (start/stop)
  *   │ ⚙   │  ← Nastavení (lower group)
  *   │ ◯   │  ← Cache count / running ring
  *   └─────┘
@@ -28,6 +29,8 @@ import {
   LayoutDashboard,
   Loader2,
   Settings as SettingsIcon,
+  Shield,
+  ShieldBan,
   Target,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -41,9 +44,11 @@ import {
   listUnassignedWorklogs,
   refreshAll,
 } from "../../api/commands";
+import { useFocusSession } from "../../hooks/useFocusSession";
 import { useNow } from "../../hooks/useNow";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { useT } from "../../i18n";
+import { formatRemaining } from "../../lib/focus";
 import { queryKeys } from "../../api/queryKeys";
 import { elapsedSeconds, useTimerStore } from "../../stores/timerStore";
 
@@ -250,8 +255,9 @@ export function IconSidebar() {
 
       <div className="flex-1" />
 
-      {/* Settings + user ring (bottom group) */}
+      {/* Focus toggle + settings + user ring (bottom group) */}
       <nav className="flex flex-col items-stretch gap-2 w-full px-2 pb-1">
+        <FocusToggle />
         <SidebarLink
           item={{
             to: "/settings",
@@ -270,6 +276,52 @@ export function IconSidebar() {
         onRefresh={handleRefresh}
       />
     </aside>
+  );
+}
+
+/**
+ * Start/stop Focus mode. Deliberately a button, not a nav link — the rules
+ * live in Settings → Focus and this rail is for the one action you take
+ * mid-work. Lights up in the accent while a session runs.
+ */
+function FocusToggle() {
+  const t = useT();
+  const { active, busy, remainingSeconds, toggle } = useFocusSession();
+
+  const label = active ? t("focus.stop") : t("focus.start");
+  const title =
+    active && remainingSeconds != null
+      ? `${label} · ${t("focus.remaining", { time: formatRemaining(remainingSeconds) })}`
+      : label;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      disabled={busy}
+      title={title}
+      aria-label={t("focus.toggleAria")}
+      aria-pressed={active}
+      className={clsx(
+        "group relative flex items-center justify-center h-10 rounded-[var(--radius-md)]",
+        "transition-colors duration-150 cursor-pointer appearance-none",
+        "disabled:cursor-progress",
+      )}
+      style={
+        active
+          ? { background: "var(--accent-soft)", color: "var(--accent)" }
+          : { color: "var(--sidebar-text-muted)" }
+      }
+    >
+      <span className="pointer-events-none">
+        {active ? (
+          <ShieldBan className="w-5 h-5" aria-hidden />
+        ) : (
+          <Shield className="w-5 h-5" aria-hidden />
+        )}
+      </span>
+      <SidebarTooltip label={title} />
+    </button>
   );
 }
 

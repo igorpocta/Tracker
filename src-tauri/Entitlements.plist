@@ -10,5 +10,10 @@
   <!-- Odchozí síť (Jira / Freelo / fonty). -->
   <key>com.apple.security.network.client</key>
   <true/>
+  <!-- Focus mode řídí Safari a Chrome přes Apple Events (přepis URL
+       blokovaného tabu). Bez tohoto entitlementu hardened runtime odmítne
+       osascript ještě dřív, než se systém stihne zeptat na povolení. -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
 </dict>
 </plist>

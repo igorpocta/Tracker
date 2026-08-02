@@ -3,6 +3,7 @@ pub mod audit_helpers;
 pub mod cache;
 pub mod commands;
 pub mod config;
+pub mod focus;
 pub mod freelo;
 pub mod http_base;
 pub mod jira;
@@ -194,6 +195,18 @@ pub fn run() {
                     );
                 }
             }
+
+            // Focus mode: pick up a session that was still running when the
+            // app last closed, then start the enforcement loop. The loop is
+            // idle-cheap — it only does real work while a session runs.
+            {
+                let state = app.state::<AppState>();
+                crate::focus::engine::restore(&handle, &state);
+            }
+            // Build the (hidden) overlay window here, on the main thread —
+            // enforcement runs on a blocking worker and must not create it.
+            crate::focus::overlay::prewarm(&handle);
+            crate::focus::engine::spawn(handle.clone());
 
             crate::server::start(handle);
 
@@ -526,6 +539,21 @@ pub fn run() {
             // Global timer-toggle shortcut
             commands::shortcuts::get_global_shortcut,
             commands::shortcuts::set_global_shortcut,
+            // Focus mode
+            commands::focus::get_focus_state,
+            commands::focus::start_focus,
+            commands::focus::stop_focus,
+            commands::focus::toggle_focus,
+            commands::focus::get_focus_settings,
+            commands::focus::set_focus_settings,
+            commands::focus::list_focus_rules,
+            commands::focus::add_focus_rule,
+            commands::focus::set_focus_rule_enabled,
+            commands::focus::set_focus_rule_action,
+            commands::focus::delete_focus_rule,
+            commands::focus::list_running_apps,
+            commands::focus::list_focus_shortcuts,
+            commands::focus::open_dnd_settings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

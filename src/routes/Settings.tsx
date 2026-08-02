@@ -6,6 +6,7 @@
  *   • General (day timeline toggle, time input style, auto re-index interval)
  *   • Reporting (hourly rate, currency)
  *   • Goals (daily hours goal slider)
+ *   • Focus (blocked apps / sites, notification silencing)
  *   • Appearance (theme + palette)
  *   • Extensions (placeholder)
  *
@@ -20,6 +21,7 @@ import { useT } from "../i18n";
 import About from "../components/Settings/About";
 import Appearance from "../components/Settings/Appearance";
 import Connection from "../components/Settings/Connection";
+import Focus from "../components/Settings/Focus";
 import General from "../components/Settings/General";
 import Reporting from "../components/Settings/Reporting";
 import SettingsGoals from "../components/Settings/SettingsGoals";
@@ -29,6 +31,7 @@ type TabId =
   | "general"
   | "reporting"
   | "goals"
+  | "focus"
   | "appearance"
   | "about";
 
@@ -37,6 +40,7 @@ const TABS: { id: TabId; labelKey: string }[] = [
   { id: "general", labelKey: "misc.settings.tab.general" },
   { id: "reporting", labelKey: "misc.settings.tab.reporting" },
   { id: "goals", labelKey: "misc.settings.tab.goals" },
+  { id: "focus", labelKey: "misc.settings.tab.focus" },
   { id: "appearance", labelKey: "misc.settings.tab.appearance" },
   { id: "about", labelKey: "misc.settings.tab.about" },
 ];
@@ -90,6 +94,7 @@ export default function Settings() {
         {active === "general" && <General />}
         {active === "reporting" && <Reporting />}
         {active === "goals" && <SettingsGoals />}
+        {active === "focus" && <Focus />}
         {active === "appearance" && <Appearance />}
         {active === "about" && <About />}
       </main>

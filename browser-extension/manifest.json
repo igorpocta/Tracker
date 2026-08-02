@@ -3,20 +3,36 @@
   "name": "Tracker Bridge",
   "version": "1.0.0",
   "description": "Hlásí do desktopové aplikace Tracker, na kterém Jira úkolu právě jsi, a umožní odsud spustit/zastavit časovač.",
-  "permissions": ["storage", "tabs", "scripting"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "declarativeNetRequest",
+    "alarms"
+  ],
   "host_permissions": [
     "http://127.0.0.1:27420/*",
     "http://localhost:27420/*",
     "https://*.atlassian.net/*"
   ],
-  "optional_host_permissions": ["*://*/*"],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module",
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["https://*.atlassian.net/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://*.atlassian.net/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

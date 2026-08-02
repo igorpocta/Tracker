@@ -30,7 +30,7 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use axum::{
-    extract::{Request, State},
+    extract::{Query, RawQuery, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -251,8 +251,15 @@ impl BrowserBridgeToken {
 /// cross-origin preflight, so an arbitrary web tab cannot reach these
 /// endpoints (browser extensions with `host_permissions` bypass CORS
 /// and CAN — that's the intended consumer).
+/// Two public routes sit outside the bearer-token wall, because the *browser*
+/// requests them and a browser cannot be handed the token:
+///
+/// * `/blocked` is the page a blocked tab lands on. It is rendered
+///   server-side, so no local page can pull the rule list out of it.
+/// * `/focus/ping` reports only whether a session is running, which is
+///   already obvious to anyone looking at the screen.
 pub fn build_router<R: Runtime>(state: ServerState<R>, bearer_token: Arc<String>) -> Router {
-    Router::new()
+    let authenticated = Router::new()
         .route("/status", get(status_handler::<R>))
         .route("/jira-host", get(jira_host_handler::<R>))
         .route("/active-ticket", get(active_ticket_handler::<R>))
@@ -261,8 +268,16 @@ pub fn build_router<R: Runtime>(state: ServerState<R>, bearer_token: Arc<String>
         .route("/visible-ticket", post(post_visible_ticket_handler::<R>))
         .route("/start-timer", post(start_timer_handler::<R>))
         .route("/stop-timer", post(stop_timer_handler::<R>))
+        .route("/focus/state", get(focus_state_handler::<R>))
         .route_layer(middleware::from_fn_with_state(bearer_token, require_bearer))
-        .with_state(state)
+        .with_state(state.clone());
+
+    let public = Router::new()
+        .route("/blocked", get(blocked_page_handler::<R>))
+        .route("/focus/ping", get(focus_ping_handler::<R>))
+        .with_state(state);
+
+    authenticated.merge(public)
 }
 
 fn run_server(state: ServerState<tauri::Wry>, bearer_token: Arc<String>) {
@@ -520,9 +535,503 @@ async fn post_visible_ticket_handler<R: Runtime>(
 }
 
 // -----------------------------------------------------------------------------
+// Focus mode.
+// -----------------------------------------------------------------------------
+
+/// Longest a `/focus/state` long-poll is allowed to park. Kept under the
+/// browser's own idle timeouts so the extension's service worker isn't held
+/// open indefinitely.
+const FOCUS_MAX_WAIT_SECS: u64 = 30;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct FocusStateQuery {
+    /// Seconds to wait for a change before replying. `0`/absent = reply now.
+    pub wait: Option<u64>,
+    /// Generation the caller already has. When it differs from ours we reply
+    /// immediately — this closes the race where a change lands between the
+    /// caller's last reply and its next request.
+    #[serde(rename = "gen")]
+    pub generation: Option<u64>,
+}
+
+/// The ruleset as the browser extension consumes it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusRulesResponse {
+    pub active: bool,
+    pub generation: u64,
+    /// Allow-list mode: block every site that isn't explicitly allowed.
+    pub strict_sites: bool,
+    /// Site patterns to block.
+    pub block: Vec<String>,
+    /// Site patterns to allow (also the exceptions to `block`).
+    pub allow: Vec<String>,
+    /// Where blocked requests should be redirected.
+    pub blocked_page: String,
+}
+
+fn focus_rules_response(app_state: &AppState) -> FocusRulesResponse {
+    let runtime = app_state
+        .focus
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let settings = crate::focus::engine::load_settings(&app_state.db);
+    let rules = crate::cache::focus::list_enabled(&app_state.db).unwrap_or_default();
+
+    let collect = |mode: &str| -> Vec<String> {
+        rules
+            .iter()
+            .filter(|r| r.kind == "site" && r.mode == mode)
+            .map(|r| r.pattern.clone())
+            .collect()
+    };
+
+    FocusRulesResponse {
+        active: runtime.active,
+        generation: runtime.generation,
+        strict_sites: settings.strict_sites,
+        block: collect("block"),
+        allow: collect("allow"),
+        blocked_page: format!("http://127.0.0.1:{SERVER_PORT}/blocked"),
+    }
+}
+
+async fn focus_state_handler<R: Runtime>(
+    State(state): State<ServerState<R>>,
+    Query(query): Query<FocusStateQuery>,
+) -> Response {
+    state.bump_heartbeat();
+
+    // Grab the waker before any await so the Tauri state guard never crosses
+    // a suspension point.
+    let notify = match state.app.try_state::<AppState>() {
+        Some(s) => s.focus_notify.clone(),
+        None => return err_response(StatusCode::INTERNAL_SERVER_ERROR, "app state missing"),
+    };
+
+    let wait = query.wait.unwrap_or(0).min(FOCUS_MAX_WAIT_SECS);
+    if wait > 0 {
+        loop {
+            // Register as a waiter BEFORE reading the generation. `Notify`
+            // only wakes waiters that are already registered, so reading
+            // first would drop a change landing in between and stall the
+            // caller for the whole wait window.
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let current = {
+                let Some(app_state) = state.app.try_state::<AppState>() else {
+                    break;
+                };
+                // Bound to a local so the read guard drops before the Tauri
+                // state guard — the block's tail expression would otherwise
+                // outlive `app_state`.
+                let generation = app_state
+                    .focus
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .generation;
+                generation
+            };
+            if query.generation != Some(current) {
+                break;
+            }
+            let timed_out = tokio::time::timeout(std::time::Duration::from_secs(wait), notified)
+                .await
+                .is_err();
+            if timed_out {
+                break;
+            }
+        }
+    }
+
+    let Some(app_state) = state.app.try_state::<AppState>() else {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, "app state missing");
+    };
+    Json(focus_rules_response(&app_state)).into_response()
+}
+
+async fn focus_ping_handler<R: Runtime>(State(state): State<ServerState<R>>) -> Response {
+    // Deliberately does NOT bump the heartbeat: this is the block page
+    // polling, not the extension, and it would fake an "extension connected"
+    // signal in Settings.
+    let active = state
+        .app
+        .try_state::<AppState>()
+        .map(|s| crate::focus::engine::is_active(&s))
+        .unwrap_or(false);
+    Json(serde_json::json!({ "active": active })).into_response()
+}
+
+/// One "go here instead" tile on the block page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedTile {
+    pub label: String,
+    pub url: String,
+}
+
+/// Minimal HTML entity escaping. The block page interpolates a URL the user
+/// was redirected from, which is attacker-influenced in the sense that any
+/// page can link to a nasty URL and get it echoed back here.
+pub fn html_escape(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Make a JSON literal safe to sit inside a `<script>` element.
+///
+/// JSON encoding alone is not enough: `serde_json` leaves `<` and `>` intact,
+/// so a URL containing `</script>` would close the block and everything after
+/// it would be parsed as markup. The HTML parser doesn't look inside string
+/// escapes, and `<` is the same character to JavaScript — so escaping the
+/// three markup-significant characters closes the hole without changing the
+/// value. U+2028/U+2029 are escaped too; they terminate lines in older
+/// JavaScript parsers.
+pub fn escape_json_for_script(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+/// Tiles for the allow-listed sites, so a blocked tab offers somewhere useful
+/// to go instead of being a dead end.
+pub fn blocked_tiles(app_state: &AppState) -> Vec<BlockedTile> {
+    crate::cache::focus::list_enabled(&app_state.db)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.kind == "site" && r.mode == "allow")
+        .map(|r| BlockedTile {
+            label: r.label.unwrap_or_else(|| r.pattern.clone()),
+            url: format!("https://{}", r.pattern),
+        })
+        .collect()
+}
+
+/// Render the block page.
+///
+/// Server-rendered rather than a static page plus a JSON API: the allow-list
+/// is the user's own browsing profile, and a public endpoint serving it would
+/// hand that list to every page running on the machine.
+pub fn render_blocked_page(
+    original_url: Option<&str>,
+    ends_at: Option<i64>,
+    tiles: &[BlockedTile],
+) -> String {
+    let host = original_url
+        .and_then(|u| crate::focus::rules::split_url(u).map(|(host, _)| host))
+        .unwrap_or_default();
+    let host_line = if host.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<p class=\"host\">Stránka <strong>{}</strong> je teď zablokovaná.</p>",
+            html_escape(&host)
+        )
+    };
+
+    let countdown = match ends_at {
+        Some(ts) => format!(
+            "<p class=\"countdown\" data-ends-at=\"{ts}\">Zbývá <span id=\"remaining\">…</span></p>"
+        ),
+        None => "<p class=\"countdown\">Běží, dokud ho nezastavíte.</p>".to_string(),
+    };
+
+    let tiles_html = if tiles.is_empty() {
+        String::new()
+    } else {
+        let items: String = tiles
+            .iter()
+            .map(|tile| {
+                let initial = tile
+                    .label
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_else(|| "?".into());
+                format!(
+                    "<a class=\"tile\" href=\"{url}\"><span class=\"mono\">{initial}</span>\
+                     <span class=\"tile-label\">{label}</span></a>",
+                    url = html_escape(&tile.url),
+                    initial = html_escape(&initial),
+                    label = html_escape(&tile.label),
+                )
+            })
+            .collect();
+        format!("<h2>Kam můžete</h2><div class=\"tiles\">{items}</div>")
+    };
+
+    let return_target = original_url
+        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .and_then(|u| serde_json::to_string(u).ok())
+        .map(|json| escape_json_for_script(&json))
+        .unwrap_or_else(|| "null".to_string());
+
+    format!(
+        r#"<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus mode je aktivní — Tracker</title>
+<style>
+  :root {{
+    color-scheme: light dark;
+    --bg: #f4f5f7; --surface: #ffffff; --text: #17181c; --muted: #6b7280;
+    --border: #e3e5e9; --accent: #0f766e;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{
+      --bg: #121316; --surface: #1c1e22; --text: #ecedef; --muted: #9aa1ab;
+      --border: #2b2e34; --accent: #2dd4bf;
+    }}
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; padding: 32px; background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }}
+  main {{
+    width: 100%; max-width: 560px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 16px; padding: 36px 32px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }}
+  .brand {{
+    font-style: italic; font-weight: 600; font-size: 26px; color: var(--accent);
+    margin: 0 0 20px;
+  }}
+  h1 {{ font-size: 22px; margin: 0 0 8px; }}
+  .host, .countdown {{ margin: 0 0 6px; color: var(--muted); font-size: 14px; }}
+  h2 {{
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 28px 0 12px;
+  }}
+  .tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }}
+  .tile {{
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 10px; text-decoration: none;
+    color: var(--text); background: var(--bg); overflow: hidden;
+  }}
+  .tile:hover {{ border-color: var(--accent); }}
+  .mono {{
+    flex: 0 0 28px; height: 28px; border-radius: 8px; background: var(--accent);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 13px;
+  }}
+  .tile-label {{ font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  footer {{ margin-top: 28px; font-size: 12px; color: var(--muted); }}
+</style>
+</head>
+<body>
+<main>
+  <p class="brand">Tracker.</p>
+  <h1>Focus mode je aktivní</h1>
+  {host_line}
+  {countdown}
+  {tiles_html}
+  <footer>Až Focus skončí, stránka se sama vrátí zpět.</footer>
+</main>
+<script>
+  var RETURN_TO = {return_target};
+  var el = document.querySelector('.countdown[data-ends-at]');
+  if (el) {{
+    var endsAt = parseInt(el.getAttribute('data-ends-at'), 10) * 1000;
+    var out = document.getElementById('remaining');
+    var render = function () {{
+      var left = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      var h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+      out.textContent = (h ? h + ' h ' : '') + m + ' min ' + s + ' s';
+    }};
+    render();
+    setInterval(render, 1000);
+  }}
+  setInterval(function () {{
+    fetch('/focus/ping', {{ cache: 'no-store' }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (data) {{
+        if (!data.active) {{
+          if (RETURN_TO) {{ location.replace(RETURN_TO); }} else {{ history.back(); }}
+        }}
+      }})
+      .catch(function () {{ /* Tracker stopped — the extension clears its rules */ }});
+  }}, 5000);
+</script>
+</body>
+</html>"#
+    )
+}
+
+/// `GET /blocked?u=<original url>`.
+///
+/// The `u` value is read straight off the raw query string rather than
+/// through a parser, because the extension's `regexSubstitution` splices the
+/// original URL in unencoded — query delimiters and all.
+async fn blocked_page_handler<R: Runtime>(
+    State(state): State<ServerState<R>>,
+    RawQuery(raw): RawQuery,
+) -> Response {
+    let original = raw.as_deref().and_then(extract_u_param);
+    let (ends_at, tiles) = match state.app.try_state::<AppState>() {
+        Some(app_state) => {
+            let ends_at = app_state
+                .focus
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .ends_at;
+            (ends_at, blocked_tiles(&app_state))
+        }
+        None => (None, Vec::new()),
+    };
+
+    let html = render_blocked_page(original.as_deref(), ends_at, &tiles);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
+}
+
+/// Pull the `u` parameter out of a raw query string, taking everything after
+/// it verbatim. Returns `None` for anything that isn't an http(s) URL.
+pub fn extract_u_param(raw_query: &str) -> Option<String> {
+    let rest = if let Some(stripped) = raw_query.strip_prefix("u=") {
+        stripped
+    } else {
+        let idx = raw_query.find("&u=")?;
+        &raw_query[idx + 3..]
+    };
+    let decoded = crate::focus::percent_decode(rest);
+    if decoded.starts_with("http://") || decoded.starts_with("https://") {
+        Some(decoded)
+    } else {
+        None
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Helpers.
 // -----------------------------------------------------------------------------
 
 fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+
+    #[test]
+    fn u_param_is_taken_verbatim_including_its_own_query() {
+        assert_eq!(
+            extract_u_param("u=https://reddit.com/r/x?sort=new&t=all"),
+            Some("https://reddit.com/r/x?sort=new&t=all".to_string())
+        );
+    }
+
+    #[test]
+    fn u_param_can_follow_another_parameter() {
+        assert_eq!(
+            extract_u_param("from=ext&u=https://x.com/a"),
+            Some("https://x.com/a".to_string())
+        );
+    }
+
+    #[test]
+    fn percent_encoded_u_param_is_decoded() {
+        assert_eq!(
+            extract_u_param("u=https%3A%2F%2Fx.com%2Fa%20b"),
+            Some("https://x.com/a b".to_string())
+        );
+    }
+
+    #[test]
+    fn non_http_u_param_is_rejected() {
+        assert_eq!(extract_u_param("u=javascript:alert(1)"), None);
+        assert_eq!(extract_u_param("u=file:///etc/passwd"), None);
+        assert_eq!(extract_u_param("other=1"), None);
+    }
+
+    #[test]
+    fn html_escaping_neutralises_markup() {
+        assert_eq!(
+            html_escape("<script>\"x\"&'y'</script>"),
+            "&lt;script&gt;&quot;x&quot;&amp;&#39;y&#39;&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn rendered_page_escapes_the_host_it_echoes_back() {
+        let html = render_blocked_page(
+            Some("https://x.com/<img src=x onerror=alert(1)>"),
+            None,
+            &[],
+        );
+        assert!(!html.contains("<img src=x"));
+        assert!(html.contains("x.com"));
+    }
+
+    #[test]
+    fn rendered_page_embeds_the_return_url_as_json() {
+        let html = render_blocked_page(Some("https://x.com/a\"b"), None, &[]);
+        assert!(html.contains(r#"var RETURN_TO = "https://x.com/a\"b""#));
+    }
+
+    #[test]
+    fn return_url_cannot_close_the_script_element() {
+        let html = render_blocked_page(
+            Some("https://x.com/</script><img src=x onerror=alert(1)>"),
+            None,
+            &[],
+        );
+        assert!(!html.contains("</script><img"));
+        assert!(html.contains("\\u003c/script\\u003e"));
+        // Exactly one real closing tag: the one we wrote.
+        assert_eq!(html.matches("</script>").count(), 1);
+    }
+
+    #[test]
+    fn rendered_page_refuses_a_non_http_return_url() {
+        let html = render_blocked_page(Some("javascript:alert(1)"), None, &[]);
+        assert!(html.contains("var RETURN_TO = null"));
+    }
+
+    #[test]
+    fn tiles_render_a_link_per_allowed_site() {
+        let tiles = vec![
+            BlockedTile {
+                label: "Jira".into(),
+                url: "https://team.atlassian.net".into(),
+            },
+            BlockedTile {
+                label: "Docs".into(),
+                url: "https://docs.rs".into(),
+            },
+        ];
+        let html = render_blocked_page(Some("https://reddit.com"), Some(1_700_000_000), &tiles);
+        assert!(html.contains("https://team.atlassian.net"));
+        assert!(html.contains("https://docs.rs"));
+        assert!(html.contains("data-ends-at=\"1700000000\""));
+    }
+
+    #[test]
+    fn page_without_tiles_omits_the_section() {
+        let html = render_blocked_page(Some("https://reddit.com"), None, &[]);
+        assert!(!html.contains("Kam můžete"));
+        assert!(html.contains("Focus mode je aktivní"));
+    }
 }

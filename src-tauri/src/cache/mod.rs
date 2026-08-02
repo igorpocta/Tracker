@@ -5,6 +5,7 @@ pub mod connections;
 pub mod dashboard_hidden;
 pub mod db;
 pub mod favorites;
+pub mod focus;
 pub mod issues;
 pub mod migrations;
 pub mod project_colors;

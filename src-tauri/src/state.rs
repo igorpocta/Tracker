@@ -91,6 +91,13 @@ pub struct AppState {
     /// bar all at once — the second caller is rejected instead of hammering
     /// the provider with duplicate pulls.
     pub reindex_in_progress: std::sync::atomic::AtomicBool,
+    /// Focus mode session state. Read on every enforcement tick and by the
+    /// bridge's long-poll endpoint, written only by the session lifecycle.
+    pub focus: RwLock<crate::focus::engine::FocusRuntime>,
+    /// Woken whenever [`Self::focus`] or the focus ruleset changes, so the
+    /// browser extension's long-poll returns immediately instead of waiting
+    /// out its timeout.
+    pub focus_notify: std::sync::Arc<tokio::sync::Notify>,
 
     // ----- Legacy single-Jira shims (Phase 17 → 18A bridge) -------------------
     /// Last-known Jira configuration loaded from disk, if any. Phase 18A:
@@ -109,6 +116,8 @@ impl AppState {
             activity_recorder: ActivityRecorder::new(),
             worklog_push_lock: Mutex::new(()),
             reindex_in_progress: std::sync::atomic::AtomicBool::new(false),
+            focus: RwLock::new(crate::focus::engine::FocusRuntime::default()),
+            focus_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
             jira_config: RwLock::new(None),
             jira_client: RwLock::new(None),
         }
