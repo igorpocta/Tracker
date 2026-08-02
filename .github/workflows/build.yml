@@ -13,10 +13,33 @@ jobs:
   # Phase 18C — Item 25: a fast "checks" job that runs on every push + PR.
   # Mirrors `scripts/precommit.sh` so contributors see the same gate locally.
   # Always blocks the bundle matrix below.
+  #
+  # Runs on BOTH platforms. It used to be macOS-only, which meant everything
+  # behind `#[cfg(target_os = "windows")]` — the Focus mode Win32 FFI, the
+  # native title-bar handling, the Do Not Disturb deep link — was never
+  # compiled by anything until the `bundle` job ran, and that job only fires
+  # on a tag. A Windows-only compile error therefore surfaced at release time
+  # rather than on the pull request that introduced it.
+  #
+  # The JS-side checks stay macOS-only: they are platform-independent and
+  # running them twice buys nothing (Windows runners also bill at a higher
+  # rate). `npm ci` + `npm run build` DO run on both, because `tauri-build`
+  # resolves `frontendDist` at compile time and fails without `dist/`.
   # ---------------------------------------------------------------------------
   checks:
-    name: Lint + Typecheck + Tests
-    runs-on: macos-latest
+    name: Checks · ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-latest
+            # Owns the platform-independent checks.
+            js_checks: true
+          - label: Windows
+            os: windows-latest
+            js_checks: false
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,18 +62,24 @@ jobs:
         run: npm ci
 
       - name: TypeScript typecheck
+        if: matrix.js_checks
         run: npm run typecheck
 
       - name: ESLint
+        if: matrix.js_checks
         run: npm run lint
 
       - name: Vitest
+        if: matrix.js_checks
         run: npm run test
 
+      # Both platforms: `tauri-build` needs `dist/` to exist before the Rust
+      # crate will compile at all.
       - name: Frontend build
         run: npm run build
 
       - name: Rust format check
+        if: matrix.js_checks
         working-directory: src-tauri
         run: cargo fmt -- --check
 
