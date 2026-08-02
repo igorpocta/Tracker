@@ -46,27 +46,37 @@ const BACKUP_VERSION: u32 = 1;
 /// protože nejsou v `connections` tabulce.
 #[tauri::command]
 pub async fn export_backup(state: tauri::State<'_, AppState>) -> Result<BackupBundle, String> {
-    export_inner(&state.db).map_err(|e| e.to_string())
+    export_inner(&state.db)
 }
 
-fn export_inner(db: &Db) -> Result<BackupBundle, rusqlite::Error> {
-    let conn = db.pool().get().expect("db pool");
+fn export_inner(db: &Db) -> Result<BackupBundle, String> {
+    // A pool that cannot hand out a connection is a condition to report, not
+    // to panic on: unwinding out of a Tauri command breaks the IPC call
+    // instead of showing the user what went wrong.
+    let conn = db
+        .pool()
+        .get()
+        .map_err(|e| format!("databáze není dostupná: {e}"))?;
     let tables = BackupTables {
-        worklogs: dump_table(
+        worklogs: dump_required(
             &conn,
+            "worklogs",
             "SELECT id, connection_id, issue_key, description, started_at, ended_at, logged_at, updated_at, is_synced, synced_at, remote_id, pending_delete_at, tombstoned_at FROM worklogs",
         )?,
-        issues_v2: dump_table(
+        issues_v2: dump_required(
             &conn,
+            "issues_v2",
             "SELECT id, connection_id, issue_id, issue_key, name, parent_key, parent_name, status, is_archived, created_at, updated_at, remote_updated_at, last_synced_at FROM issues_v2",
         )?,
-        connections: dump_table(
+        connections: dump_required(
             &conn,
+            "connections",
             "SELECT id, provider, name, enabled, created_at, updated_at, config_json FROM connections",
         )?,
-        app_settings: dump_table(&conn, "SELECT key, value FROM app_settings")?,
-        audit_log: dump_table(
+        app_settings: dump_required(&conn, "app_settings", "SELECT key, value FROM app_settings")?,
+        audit_log: dump_required(
             &conn,
+            "audit_log",
             "SELECT id, occurred_at, op, issue_key, worklog_id, before_json, after_json, success, error, source_audit_id FROM audit_log",
         )?,
         favorite_issues: dump_optional_table(
@@ -92,6 +102,15 @@ fn export_inner(db: &Db) -> Result<BackupBundle, rusqlite::Error> {
     })
 }
 
+/// Dump a table the backup cannot do without, naming it if the read fails.
+fn dump_required(
+    conn: &rusqlite::Connection,
+    table: &str,
+    sql: &str,
+) -> Result<Vec<Value>, String> {
+    dump_table(conn, sql).map_err(|e| format!("čtení tabulky {table} selhalo: {e}"))
+}
+
 /// Is `table` present in this database?
 fn table_exists(conn: &rusqlite::Connection, table: &str) -> Result<bool, rusqlite::Error> {
     conn.query_row(
@@ -113,11 +132,11 @@ fn dump_optional_table(
     conn: &rusqlite::Connection,
     table: &str,
     sql: &str,
-) -> Result<Vec<Value>, rusqlite::Error> {
-    if !table_exists(conn, table)? {
+) -> Result<Vec<Value>, String> {
+    if !table_exists(conn, table).map_err(|e| format!("kontrola tabulky {table} selhala: {e}"))? {
         return Ok(Vec::new());
     }
-    dump_table(conn, sql)
+    dump_required(conn, table, sql)
 }
 
 /// Read all rows from a SELECT and convert to `Vec<serde_json::Value>` keyed
