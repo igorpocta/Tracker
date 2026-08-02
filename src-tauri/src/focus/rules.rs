@@ -259,12 +259,29 @@ pub fn split_url(raw: &str) -> Option<(String, String)> {
 
 /// `true` for loopback hosts, which are never blocked — the block page itself
 /// lives on `127.0.0.1` and dead-ending it would strand the browser.
+///
+/// Addresses are parsed rather than prefix-matched. `starts_with("127.")` also
+/// swallowed ordinary domains: `127.foo.com` is a perfectly legal name, and
+/// `127.0.0.1.nip.io` is a real service, so either one could have slipped past
+/// blocking untouched.
 pub fn is_loopback_host(host: &str) -> bool {
-    matches!(
-        host,
-        "localhost" | "127.0.0.1" | "0.0.0.0" | "[::1]" | "::1"
-    ) || host.ends_with(".localhost")
-        || host.starts_with("127.")
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    // URLs bracket IPv6 literals; the parser wants them bare.
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    if let Ok(v4) = bare.parse::<std::net::Ipv4Addr>() {
+        // The whole 127.0.0.0/8 block, plus 0.0.0.0, which browsers route to
+        // the local machine too.
+        return v4.is_loopback() || v4.is_unspecified();
+    }
+    if let Ok(v6) = bare.parse::<std::net::Ipv6Addr>() {
+        return v6.is_loopback() || v6.is_unspecified();
+    }
+    false
 }
 
 /// Normalise a user-typed site pattern into `(host, path_prefix)`.
@@ -574,6 +591,39 @@ mod tests {
         assert_eq!(
             decide_site("http://localhost:1420/", &rules, true),
             SiteDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn loopback_covers_the_whole_127_block_and_both_families() {
+        for host in [
+            "localhost",
+            "dev.localhost",
+            "127.0.0.1",
+            "127.1.2.3",
+            "0.0.0.0",
+            "::1",
+            "[::1]",
+        ] {
+            assert!(is_loopback_host(host), "{host} should be loopback");
+        }
+    }
+
+    #[test]
+    fn a_domain_that_merely_starts_with_127_is_not_loopback() {
+        // Both are legal names and were previously allowed straight through,
+        // bypassing blocking entirely.
+        for host in ["127.foo.com", "127.0.0.1.nip.io", "127x.example.com"] {
+            assert!(!is_loopback_host(host), "{host} must not be loopback");
+        }
+    }
+
+    #[test]
+    fn a_blocked_site_on_a_127_lookalike_domain_is_still_blocked() {
+        let rules = vec![rule("site", "block", "127.foo.com", "hide")];
+        assert_eq!(
+            decide_site("https://127.foo.com/x", &rules, false),
+            SiteDecision::Blocked
         );
     }
 

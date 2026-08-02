@@ -92,6 +92,25 @@ describe("buildFocusRules", () => {
     expect(new RegExp(loopback.condition.regexFilter).test(BASE.blocked_page)).toBe(true);
   });
 
+  it("keeps loopback in step with the desktop's own check", () => {
+    const [loopback] = buildFocusRules({ ...BASE, strict_sites: true, allow: ["x.com"] });
+    const re = new RegExp(loopback.condition.regexFilter);
+    for (const url of [
+      "http://127.0.0.1:27420/blocked",
+      "http://127.1.2.3/",
+      "http://0.0.0.0:8080/",
+      "http://localhost:1420/",
+      "http://dev.localhost/",
+      "http://[::1]:9000/",
+    ]) {
+      expect(re.test(url), url).toBe(true);
+    }
+    // Lookalike domains must not inherit the exemption.
+    for (const url of ["https://127.foo.com/", "https://127.0.0.1.nip.io/"]) {
+      expect(re.test(url), url).toBe(false);
+    }
+  });
+
   it("ranks allow above block above the strict catch-all", () => {
     const rules = buildFocusRules({
       ...BASE,

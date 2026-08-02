@@ -100,13 +100,20 @@ function redirectAction(blockedPage) {
   };
 }
 
+/**
+ * Loopback stays reachable no matter what. Kept in step with the desktop's
+ * `is_loopback_host`: the whole 127.0.0.0/8 block, `0.0.0.0`, IPv6 loopback,
+ * and `localhost` with any subdomain. Digits are matched explicitly so a
+ * lookalike domain such as `127.foo.com` does not slip through.
+ */
 function loopbackRule(id) {
+  const host = "(?:127\\.\\d+\\.\\d+\\.\\d+|0\\.0\\.0\\.0|(?:[^/?#]*\\.)?localhost|\\[::1\\])";
   return {
     id,
     priority: LOOPBACK_PRIORITY,
     action: { type: "allow" },
     condition: {
-      regexFilter: "^https?://(?:127\\.\\d+\\.\\d+\\.\\d+|localhost|\\[::1\\])(?::\\d+)?(?:[/?#].*)?$",
+      regexFilter: `^https?://${host}(?::\\d+)?(?:[/?#].*)?$`,
       resourceTypes: RESOURCE_TYPES,
     },
   };
