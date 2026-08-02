@@ -144,7 +144,7 @@ pub async fn import_backup(
             bundle.version
         ));
     }
-    let stats = import_inner(&state.db, &bundle).map_err(|e| e.to_string())?;
+    let stats = import_inner(&state.db, &bundle)?;
 
     apply_post_import_state_refresh(&state);
 
@@ -188,9 +188,27 @@ pub struct ImportStats {
     pub app_settings: usize,
 }
 
-fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, rusqlite::Error> {
-    let mut conn = db.pool().get().expect("db pool");
-    let tx = conn.transaction()?;
+/// Insert one table's rows, naming the table if anything goes wrong.
+///
+/// Every table goes through here so a failure is attributable. The three
+/// "optional" tables used to swallow their result with `let _`, which meant a
+/// failed insert rode along with a committed transaction: the truncate had
+/// already happened, so the user's favourites, activity history and
+/// non-working days were gone and the import still reported success.
+fn insert_table(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    rows: &[Value],
+) -> Result<usize, String> {
+    insert_rows(tx, table, rows).map_err(|e| format!("obnova tabulky {table} selhala: {e}"))
+}
+
+fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, String> {
+    let mut conn = db
+        .pool()
+        .get()
+        .map_err(|e| format!("databáze není dostupná: {e}"))?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // Truncate v opačném pořadí kvůli FK (audit drží jen string id, FK neřeší,
     // ale pro robustnost).
@@ -204,7 +222,8 @@ fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, rusqlite:
         "connections",
         "app_settings",
     ] {
-        tx.execute(&format!("DELETE FROM {table}"), [])?;
+        tx.execute(&format!("DELETE FROM {table}"), [])
+            .map_err(|e| format!("vyprázdnění tabulky {table} selhalo: {e}"))?;
     }
 
     // Vkládáme rodiče před potomky, ať sedí per-connection FK:
@@ -212,16 +231,16 @@ fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, rusqlite:
     // `favorite_issues` na connections také referují. `connections` proto MUSÍ
     // první; `issues_v2` a `worklogs` jsou mezi sebou nezávislé (žádný FK
     // worklogs→issues_v2). Truncate výše běží v opačném pořadí (potomci první).
-    let n_conns = insert_rows(&tx, "connections", &bundle.tables.connections)?;
-    let n_issues = insert_rows(&tx, "issues_v2", &bundle.tables.issues_v2)?;
-    let n_worklogs = insert_rows(&tx, "worklogs", &bundle.tables.worklogs)?;
-    let n_audit = insert_rows(&tx, "audit_log", &bundle.tables.audit_log)?;
-    let n_settings = insert_rows(&tx, "app_settings", &bundle.tables.app_settings)?;
-    let _ = insert_rows(&tx, "favorite_issues", &bundle.tables.favorite_issues);
-    let _ = insert_rows(&tx, "daily_activity", &bundle.tables.daily_activity);
-    let _ = insert_rows(&tx, "non_working_days", &bundle.tables.non_working_days);
+    let n_conns = insert_table(&tx, "connections", &bundle.tables.connections)?;
+    let n_issues = insert_table(&tx, "issues_v2", &bundle.tables.issues_v2)?;
+    let n_worklogs = insert_table(&tx, "worklogs", &bundle.tables.worklogs)?;
+    let n_audit = insert_table(&tx, "audit_log", &bundle.tables.audit_log)?;
+    let n_settings = insert_table(&tx, "app_settings", &bundle.tables.app_settings)?;
+    insert_table(&tx, "favorite_issues", &bundle.tables.favorite_issues)?;
+    insert_table(&tx, "daily_activity", &bundle.tables.daily_activity)?;
+    insert_table(&tx, "non_working_days", &bundle.tables.non_working_days)?;
 
-    tx.commit()?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(ImportStats {
         worklogs: n_worklogs,
         issues_v2: n_issues,
@@ -341,6 +360,34 @@ mod tests {
         // Sync helper přes import_inner — kontrola version je v Tauri wrapperu,
         // ale tady jen ujistíme, že prázdný bundle projde DELETE bez paniky.
         assert!(import_inner(&db, &bundle).is_ok());
+    }
+
+    #[test]
+    fn a_failing_table_aborts_the_whole_import() {
+        let db = open_db();
+        seed_connection_issue_worklog(&db);
+        crate::cache::settings::set(&db, "keep_me", "before").unwrap();
+
+        // A row whose column does not exist in the schema. Previously this
+        // table's result was discarded, so the truncate stood and the rows
+        // never came back.
+        let mut bundle = export_inner(&db).unwrap();
+        bundle.tables.favorite_issues = vec![json!({ "no_such_column": 1 })];
+
+        let err = import_inner(&db, &bundle).unwrap_err();
+        assert!(
+            err.contains("favorite_issues"),
+            "the failing table must be named: {err}"
+        );
+
+        // The transaction rolled back, so nothing was lost.
+        assert_eq!(
+            crate::cache::settings::get(&db, "keep_me")
+                .unwrap()
+                .as_deref(),
+            Some("before"),
+        );
+        assert_eq!(crate::cache::worklogs::count(&db).unwrap(), 1);
     }
 
     #[test]
