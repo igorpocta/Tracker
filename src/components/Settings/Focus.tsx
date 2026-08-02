@@ -194,28 +194,13 @@ export default function Focus() {
         title={t("focus.settings.appsTitle")}
         description={t("focus.settings.appsIntro")}
       >
-        <SwitchRow
-          label={t("focus.settings.strictApps")}
-          hint={t("focus.settings.strictAppsHint")}
-          checked={settings.strict_apps}
+        <RuleMode
+          kind="app"
+          strict={settings.strict_apps}
+          rules={rules}
+          onRun={runRuleOp}
           onChange={(v) => void patch({ strict_apps: v })}
         />
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <RuleColumn
-            kind="app"
-            mode="block"
-            rules={rules}
-            onRun={runRuleOp}
-            title={t("focus.rules.block")}
-          />
-          <RuleColumn
-            kind="app"
-            mode="allow"
-            rules={rules}
-            onRun={runRuleOp}
-            title={t("focus.rules.allow")}
-          />
-        </div>
       </SettingsCard>
 
       {/* Websites ------------------------------------------------------ */}
@@ -223,10 +208,11 @@ export default function Focus() {
         title={t("focus.settings.sitesTitle")}
         description={t("focus.settings.sitesIntro")}
       >
-        <SwitchRow
-          label={t("focus.settings.strictSites")}
-          hint={t("focus.settings.strictSitesHint")}
-          checked={settings.strict_sites}
+        <RuleMode
+          kind="site"
+          strict={settings.strict_sites}
+          rules={rules}
+          onRun={runRuleOp}
           onChange={(v) => void patch({ strict_sites: v })}
         />
         {extensionFresh !== null && (
@@ -239,22 +225,6 @@ export default function Focus() {
               : t("focus.settings.extensionMissing")}
           </p>
         )}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <RuleColumn
-            kind="site"
-            mode="block"
-            rules={rules}
-            onRun={runRuleOp}
-            title={t("focus.rules.block")}
-          />
-          <RuleColumn
-            kind="site"
-            mode="allow"
-            rules={rules}
-            onRun={runRuleOp}
-            title={t("focus.rules.allow")}
-          />
-        </div>
       </SettingsCard>
 
       {/* Notifications ------------------------------------------------- */}
@@ -309,6 +279,97 @@ export default function Focus() {
 }
 
 // -----------------------------------------------------------------------------
+
+/**
+ * Mode picker plus the lists that mode actually uses.
+ *
+ * The two modes used to be one checkbox, which left the second list meaning
+ * different things depending on its state: exceptions to the block list when
+ * off, the entire whitelist when on. Nothing on screen said which, and in
+ * strict mode the block list was still there doing nothing — an `allow` rule
+ * already wins over a `block` one, and strict blocks everything unlisted, so
+ * a block rule cannot change any outcome. Showing only what applies is the
+ * point of the split.
+ */
+function RuleMode({
+  kind,
+  strict,
+  rules,
+  onRun,
+  onChange,
+}: {
+  kind: FocusRuleKind;
+  strict: boolean;
+  rules: FocusRule[];
+  onRun: (op: () => Promise<FocusRule[]>) => Promise<void>;
+  onChange: (strict: boolean) => void;
+}) {
+  const t = useT();
+  // Block rules are kept, not deleted, when strict mode hides them — so say so
+  // rather than let the user think they vanished.
+  const hiddenBlocked = strict
+    ? rules.filter((r) => r.kind === kind && r.mode === "block").length
+    : 0;
+
+  return (
+    <>
+      <div
+        role="radiogroup"
+        aria-label={t("focus.mode.label")}
+        className="inline-flex rounded-[var(--radius-md)] border border-[var(--border-default)] overflow-hidden"
+      >
+        {[false, true].map((value) => (
+          <button
+            key={String(value)}
+            type="button"
+            role="radio"
+            aria-checked={strict === value}
+            onClick={() => onChange(value)}
+            className="px-3 h-8 text-xs transition-colors duration-150"
+            style={
+              strict === value
+                ? { background: "var(--accent)", color: "var(--accent-text)" }
+                : { color: "var(--text-secondary)" }
+            }
+          >
+            {t(value ? "focus.mode.allowOnly" : "focus.mode.blockSelected")}
+          </button>
+        ))}
+      </div>
+
+      {/* Hiding and redirecting are different enough to be worth saying
+          separately, so the hint is per kind. */}
+      <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+        {t(`focus.mode.${kind}.${strict ? "allowHint" : "blockHint"}`)}
+      </p>
+
+      <div className={clsx("mt-4 grid gap-4", !strict && "md:grid-cols-2")}>
+        {!strict && (
+          <RuleColumn
+            kind={kind}
+            mode="block"
+            rules={rules}
+            onRun={onRun}
+            title={t("focus.rules.block")}
+          />
+        )}
+        <RuleColumn
+          kind={kind}
+          mode="allow"
+          rules={rules}
+          onRun={onRun}
+          title={t(strict ? "focus.rules.allow" : "focus.rules.exceptions")}
+        />
+      </div>
+
+      {hiddenBlocked > 0 && (
+        <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+          {t("focus.mode.hiddenBlocked", { count: hiddenBlocked })}
+        </p>
+      )}
+    </>
+  );
+}
 
 /** One block/allow list for a given rule kind, with its own add form. */
 function RuleColumn({

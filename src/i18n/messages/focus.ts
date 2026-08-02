@@ -27,9 +27,15 @@ export const focus = {
     "focus.settings.appsTitle": "Aplikace",
     "focus.settings.appsIntro":
       "Tracker zasahuje jen do aplikace, kterou právě přepnete do popředí. Systémové aplikace jsou chráněné a zablokovat je nelze.",
-    "focus.settings.strictApps": "Povolit jen vybrané aplikace",
-    "focus.settings.strictAppsHint":
-      "Vše ostatní se schová. V tomto režimu se nikdy nic neukončuje, jen skrývá. Dokud je seznam povolených prázdný, režim se neuplatní.",
+    "focus.mode.label": "Režim",
+    "focus.mode.blockSelected": "Blokovat vybrané",
+    "focus.mode.allowOnly": "Povolit jen vybrané",
+    "focus.mode.hiddenBlocked":
+      "Blokovaná pravidla ({count}) zůstávají uložená, ale v tomto režimu se neuplatní — povolené má vždy přednost a vše ostatní je zakázané tak jako tak.",
+    "focus.mode.app.blockHint":
+      "Blokuje se jen to, co je v seznamu. Výjimky mají přednost — hodí se, když chcete zakázat aplikaci, ale jednu její část nechat.",
+    "focus.mode.app.allowHint":
+      "Vše kromě povolených se schová. V tomto režimu se nikdy nic neukončuje, jen skrývá. Dokud je seznam prázdný, režim se neuplatní.",
     "focus.settings.pickApp": "Vybrat ze spuštěných",
     "focus.settings.appPlaceholder": "com.slack.Slack nebo slack.exe",
     "focus.settings.protected": "chráněná",
@@ -38,9 +44,10 @@ export const focus = {
     "focus.settings.sitesTitle": "Weby",
     "focus.settings.sitesIntro":
       "Doména (seznam.cz) pokryje celý web včetně subdomén — email.seznam.cz i seznam.cz/email. Konkrétní host (www.seznam.cz) platí jen pro něj, email.seznam.cz projde. Lze zadat i cestu: reddit.com/r/rust.",
-    "focus.settings.strictSites": "Povolit jen vybrané weby",
-    "focus.settings.strictSitesHint":
-      "Vše ostatní skončí na blokovací stránce, kde se povolené weby zobrazí jako dlaždice. Dokud je seznam povolených prázdný, režim se neuplatní.",
+    "focus.mode.site.blockHint":
+      "Blokují se jen weby ze seznamu. Výjimky mají přednost — třeba zakázat reddit.com, ale povolit reddit.com/r/rust.",
+    "focus.mode.site.allowHint":
+      "Vše kromě povolených skončí na blokovací stránce, kde se povolené weby zobrazí jako dlaždice. Dokud je seznam prázdný, režim se neuplatní.",
     "focus.settings.sitePlaceholder": "seznam.cz nebo www.seznam.cz",
     "focus.settings.extensionOk": "Rozšíření prohlížeče je připojené.",
     "focus.settings.extensionMissing":
@@ -62,6 +69,7 @@ export const focus = {
     // Rules list
     "focus.rules.block": "Blokované",
     "focus.rules.allow": "Povolené",
+    "focus.rules.exceptions": "Výjimky",
     "focus.rules.empty": "Zatím nic.",
     "focus.rules.add": "Přidat",
     "focus.rules.remove": "Odebrat",
@@ -94,9 +102,15 @@ export const focus = {
     "focus.settings.appsTitle": "Applications",
     "focus.settings.appsIntro":
       "Tracker only touches the app you just brought to the front. System apps are protected and cannot be blocked.",
-    "focus.settings.strictApps": "Allow only the selected apps",
-    "focus.settings.strictAppsHint":
-      "Everything else gets hidden. This mode never terminates anything, and stays inert while the allow list is empty.",
+    "focus.mode.label": "Mode",
+    "focus.mode.blockSelected": "Block selected",
+    "focus.mode.allowOnly": "Allow only selected",
+    "focus.mode.hiddenBlocked":
+      "Block rules ({count}) are kept but do nothing in this mode — an allow rule always wins, and everything unlisted is blocked anyway.",
+    "focus.mode.app.blockHint":
+      "Only what is listed gets blocked. Exceptions win, which is how you block an app but keep one part of it.",
+    "focus.mode.app.allowHint":
+      "Everything but the allowed apps gets hidden. This mode never terminates anything, and stays inert while the list is empty.",
     "focus.settings.pickApp": "Pick from running apps",
     "focus.settings.appPlaceholder": "com.slack.Slack or slack.exe",
     "focus.settings.protected": "protected",
@@ -104,9 +118,10 @@ export const focus = {
     "focus.settings.sitesTitle": "Websites",
     "focus.settings.sitesIntro":
       "A domain (seznam.cz) covers the whole site including subdomains — email.seznam.cz and seznam.cz/email alike. A specific host (www.seznam.cz) covers only that host, leaving email.seznam.cz reachable. A path works too: reddit.com/r/rust.",
-    "focus.settings.strictSites": "Allow only the selected sites",
-    "focus.settings.strictSitesHint":
-      "Everything else lands on the block page, which lists the allowed sites as tiles. Stays inert while the allow list is empty.",
+    "focus.mode.site.blockHint":
+      "Only listed sites get blocked. Exceptions win — block reddit.com but allow reddit.com/r/rust.",
+    "focus.mode.site.allowHint":
+      "Everything but the allowed sites lands on the block page, which lists them as tiles. Stays inert while the list is empty.",
     "focus.settings.sitePlaceholder": "seznam.cz or www.seznam.cz",
     "focus.settings.extensionOk": "The browser extension is connected.",
     "focus.settings.extensionMissing":
@@ -126,6 +141,7 @@ export const focus = {
 
     "focus.rules.block": "Blocked",
     "focus.rules.allow": "Allowed",
+    "focus.rules.exceptions": "Exceptions",
     "focus.rules.empty": "Nothing yet.",
     "focus.rules.add": "Add",
     "focus.rules.remove": "Remove",
