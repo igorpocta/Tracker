@@ -4,7 +4,7 @@
  * Reference: `screens/SCR-20260514-rkec-2.png`.
  *
  *   ┌──────────────────────────────────────────────┐
- *   │ Tracker.               Today goal  5h 21m/9h │  ← cursive accent script
+ *   │ Tracker                Today goal  5h 21m/9h │  ← cursive accent script
  *   │                        ▰▰▰▰▰▰▰░░░░░░░░░░░░░ │
  *   ├──────────────────────────────────────────────┤
  *   │  ⏰  No timer running                         │

@@ -153,7 +153,7 @@ function BootSplash() {
           fontFamily: "var(--font-script), serif",
         }}
       >
-        Tracker.
+        Tracker
       </div>
       <div className="flex items-center gap-2 text-[var(--text-tertiary)] text-xs">
         <span

@@ -813,6 +813,7 @@ pub fn render_blocked_page(
     width: 100%; max-width: 560px; background: var(--surface);
     border: 1px solid var(--border); border-radius: 16px; padding: 36px 32px;
     box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    text-align: center;
   }}
   .brand {{
     font-style: italic; font-weight: 600; font-size: 26px; color: var(--accent);
@@ -824,9 +825,14 @@ pub fn render_blocked_page(
     font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
     color: var(--muted); margin: 28px 0 12px;
   }}
-  .tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }}
+  /* `auto-fit` + `justify-content: center` so a couple of tiles sit in the
+     middle instead of hugging the left edge of the card. */
+  .tiles {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 200px));
+    gap: 10px; justify-content: center;
+  }}
   .tile {{
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 12px;
     border: 1px solid var(--border); border-radius: 10px; text-decoration: none;
     color: var(--text); background: var(--bg); overflow: hidden;
   }}
@@ -842,7 +848,7 @@ pub fn render_blocked_page(
 </head>
 <body>
 <main>
-  <p class="brand">Tracker.</p>
+  <p class="brand">Tracker</p>
   <h1>Focus mode je aktivní</h1>
   {host_line}
   {countdown}
