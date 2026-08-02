@@ -901,13 +901,14 @@ pub fn render_blocked_page(
         format!(
             "<div class=\"allow\">\
              <button type=\"button\" id=\"allow-toggle\" class=\"linkish\">Povolit tuto stránku</button>\
-             <form id=\"allow-form\" hidden>\
+             <div id=\"allow-panel\" hidden>\
+             <form id=\"allow-form\">\
              <input id=\"allow-pattern\" value=\"{host}\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\">\
              <button type=\"submit\" class=\"allow-go\">Povolit</button>\
              </form>\
              <p id=\"allow-msg\" class=\"allow-msg\"></p>\
              <p class=\"allow-hint\">Uloží se jako trvalé pravidlo. Pro celou doménu napište *.{host_bare}</p>\
-             </div>",
+             </div></div>",
             host = html_escape(&host),
             host_bare = html_escape(host.trim_start_matches("www.")),
         )
@@ -977,16 +978,24 @@ pub fn render_blocked_page(
     font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }}
   main {{
-    width: 100%; max-width: 560px; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 16px; padding: 36px 32px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    width: 100%; max-width: 520px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 18px; padding: 40px 36px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.05);
     text-align: center;
   }}
   .brand {{
-    font-style: italic; font-weight: 600; font-size: 26px; color: var(--accent);
-    margin: 0 0 20px;
+    font-style: italic; font-weight: 600; font-size: 24px; color: var(--accent);
+    margin: 0 0 22px; letter-spacing: -0.01em;
   }}
-  h1 {{ font-size: 22px; margin: 0 0 8px; }}
+  .badge {{
+    width: 46px; height: 46px; margin: 0 auto 16px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-soft); color: var(--accent);
+  }}
+  h1 {{
+    font-size: 20px; font-weight: 600; letter-spacing: -0.01em;
+    margin: 0 0 10px;
+  }}
   .host, .countdown {{ margin: 0 0 6px; color: var(--muted); font-size: 14px; }}
   h2 {{
     font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
@@ -1003,15 +1012,16 @@ pub fn render_blocked_page(
     border: 1px solid var(--border); border-radius: 10px; text-decoration: none;
     color: var(--text); background: var(--bg); overflow: hidden;
   }}
-  .tile:hover {{ border-color: var(--accent); }}
+  .tile {{ transition: border-color .15s, transform .15s; }}
+  .tile:hover {{ border-color: var(--accent); transform: translateY(-1px); }}
   .mono {{
     flex: 0 0 28px; height: 28px; border-radius: 8px; background: var(--accent);
     color: #fff; display: flex; align-items: center; justify-content: center;
     font-weight: 600; font-size: 13px;
   }}
   .tile-label {{ font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-  footer {{ margin-top: 28px; font-size: 12px; color: var(--muted); }}
-  .allow {{ margin-top: 26px; }}
+  footer {{ margin-top: 24px; font-size: 12px; color: var(--muted); }}
+  .allow {{ margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }}
   .linkish {{
     background: none; border: 0; padding: 0; font: inherit; font-size: 12px;
     color: var(--muted); text-decoration: underline; cursor: pointer;
@@ -1028,8 +1038,10 @@ pub fn render_blocked_page(
   #allow-pattern:focus {{ outline: none; border-color: var(--accent); }}
   .allow-go {{
     padding: 7px 14px; border-radius: 8px; border: 0; cursor: pointer;
-    font: inherit; font-size: 13px; background: var(--accent); color: #fff;
+    font: inherit; font-size: 13px; font-weight: 500;
+    background: var(--accent); color: #fff; transition: filter .15s;
   }}
+  .allow-go:hover {{ filter: brightness(1.08); }}
   .allow-msg {{ margin: 10px 0 0; font-size: 12px; color: var(--accent); min-height: 1em; }}
   .allow-hint {{ margin: 6px 0 0; font-size: 11px; color: var(--muted); }}
 </style>
@@ -1037,6 +1049,13 @@ pub fn render_blocked_page(
 <body>
 <main>
   <p class="brand">Tracker</p>
+  <div class="badge" aria-hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+      <path d="m4.24 5.21 14.39 12.47"/>
+    </svg>
+  </div>
   <h1>Focus mode je aktivní</h1>
   {host_line}
   {countdown}
@@ -1061,10 +1080,16 @@ pub fn render_blocked_page(
   var NONCE = {nonce_json};
   var toggle = document.getElementById('allow-toggle');
   var form = document.getElementById('allow-form');
-  if (toggle && form) {{
+  var panel = document.getElementById('allow-panel');
+  if (toggle && form && panel) {{
     toggle.addEventListener('click', function () {{
-      form.hidden = !form.hidden;
-      if (!form.hidden) document.getElementById('allow-pattern').focus();
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) {{
+        var input = document.getElementById('allow-pattern');
+        input.focus();
+        input.select();
+      }}
     }});
     form.addEventListener('submit', function (e) {{
       e.preventDefault();
@@ -1313,6 +1338,29 @@ mod focus_tests {
         // The hint offers the wildcard form without the `www.` label, since
         // that is what covers the whole domain.
         assert!(html.contains("*.qadata.cz"));
+    }
+
+    #[test]
+    fn only_the_trigger_shows_before_the_user_asks_to_allow() {
+        let html = render_blocked_page(
+            Some("https://www.qadata.cz/"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
+        // `class="…"` / `id="…"` rather than the bare word: the stylesheet
+        // mentions every one of these selectors before the markup does.
+        let toggle = html.find("id=\"allow-toggle\"").expect("trigger");
+        let panel = html.find("id=\"allow-panel\" hidden").expect("panel");
+        let input = html.find("id=\"allow-pattern\"").expect("input");
+        let hint = html.find("class=\"allow-hint\"").expect("hint");
+
+        assert!(toggle < panel, "the trigger is what shows first");
+        // The input and the note both have to sit inside the collapsed panel;
+        // the note used to hang outside it and was visible from the start.
+        assert!(input > panel, "input must be inside the panel");
+        assert!(hint > panel, "note must be inside the panel");
     }
 
     #[test]
