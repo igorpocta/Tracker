@@ -119,6 +119,14 @@ const KEY_LANGUAGE: &str = "language";
 const KEY_FONT_SIZE: &str = "font_size";
 const KEY_DENSITY: &str = "density";
 const KEY_ACCENT: &str = "accent_color";
+/// Resolved hex for the active palette, pushed down by the frontend.
+///
+/// The palette table itself lives in TypeScript (`src/lib/accent.ts`) and is
+/// the single source of truth. Rather than mirror ~35 colour definitions here
+/// — and let the two drift — the frontend sends the colours it resolved, and
+/// surfaces the backend renders (the Focus block page) read them back.
+const KEY_ACCENT_PRIMARY_HEX: &str = "accent_primary_hex";
+const KEY_ACCENT_SECONDARY_HEX: &str = "accent_secondary_hex";
 const KEY_CURRENCY: &str = "currency";
 const KEY_PALETTE_MODE: &str = "palette_mode";
 const KEY_DAY_TIMELINE_VISIBLE: &str = "day_timeline_visible";
@@ -486,6 +494,51 @@ pub fn set_currency_inner(db: &Db, currency: &str) -> Result<(), String> {
 
 // ----- Palette mode (Phase 13) -----
 
+/// Store the hex the frontend resolved for the active palette. A `None` (or
+/// malformed) value clears the key so readers fall back to the default rather
+/// than render a broken colour.
+pub fn set_accent_hex_inner(
+    db: &Db,
+    primary: Option<&str>,
+    secondary: Option<&str>,
+) -> Result<(), String> {
+    for (key, value) in [
+        (KEY_ACCENT_PRIMARY_HEX, primary),
+        (KEY_ACCENT_SECONDARY_HEX, secondary),
+    ] {
+        match value.and_then(sanitize_hex) {
+            Some(hex) => cache::settings::set(db, key, &hex).map_err(|e| e.to_string())?,
+            None => cache::settings::remove(db, key).map_err(|e| e.to_string())?,
+        }
+    }
+    Ok(())
+}
+
+/// `(primary, secondary)` hex for the active palette, if the frontend has
+/// pushed them down. Secondary falls back to primary (mono palettes).
+pub fn get_accent_hex_inner(db: &Db) -> (Option<String>, Option<String>) {
+    let read = |key: &str| {
+        cache::settings::get(db, key)
+            .ok()
+            .flatten()
+            .and_then(|v| sanitize_hex(&v))
+    };
+    let primary = read(KEY_ACCENT_PRIMARY_HEX);
+    let secondary = read(KEY_ACCENT_SECONDARY_HEX).or_else(|| primary.clone());
+    (primary, secondary)
+}
+
+/// Accept only `#RRGGBB`. Anything else is treated as absent — these values
+/// are interpolated straight into a stylesheet.
+fn sanitize_hex(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let body = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    if body.len() != 6 || !body.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", body.to_ascii_uppercase()))
+}
+
 pub fn get_palette_mode_inner(db: &Db) -> Result<String, String> {
     match cache::settings::get(db, KEY_PALETTE_MODE).map_err(|e| e.to_string())? {
         Some(v) if ALLOWED_PALETTE_MODES.contains(&v.as_str()) => Ok(v),
@@ -819,8 +872,11 @@ pub async fn set_accent_color(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     accent: String,
+    primary_hex: Option<String>,
+    secondary_hex: Option<String>,
 ) -> Result<(), String> {
     set_accent_color_inner(&state.db, &accent)?;
+    set_accent_hex_inner(&state.db, primary_hex.as_deref(), secondary_hex.as_deref())?;
     let _ = app.emit("prefs-changed", "accent_color");
     Ok(())
 }
@@ -895,6 +951,49 @@ pub async fn set_earnings_visible(
     set_earnings_visible_inner(&state.db, visible)?;
     let _ = app.emit("prefs-changed", "earnings_visible");
     Ok(())
+}
+
+#[cfg(test)]
+mod hex_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn open_db() -> Db {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("accent.db");
+        std::mem::forget(dir);
+        Db::open(&path).unwrap()
+    }
+
+    #[test]
+    fn accent_hex_round_trips_and_normalises_case() {
+        let db = open_db();
+        set_accent_hex_inner(&db, Some("#14b8a6"), Some("#0f766e")).unwrap();
+        assert_eq!(
+            get_accent_hex_inner(&db),
+            (Some("#14B8A6".into()), Some("#0F766E".into()))
+        );
+    }
+
+    #[test]
+    fn a_mono_palette_falls_back_to_the_primary() {
+        let db = open_db();
+        set_accent_hex_inner(&db, Some("#EAB308"), None).unwrap();
+        assert_eq!(
+            get_accent_hex_inner(&db),
+            (Some("#EAB308".into()), Some("#EAB308".into()))
+        );
+    }
+
+    #[test]
+    fn anything_that_is_not_a_hex_colour_is_refused() {
+        let db = open_db();
+        // These land in a stylesheet, so a stray value must not survive.
+        for bad in ["red", "#12", "#GGGGGG", "#14B8A6; }", ""] {
+            set_accent_hex_inner(&db, Some(bad), None).unwrap();
+            assert_eq!(get_accent_hex_inner(&db).0, None, "accepted {bad:?}");
+        }
+    }
 }
 
 #[cfg(test)]

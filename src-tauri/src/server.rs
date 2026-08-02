@@ -724,6 +724,72 @@ pub fn blocked_tiles(app_state: &AppState) -> Vec<BlockedTile> {
         .collect()
 }
 
+/// Colours the block page should paint itself with, so it matches whatever
+/// palette and theme the desktop is currently showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageTheme {
+    /// Primary accent, `#RRGGBB`.
+    pub accent: String,
+    /// `"auto"`, `"light"` or `"dark"` — mirrors the app's theme preference.
+    pub mode: String,
+}
+
+impl Default for PageTheme {
+    fn default() -> Self {
+        // Aurora teal: the default palette's primary, so an install that has
+        // never touched the palette picker looks unchanged.
+        Self {
+            accent: "#14B8A6".to_string(),
+            mode: "auto".to_string(),
+        }
+    }
+}
+
+impl PageTheme {
+    /// Read the active palette + theme out of `app_settings`.
+    pub fn load(app_state: &AppState) -> Self {
+        let defaults = Self::default();
+        let (primary, _secondary) = crate::commands::prefs::get_accent_hex_inner(&app_state.db);
+        let mode = crate::commands::prefs::get_theme_inner(&app_state.db)
+            .unwrap_or_else(|_| defaults.mode.clone());
+        Self {
+            accent: primary.unwrap_or(defaults.accent),
+            mode,
+        }
+    }
+
+    /// `rgba(r, g, b, alpha)` derived from the accent, for tinted surfaces.
+    ///
+    /// The accent is validated as `#RRGGBB` before it is stored, so parsing
+    /// cannot fail here — but a bad value would land in a stylesheet, so it
+    /// falls back rather than unwrapping.
+    pub fn accent_rgba(&self, alpha: f32) -> String {
+        let body = self.accent.trim_start_matches('#');
+        let parse = |i: usize| u8::from_str_radix(&body[i..i + 2], 16).ok();
+        match (body.len() == 6)
+            .then(|| (parse(0), parse(2), parse(4)))
+            .and_then(|(r, g, b)| Some((r?, g?, b?)))
+        {
+            Some((r, g, b)) => format!("rgba({r}, {g}, {b}, {alpha})"),
+            None => format!("rgba(20, 184, 166, {alpha})"),
+        }
+    }
+
+    /// The surface palette, either as a `prefers-color-scheme` pair (auto) or
+    /// pinned to the one the user chose.
+    fn surface_css(&self) -> String {
+        let light = "--bg: #f4f5f7; --surface: #ffffff; --text: #17181c; --muted: #6b7280; --border: #e3e5e9;";
+        let dark = "--bg: #121316; --surface: #1c1e22; --text: #ecedef; --muted: #9aa1ab; --border: #2b2e34;";
+        match self.mode.as_str() {
+            "light" => format!(":root {{ color-scheme: light; {light} }}"),
+            "dark" => format!(":root {{ color-scheme: dark; {dark} }}"),
+            _ => format!(
+                ":root {{ color-scheme: light dark; {light} }}\n  @media (prefers-color-scheme: dark) {{ :root {{ {dark} }} }}"
+            ),
+        }
+    }
+}
+
 /// Render the block page.
 ///
 /// Server-rendered rather than a static page plus a JSON API: the allow-list
@@ -733,6 +799,7 @@ pub fn render_blocked_page(
     original_url: Option<&str>,
     ends_at: Option<i64>,
     tiles: &[BlockedTile],
+    theme: &PageTheme,
 ) -> String {
     let host = original_url
         .and_then(|u| crate::focus::rules::split_url(u).map(|(host, _)| host))
@@ -783,6 +850,10 @@ pub fn render_blocked_page(
         .map(|json| escape_json_for_script(&json))
         .unwrap_or_else(|| "null".to_string());
 
+    let surface_css = theme.surface_css();
+    let accent = html_escape(&theme.accent);
+    let accent_soft = theme.accent_rgba(0.15);
+
     format!(
         r#"<!doctype html>
 <html lang="cs">
@@ -791,17 +862,10 @@ pub fn render_blocked_page(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Focus mode je aktivní — Tracker</title>
 <style>
-  :root {{
-    color-scheme: light dark;
-    --bg: #f4f5f7; --surface: #ffffff; --text: #17181c; --muted: #6b7280;
-    --border: #e3e5e9; --accent: #0f766e;
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{
-      --bg: #121316; --surface: #1c1e22; --text: #ecedef; --muted: #9aa1ab;
-      --border: #2b2e34; --accent: #2dd4bf;
-    }}
-  }}
+  {surface_css}
+  /* Accent comes from the desktop's active palette, so the block page and the
+     app are visibly the same product. */
+  :root {{ --accent: {accent}; --accent-soft: {accent_soft}; }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0; min-height: 100vh; display: flex; align-items: center;
@@ -895,19 +959,23 @@ async fn blocked_page_handler<R: Runtime>(
     RawQuery(raw): RawQuery,
 ) -> Response {
     let original = raw.as_deref().and_then(extract_u_param);
-    let (ends_at, tiles) = match state.app.try_state::<AppState>() {
+    let (ends_at, tiles, theme) = match state.app.try_state::<AppState>() {
         Some(app_state) => {
             let ends_at = app_state
                 .focus
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .ends_at;
-            (ends_at, blocked_tiles(&app_state))
+            (
+                ends_at,
+                blocked_tiles(&app_state),
+                PageTheme::load(&app_state),
+            )
         }
-        None => (None, Vec::new()),
+        None => (None, Vec::new(), PageTheme::default()),
     };
 
-    let html = render_blocked_page(original.as_deref(), ends_at, &tiles);
+    let html = render_blocked_page(original.as_deref(), ends_at, &tiles, &theme);
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -990,6 +1058,7 @@ mod focus_tests {
             Some("https://x.com/<img src=x onerror=alert(1)>"),
             None,
             &[],
+            &PageTheme::default(),
         );
         assert!(!html.contains("<img src=x"));
         assert!(html.contains("x.com"));
@@ -997,7 +1066,8 @@ mod focus_tests {
 
     #[test]
     fn rendered_page_embeds_the_return_url_as_json() {
-        let html = render_blocked_page(Some("https://x.com/a\"b"), None, &[]);
+        let html =
+            render_blocked_page(Some("https://x.com/a\"b"), None, &[], &PageTheme::default());
         assert!(html.contains(r#"var RETURN_TO = "https://x.com/a\"b""#));
     }
 
@@ -1007,6 +1077,7 @@ mod focus_tests {
             Some("https://x.com/</script><img src=x onerror=alert(1)>"),
             None,
             &[],
+            &PageTheme::default(),
         );
         assert!(!html.contains("</script><img"));
         assert!(html.contains("\\u003c/script\\u003e"));
@@ -1016,8 +1087,51 @@ mod focus_tests {
 
     #[test]
     fn rendered_page_refuses_a_non_http_return_url() {
-        let html = render_blocked_page(Some("javascript:alert(1)"), None, &[]);
+        let html = render_blocked_page(
+            Some("javascript:alert(1)"),
+            None,
+            &[],
+            &PageTheme::default(),
+        );
         assert!(html.contains("var RETURN_TO = null"));
+    }
+
+    #[test]
+    fn the_page_paints_itself_with_the_active_accent() {
+        let theme = PageTheme {
+            accent: "#EAB308".into(),
+            mode: "auto".into(),
+        };
+        let html = render_blocked_page(Some("https://reddit.com"), None, &[], &theme);
+        assert!(html.contains("--accent: #EAB308"));
+        assert!(html.contains("rgba(234, 179, 8, 0.15)"));
+    }
+
+    #[test]
+    fn an_explicit_theme_pins_the_surface_instead_of_asking_the_browser() {
+        let dark = PageTheme {
+            mode: "dark".into(),
+            ..PageTheme::default()
+        };
+        let html = render_blocked_page(None, None, &[], &dark);
+        assert!(html.contains("color-scheme: dark"));
+        assert!(
+            !html.contains("prefers-color-scheme"),
+            "a pinned theme must not defer to the OS"
+        );
+
+        let auto = PageTheme::default();
+        let html = render_blocked_page(None, None, &[], &auto);
+        assert!(html.contains("prefers-color-scheme: dark"));
+    }
+
+    #[test]
+    fn a_malformed_accent_degrades_instead_of_emitting_broken_css() {
+        let theme = PageTheme {
+            accent: "not-a-colour".into(),
+            mode: "auto".into(),
+        };
+        assert_eq!(theme.accent_rgba(0.15), "rgba(20, 184, 166, 0.15)");
     }
 
     #[test]
@@ -1032,7 +1146,12 @@ mod focus_tests {
                 url: "https://docs.rs".into(),
             },
         ];
-        let html = render_blocked_page(Some("https://reddit.com"), Some(1_700_000_000), &tiles);
+        let html = render_blocked_page(
+            Some("https://reddit.com"),
+            Some(1_700_000_000),
+            &tiles,
+            &PageTheme::default(),
+        );
         assert!(html.contains("https://team.atlassian.net"));
         assert!(html.contains("https://docs.rs"));
         assert!(html.contains("data-ends-at=\"1700000000\""));
@@ -1040,7 +1159,8 @@ mod focus_tests {
 
     #[test]
     fn page_without_tiles_omits_the_section() {
-        let html = render_blocked_page(Some("https://reddit.com"), None, &[]);
+        let html =
+            render_blocked_page(Some("https://reddit.com"), None, &[], &PageTheme::default());
         assert!(!html.contains("Kam můžete"));
         assert!(html.contains("Focus mode je aktivní"));
     }

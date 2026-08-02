@@ -832,8 +832,24 @@ export function getAccentColor(): Promise<string> {
   return invoke<string>("get_accent_color");
 }
 
-export function setAccentColor(accent: string): Promise<void> {
-  return invoke<void>("set_accent_color", { accent });
+/**
+ * `set_accent_color(accent, primaryHex?, secondaryHex?): ()`
+ *
+ * The hex is sent alongside the palette id so backend-rendered surfaces (the
+ * Focus block page) can paint themselves in the same colours. The palette
+ * table stays in `lib/accent.ts` — mirroring it in Rust would be two copies
+ * free to drift.
+ */
+export function setAccentColor(
+  accent: string,
+  primaryHex?: string | null,
+  secondaryHex?: string | null,
+): Promise<void> {
+  return invoke<void>("set_accent_color", {
+    accent,
+    primaryHex: primaryHex ?? null,
+    secondaryHex: secondaryHex ?? null,
+  });
 }
 
 export function getCurrency(): Promise<string> {
