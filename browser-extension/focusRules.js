@@ -37,9 +37,13 @@ export function escapeRegex(literal) {
 }
 
 /**
- * Split a user-typed pattern into `{ host, path }`, mirroring the desktop
- * normalisation: scheme is optional, a leading `*.` or `www.` is dropped
- * because subdomains match implicitly.
+ * Split a user-typed pattern into `{ host, path, wildcard }`, mirroring the
+ * desktop's `normalize_site_pattern`.
+ *
+ * The host is literal: `seznam.cz` covers `seznam.cz` alone. Subdomains are
+ * opt-in via `*.seznam.cz`, which covers the apex and everything under it.
+ * Both halves of Focus mode have to agree on this or the browser and the
+ * desktop block different sets of pages.
  *
  * Returns `null` for anything that can't be a host (e.g. a bare word).
  */
@@ -61,15 +65,15 @@ export function normalizeSitePattern(raw) {
 
   host = host.split("@").pop();
   host = host.split(":")[0].replace(/\.+$/, "");
-  if (host.startsWith("*.")) host = host.slice(2);
-  if (host.startsWith("www.")) host = host.slice(4);
+  const wildcard = host.startsWith("*.");
+  if (wildcard) host = host.slice(2);
   if (!host || (!host.includes(".") && host !== "localhost")) return null;
 
   const queryAt = path.search(/[?#]/);
   if (queryAt !== -1) path = path.slice(0, queryAt);
   if (path === "/") path = "";
 
-  return { host, path };
+  return { host, path, wildcard };
 }
 
 /**
@@ -83,9 +87,10 @@ export function patternToRegex(pattern) {
   const parsed = normalizeSitePattern(pattern);
   if (!parsed) return null;
   const host = escapeRegex(parsed.host);
-  // `(?:[^/?#]*\.)?` covers subdomains without matching `notexample.com`,
-  // because the group has to end in a literal dot.
-  const authority = `^https?://(?:[^/?#]*\\.)?${host}(?::\\d+)?`;
+  // Only a wildcard pattern admits a subdomain label. The group has to end in
+  // a literal dot, so it still cannot match `notexample.com`.
+  const sub = parsed.wildcard ? "(?:[^/?#]*\\.)?" : "";
+  const authority = `^https?://${sub}${host}(?::\\d+)?`;
   return parsed.path
     ? `${authority}${escapeRegex(parsed.path)}.*$`
     : `${authority}(?:[/?#].*)?$`;

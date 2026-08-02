@@ -61,14 +61,14 @@ pub fn normalize_rule_input(
     }
 
     let pattern = if kind == "site" {
-        let (host, path) = rules::normalize_site_pattern(pattern).ok_or_else(|| {
-            format!("„{pattern}\" není platná adresa. Zadejte doménu, např. reddit.com nebo reddit.com/r/rust.")
+        let parsed = rules::normalize_site_pattern(pattern).ok_or_else(|| {
+            format!("„{pattern}\" není platná adresa. Zadejte doménu, např. seznam.cz, *.seznam.cz nebo reddit.com/r/rust.")
         })?;
-        if path == "/" {
-            host
-        } else {
-            format!("{host}{path}")
-        }
+        // The `*.` marker is part of the rule, not decoration — dropping it
+        // here would silently turn a subdomain rule into an exact-host one.
+        let prefix = if parsed.wildcard { "*." } else { "" };
+        let suffix = if parsed.path == "/" { "" } else { &parsed.path };
+        format!("{prefix}{}{suffix}", parsed.host)
     } else {
         pattern.to_string()
     };
@@ -307,9 +307,24 @@ mod tests {
             normalize_rule_input("site", "block", "  HTTPS://WWW.Reddit.com/  ", "kill").unwrap();
         assert_eq!(kind, "site");
         assert_eq!(mode, "block");
-        assert_eq!(pattern, "reddit.com");
+        // The host is kept verbatim — `www.` names a specific host.
+        assert_eq!(pattern, "www.reddit.com");
         // `kill` makes no sense for a website.
         assert_eq!(action, "hide");
+    }
+
+    #[test]
+    fn a_wildcard_pattern_keeps_its_marker_through_canonicalisation() {
+        let (_, _, pattern, _) =
+            normalize_rule_input("site", "block", " *.Seznam.CZ ", "hide").unwrap();
+        assert_eq!(pattern, "*.seznam.cz");
+    }
+
+    #[test]
+    fn a_wildcard_pattern_keeps_its_path_too() {
+        let (_, _, pattern, _) =
+            normalize_rule_input("site", "block", "*.reddit.com/r/rust", "hide").unwrap();
+        assert_eq!(pattern, "*.reddit.com/r/rust");
     }
 
     #[test]

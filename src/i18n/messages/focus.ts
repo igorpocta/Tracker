@@ -37,11 +37,11 @@ export const focus = {
     // Settings — sites
     "focus.settings.sitesTitle": "Weby",
     "focus.settings.sitesIntro":
-      "Zadejte doménu (reddit.com) nebo doménu s cestou (reddit.com/r/rust). Subdomény se počítají automaticky.",
+      "Zadejte doménu (seznam.cz) nebo doménu s cestou (reddit.com/r/rust). Blokuje se přesně zadaný host — www.seznam.cz není totéž co seznam.cz. Pro celou doménu včetně subdomén použijte *.seznam.cz.",
     "focus.settings.strictSites": "Povolit jen vybrané weby",
     "focus.settings.strictSitesHint":
       "Vše ostatní skončí na blokovací stránce, kde se povolené weby zobrazí jako dlaždice. Dokud je seznam povolených prázdný, režim se neuplatní.",
-    "focus.settings.sitePlaceholder": "reddit.com",
+    "focus.settings.sitePlaceholder": "seznam.cz nebo *.seznam.cz",
     "focus.settings.extensionOk": "Rozšíření prohlížeče je připojené.",
     "focus.settings.extensionMissing":
       "Rozšíření prohlížeče se zatím neozvalo. Bez něj blokujeme weby jen v Safari a Chrome na macOS.",
@@ -103,11 +103,11 @@ export const focus = {
 
     "focus.settings.sitesTitle": "Websites",
     "focus.settings.sitesIntro":
-      "Enter a domain (reddit.com) or a domain with a path (reddit.com/r/rust). Subdomains are included automatically.",
+      "Enter a domain (seznam.cz) or a domain with a path (reddit.com/r/rust). The host matches exactly — www.seznam.cz is not the same as seznam.cz. Use *.seznam.cz to cover a domain and all its subdomains.",
     "focus.settings.strictSites": "Allow only the selected sites",
     "focus.settings.strictSitesHint":
       "Everything else lands on the block page, which lists the allowed sites as tiles. Stays inert while the allow list is empty.",
-    "focus.settings.sitePlaceholder": "reddit.com",
+    "focus.settings.sitePlaceholder": "seznam.cz or *.seznam.cz",
     "focus.settings.extensionOk": "The browser extension is connected.",
     "focus.settings.extensionMissing":
       "The browser extension hasn't checked in. Without it we can only block sites in Safari and Chrome on macOS.",

@@ -72,8 +72,9 @@ obou platformách:
 3. shoda s `block` pravidlem → blokováno zvolenou akcí
 4. přísný režim → blokováno (`hide`), jinak povoleno
 
-Weby — vzor je `doména`, `doména/cesta` nebo `*.doména`; shoda pokrývá i
-subdomény:
+Weby — vzor je `doména`, `doména/cesta` nebo `*.doména`. Host se porovnává
+přesně; `*.doména` je jediný způsob, jak zahrnout subdomény (a pokrývá i
+samotnou doménu):
 
 1. loopback (`localhost`, `127.0.0.1`, `[::1]`) → povoleno
 2. shoda s `allow` pravidlem → povoleno

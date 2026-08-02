@@ -23,18 +23,31 @@ const BASE = {
 const matches = (pattern, url) => new RegExp(patternToRegex(pattern)).test(url);
 
 describe("normalizeSitePattern", () => {
-  it("strips scheme, wildcard and www so the spellings collapse", () => {
-    const expected = { host: "example.com", path: "" };
+  it("drops the scheme but keeps the host verbatim", () => {
+    const expected = { host: "example.com", path: "", wildcard: false };
     expect(normalizeSitePattern("example.com")).toEqual(expected);
-    expect(normalizeSitePattern("*.example.com")).toEqual(expected);
-    expect(normalizeSitePattern("www.example.com")).toEqual(expected);
     expect(normalizeSitePattern("HTTPS://Example.com/")).toEqual(expected);
+    // `www.` names a host of its own, so it must survive.
+    expect(normalizeSitePattern("www.example.com")).toEqual({
+      host: "www.example.com",
+      path: "",
+      wildcard: false,
+    });
+  });
+
+  it("records the wildcard marker instead of discarding it", () => {
+    expect(normalizeSitePattern("*.example.com")).toEqual({
+      host: "example.com",
+      path: "",
+      wildcard: true,
+    });
   });
 
   it("keeps a path prefix but drops query and fragment", () => {
     expect(normalizeSitePattern("reddit.com/r/rust?sort=new#x")).toEqual({
       host: "reddit.com",
       path: "/r/rust",
+      wildcard: false,
     });
   });
 
@@ -46,15 +59,23 @@ describe("normalizeSitePattern", () => {
 });
 
 describe("patternToRegex", () => {
-  it("matches the domain and its subdomains", () => {
-    expect(matches("reddit.com", "https://reddit.com/")).toBe(true);
-    expect(matches("reddit.com", "https://old.reddit.com/r/x")).toBe(true);
-    expect(matches("reddit.com", "http://reddit.com:8080/x")).toBe(true);
+  it("matches only the exact host without a wildcard", () => {
+    expect(matches("seznam.cz", "https://seznam.cz/")).toBe(true);
+    expect(matches("seznam.cz", "http://seznam.cz:8080/x")).toBe(true);
+    expect(matches("seznam.cz", "https://www.seznam.cz/")).toBe(false);
+    expect(matches("seznam.cz", "https://email.seznam.cz/")).toBe(false);
+  });
+
+  it("matches the apex and every subdomain with a wildcard", () => {
+    expect(matches("*.seznam.cz", "https://seznam.cz/")).toBe(true);
+    expect(matches("*.seznam.cz", "https://www.seznam.cz/")).toBe(true);
+    expect(matches("*.seznam.cz", "https://email.seznam.cz/")).toBe(true);
   });
 
   it("does not match a domain that merely ends with the pattern", () => {
     expect(matches("reddit.com", "https://notreddit.com/")).toBe(false);
-    expect(matches("reddit.com", "https://reddit.com.evil.test/")).toBe(false);
+    expect(matches("*.reddit.com", "https://notreddit.com/")).toBe(false);
+    expect(matches("*.reddit.com", "https://reddit.com.evil.test/")).toBe(false);
   });
 
   it("does not match the pattern appearing in a query string", () => {

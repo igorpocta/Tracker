@@ -284,43 +284,63 @@ pub fn is_loopback_host(host: &str) -> bool {
     false
 }
 
-/// Normalise a user-typed site pattern into `(host, path_prefix)`.
+/// A site pattern broken into the parts matching needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SitePattern {
+    /// Host to compare against, without any `*.` prefix.
+    pub host: String,
+    /// Path prefix, or `/` when the pattern named no path.
+    pub path: String,
+    /// Whether the pattern was written `*.host`, i.e. covers subdomains.
+    pub wildcard: bool,
+}
+
+/// Normalise a user-typed site pattern.
 ///
-/// Accepts `example.com`, `*.example.com`, `www.example.com`,
-/// `https://example.com/path` and everything in between; the leading `*.`
-/// and `www.` are dropped because subdomain matching is implicit anyway.
-pub fn normalize_site_pattern(raw: &str) -> Option<(String, String)> {
+/// The host is taken literally. `seznam.cz` matches `seznam.cz` and nothing
+/// else — not `www.seznam.cz`, not `email.seznam.cz`. Subdomains are opt-in
+/// through `*.seznam.cz`, which covers the apex and every subdomain under it.
+///
+/// An earlier version matched subdomains implicitly and stripped a leading
+/// `www.`. That made a rule for one host silently cover every sibling host on
+/// the domain: blocking `www.seznam.cz` also blocked `email.seznam.cz`, with
+/// no way to express the narrower intent.
+pub fn normalize_site_pattern(raw: &str) -> Option<SitePattern> {
     let (parsed_host, path) = split_url(raw)?;
-    let mut host = parsed_host.as_str();
-    if let Some(rest) = host.strip_prefix("*.") {
-        host = rest;
-    }
-    if let Some(rest) = host.strip_prefix("www.") {
-        host = rest;
-    }
-    let host = host.to_string();
+    let (host, wildcard) = match parsed_host.strip_prefix("*.") {
+        Some(rest) => (rest.to_string(), true),
+        None => (parsed_host, false),
+    };
     if host.is_empty() || (!host.contains('.') && host != "localhost") {
         // Reject bare words like "reddit" — they would match nothing useful
         // and silently look broken.
         return None;
     }
-    Some((host, path))
+    Some(SitePattern {
+        host,
+        path,
+        wildcard,
+    })
 }
 
-/// Does `(host, path)` fall under the rule pattern? Subdomains match
-/// implicitly, and a pattern path acts as a prefix.
+/// Does `(host, path)` fall under the rule pattern? A pattern path acts as a
+/// prefix; the host must match exactly unless the pattern is a wildcard.
 pub fn site_matches(host: &str, path: &str, pattern: &str) -> bool {
-    let Some((p_host, p_path)) = normalize_site_pattern(pattern) else {
+    let Some(p) = normalize_site_pattern(pattern) else {
         return false;
     };
-    let host_ok = host == p_host || host.ends_with(&format!(".{p_host}"));
+    let host_ok = if p.wildcard {
+        host == p.host || host.ends_with(&format!(".{}", p.host))
+    } else {
+        host == p.host
+    };
     if !host_ok {
         return false;
     }
-    if p_path == "/" {
+    if p.path == "/" {
         return true;
     }
-    path.starts_with(&p_path)
+    path.starts_with(&p.path)
 }
 
 /// Can any site rule possibly fire? When not, the engine skips inspecting the
@@ -438,16 +458,34 @@ mod tests {
     // ----- Site matching -----------------------------------------------------
 
     #[test]
-    fn site_pattern_matches_subdomains() {
-        assert!(site_matches("www.reddit.com", "/", "reddit.com"));
-        assert!(site_matches("old.reddit.com", "/r/x", "reddit.com"));
-        assert!(site_matches("reddit.com", "/", "reddit.com"));
+    fn a_plain_pattern_matches_only_that_exact_host() {
+        assert!(site_matches("seznam.cz", "/", "seznam.cz"));
+        // Siblings and subdomains are NOT covered — that is the whole point.
+        assert!(!site_matches("www.seznam.cz", "/", "seznam.cz"));
+        assert!(!site_matches("email.seznam.cz", "/", "seznam.cz"));
+    }
+
+    #[test]
+    fn a_pattern_naming_www_matches_www_alone() {
+        assert!(site_matches("www.seznam.cz", "/", "www.seznam.cz"));
+        assert!(!site_matches("email.seznam.cz", "/", "www.seznam.cz"));
+        assert!(!site_matches("seznam.cz", "/", "www.seznam.cz"));
+    }
+
+    #[test]
+    fn a_wildcard_pattern_covers_the_apex_and_every_subdomain() {
+        assert!(site_matches("seznam.cz", "/", "*.seznam.cz"));
+        assert!(site_matches("www.seznam.cz", "/", "*.seznam.cz"));
+        assert!(site_matches("email.seznam.cz", "/", "*.seznam.cz"));
+        assert!(site_matches("a.b.seznam.cz", "/", "*.seznam.cz"));
     }
 
     #[test]
     fn site_pattern_does_not_match_unrelated_suffix() {
         assert!(!site_matches("notreddit.com", "/", "reddit.com"));
         assert!(!site_matches("reddit.com.evil.test", "/", "reddit.com"));
+        assert!(!site_matches("notseznam.cz", "/", "*.seznam.cz"));
+        assert!(!site_matches("seznam.cz.evil.test", "/", "*.seznam.cz"));
     }
 
     #[test]
@@ -461,17 +499,25 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_and_www_prefixes_are_equivalent() {
-        assert_eq!(
-            normalize_site_pattern("*.example.com"),
-            normalize_site_pattern("example.com")
-        );
-        assert_eq!(
-            normalize_site_pattern("www.example.com"),
-            normalize_site_pattern("example.com")
-        );
+    fn the_wildcard_marker_survives_normalisation() {
+        let plain = normalize_site_pattern("example.com").unwrap();
+        assert_eq!(plain.host, "example.com");
+        assert!(!plain.wildcard);
+
+        let wild = normalize_site_pattern("*.example.com").unwrap();
+        assert_eq!(wild.host, "example.com");
+        assert!(wild.wildcard);
+    }
+
+    #[test]
+    fn a_scheme_is_optional_but_www_is_not_stripped() {
         assert_eq!(
             normalize_site_pattern("https://example.com/"),
+            normalize_site_pattern("example.com")
+        );
+        // `www.` is part of the host, not decoration.
+        assert_ne!(
+            normalize_site_pattern("www.example.com"),
             normalize_site_pattern("example.com")
         );
     }
@@ -498,7 +544,7 @@ mod tests {
 
     #[test]
     fn strict_mode_blocks_everything_not_allowed() {
-        let rules = vec![rule("site", "allow", "atlassian.net", "hide")];
+        let rules = vec![rule("site", "allow", "*.atlassian.net", "hide")];
         assert_eq!(
             decide_site("https://team.atlassian.net/browse/X-1", &rules, true),
             SiteDecision::Allowed
