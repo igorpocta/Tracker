@@ -90,6 +90,29 @@ pub struct FocusRuntime {
     /// Bumped on every change to the session **or** the ruleset. The browser
     /// extension long-polls on this so it can install new rules immediately.
     pub generation: u64,
+    /// Shortcut that must run to undo the notification silencing this session
+    /// turned on, or `None` if it never turned any on.
+    ///
+    /// Captured at start instead of recomputed at stop: the user can flip the
+    /// silencing toggle or rename the Shortcut while a session runs, and
+    /// deriving the undo from current settings would then either skip it (and
+    /// strand the Mac in Do Not Disturb) or run the wrong one. Not part of the
+    /// wire shape — nothing outside this module needs it.
+    #[serde(skip)]
+    pub dnd_undo_shortcut: Option<String>,
+}
+
+/// Shortcut that undoes what [`start`] turned on, given the settings in force
+/// at the time and whether the "on" Shortcut actually ran.
+fn undo_shortcut_for(settings: &FocusSettings, engaged: bool) -> Option<String> {
+    if !engaged {
+        return None;
+    }
+    settings
+        .shortcut_off
+        .clone()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// What both the frontend and the browser extension see.
@@ -225,11 +248,20 @@ pub fn start<R: Runtime>(
         None
     };
 
+    // Silence notifications before publishing the session, so the recorded
+    // undo reflects what actually ran.
+    let engaged =
+        settings.block_notifications && notify::run_focus_shortcut(settings.shortcut_on.as_deref());
+    if settings.block_notifications && !engaged {
+        tracing::info!("focus: system Do Not Disturb not automated on this platform");
+    }
+
     {
         let mut guard = state.focus.write().unwrap_or_else(|e| e.into_inner());
         guard.active = true;
         guard.started_at = Some(now);
         guard.ends_at = ends_at;
+        guard.dnd_undo_shortcut = undo_shortcut_for(&settings, engaged);
     }
     // Persist so a crash or restart mid-session doesn't silently drop it.
     let _ = cache::settings::set(
@@ -238,17 +270,6 @@ pub fn start<R: Runtime>(
         &ends_at.unwrap_or(0).to_string(),
     );
     overlay::reset_throttle();
-
-    if settings.block_notifications {
-        let enabled = notify::apply(
-            true,
-            settings.shortcut_on.as_deref(),
-            settings.shortcut_off.as_deref(),
-        );
-        if !enabled {
-            tracing::info!("focus: system Do Not Disturb not automated on this platform");
-        }
-    }
 
     // Opt-in kill sweep: only apps with an explicit `block` + `kill` rule, and
     // never in strict mode where the allow-list would sweep far too widely.
@@ -261,22 +282,17 @@ pub fn start<R: Runtime>(
 
 /// End the session and undo everything it turned on.
 pub fn stop<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Result<FocusStateDto, String> {
-    let settings = load_settings(&state.db);
-    {
+    let undo = {
         let mut guard = state.focus.write().unwrap_or_else(|e| e.into_inner());
         guard.active = false;
         guard.started_at = None;
         guard.ends_at = None;
-    }
+        guard.dnd_undo_shortcut.take()
+    };
     let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
 
-    if settings.block_notifications {
-        notify::apply(
-            false,
-            settings.shortcut_on.as_deref(),
-            settings.shortcut_off.as_deref(),
-        );
-    }
+    // Undo exactly what this session turned on — see `dnd_undo_shortcut`.
+    notify::run_focus_shortcut(undo.as_deref());
     overlay::hide(app);
 
     bump_generation(app, state);
@@ -445,17 +461,11 @@ pub fn spawn(app: AppHandle) {
 /// after Tracker quits. The session itself stays persisted — restarting picks
 /// it back up via [`restore`].
 pub fn shutdown(state: &AppState) {
-    if !is_active(state) {
-        return;
-    }
-    let settings = load_settings(&state.db);
-    if settings.block_notifications {
-        notify::apply(
-            false,
-            settings.shortcut_on.as_deref(),
-            settings.shortcut_off.as_deref(),
-        );
-    }
+    let undo = {
+        let mut guard = state.focus.write().unwrap_or_else(|e| e.into_inner());
+        guard.dnd_undo_shortcut.take()
+    };
+    notify::run_focus_shortcut(undo.as_deref());
 }
 
 #[cfg(test)]
@@ -511,6 +521,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_settings(&db).shortcut_on, None);
+    }
+
+    #[test]
+    fn undo_shortcut_is_none_when_nothing_was_engaged() {
+        let settings = FocusSettings {
+            shortcut_off: Some("Focus Off".into()),
+            ..FocusSettings::default()
+        };
+        assert_eq!(undo_shortcut_for(&settings, false), None);
+    }
+
+    #[test]
+    fn undo_shortcut_is_captured_when_silencing_engaged() {
+        let settings = FocusSettings {
+            shortcut_off: Some("  Focus Off  ".into()),
+            ..FocusSettings::default()
+        };
+        assert_eq!(
+            undo_shortcut_for(&settings, true),
+            Some("Focus Off".to_string())
+        );
+    }
+
+    #[test]
+    fn undo_shortcut_ignores_a_blank_name() {
+        let settings = FocusSettings {
+            shortcut_off: Some("   ".into()),
+            ..FocusSettings::default()
+        };
+        assert_eq!(undo_shortcut_for(&settings, true), None);
     }
 
     #[test]

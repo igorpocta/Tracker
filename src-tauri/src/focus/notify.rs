@@ -87,17 +87,21 @@ pub fn open_system_dnd_settings() -> Result<(), String> {
     }
 }
 
-/// Turn the system's Do Not Disturb on or off for a focus session.
+/// Run the Shortcut bound to one side of a focus transition.
 ///
-/// Returns `Ok(false)` when nothing could be done automatically — the caller
-/// surfaces that to the user instead of silently pretending it worked.
-pub fn apply(enable: bool, shortcut_on: Option<&str>, shortcut_off: Option<&str>) -> bool {
+/// Takes the name directly rather than an `enable` flag plus both names: the
+/// caller has to remember which Shortcut it actually ran anyway (see
+/// [`crate::focus::engine::undo_shortcut_for`]), and a boolean here invited
+/// recomputing that decision from settings that may have changed since.
+///
+/// Returns whether anything ran. `false` means the caller should tell the
+/// user rather than pretend Do Not Disturb is on.
+pub fn run_focus_shortcut(name: Option<&str>) -> bool {
     if !cfg!(target_os = "macos") {
         // Windows has no scriptable toggle; the Settings deep-link is offered
         // from the UI instead.
         return false;
     }
-    let name = if enable { shortcut_on } else { shortcut_off };
     match name.map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) => run_macos_shortcut(n).is_ok(),
         None => false,
