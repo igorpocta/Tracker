@@ -36,6 +36,9 @@ pub const KEY_DEFAULT_DURATION: &str = "focus_default_duration_min";
 /// Unix seconds at which a session started before the app was closed should
 /// end. Lets a running session survive a restart instead of silently lapsing.
 pub const KEY_ACTIVE_UNTIL: &str = "focus_active_until";
+/// Unix seconds the current session began at, so a restart restores when it
+/// actually started rather than pretending it began at relaunch.
+pub const KEY_STARTED_AT: &str = "focus_started_at";
 
 /// Session length used when the caller doesn't pass one. Zero means "until I
 /// stop it".
@@ -321,6 +324,7 @@ pub fn start<R: Runtime>(
         KEY_ACTIVE_UNTIL,
         &ends_at.unwrap_or(0).to_string(),
     );
+    let _ = cache::settings::set(&state.db, KEY_STARTED_AT, &now.to_string());
     overlay::reset_throttle();
 
     // Opt-in kill sweep: only apps with an explicit `block` + `kill` rule, and
@@ -342,6 +346,7 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Result<FocusSta
         guard.dnd_undo_shortcut.take()
     };
     let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
+    let _ = cache::settings::remove(&state.db, KEY_STARTED_AT);
 
     // Undo exactly what this session turned on — see `dnd_undo_shortcut`.
     notify::run_focus_shortcut(undo.as_deref());
@@ -358,14 +363,20 @@ pub fn restore<R: Runtime>(app: &AppHandle<R>, state: &AppState) {
         return;
     };
     let Ok(ends_at) = raw.parse::<i64>() else {
-        let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
+        clear_persisted_session(state);
         return;
     };
     let now = now_s();
     if ends_at != 0 && ends_at <= now {
-        let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
+        clear_persisted_session(state);
         return;
     }
+    // Fall back to "now" only when the start time is missing — a session
+    // persisted by an older build, or one whose key was lost.
+    let started_at = read_string(&state.db, KEY_STARTED_AT)
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .filter(|&started| started <= now)
+        .unwrap_or(now);
     // Re-engage silencing the same way `start` does. The previous run turned
     // Do Not Disturb off on its way out, so a restored session that skipped
     // this would claim to be running while notifications kept arriving.
@@ -376,12 +387,18 @@ pub fn restore<R: Runtime>(app: &AppHandle<R>, state: &AppState) {
     {
         let mut guard = state.focus.write().unwrap_or_else(|e| e.into_inner());
         guard.active = true;
-        guard.started_at = Some(now);
+        guard.started_at = Some(started_at);
         guard.ends_at = if ends_at == 0 { None } else { Some(ends_at) };
         guard.dnd_undo_shortcut = undo_shortcut_for(&settings, engaged);
     }
     bump_generation(app, state);
     tracing::info!("focus: restored an in-progress session");
+}
+
+/// Drop every trace of a persisted session.
+fn clear_persisted_session(state: &AppState) {
+    let _ = cache::settings::remove(&state.db, KEY_ACTIVE_UNTIL);
+    let _ = cache::settings::remove(&state.db, KEY_STARTED_AT);
 }
 
 /// Terminate already-running apps that carry an explicit `block` + `kill`
