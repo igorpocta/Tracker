@@ -296,7 +296,28 @@ fn import_inner(db: &Db, bundle: &BackupBundle) -> Result<ImportStats, String> {
     })
 }
 
+/// Column names the target table actually has, straight from the schema.
+///
+/// Read through `pragma_table_info` as a table-valued function so the table
+/// name travels as a bound parameter rather than being spliced into SQL.
+fn table_columns(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+) -> Result<std::collections::HashSet<String>, rusqlite::Error> {
+    let mut stmt = tx.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let names = stmt.query_map([table], |row| row.get::<_, String>(0))?;
+    names.collect()
+}
+
 /// Dynamicky postavit INSERT z prvního řádku — sloupce odvodíme z JSON keys.
+///
+/// Those keys come out of a file the user picked, and they end up inside the
+/// statement text, so they are checked against the table's real columns
+/// first. Quoting alone was not enough: the wrapping quotes were not escaped,
+/// so a key containing one could extend the column list. Validating against
+/// the schema means only names SQLite itself reported can reach the SQL, and
+/// a bundle that disagrees with the schema says which column it tripped on
+/// instead of failing with a parser error.
 fn insert_rows(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
@@ -310,6 +331,11 @@ fn insert_rows(
         .and_then(|v| v.as_object())
         .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
     let columns: Vec<&str> = first.keys().map(|s| s.as_str()).collect();
+
+    let known = table_columns(tx, table)?;
+    if let Some(unknown) = columns.iter().find(|c| !known.contains(**c)) {
+        return Err(rusqlite::Error::InvalidColumnName((*unknown).to_string()));
+    }
     let placeholders = (1..=columns.len())
         .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
@@ -464,6 +490,50 @@ mod tests {
             Some("before"),
         );
         assert_eq!(crate::cache::worklogs::count(&db).unwrap(), 1);
+    }
+
+    /// Run one table's rows through `insert_rows` and hand back the outcome.
+    fn try_insert(db: &Db, table: &str, rows: Vec<Value>) -> Result<usize, rusqlite::Error> {
+        let mut conn = db.pool().get().unwrap();
+        let tx = conn.transaction().unwrap();
+        let out = insert_rows(&tx, table, &rows);
+        let _ = tx.rollback();
+        out
+    }
+
+    #[test]
+    fn a_column_name_cannot_smuggle_sql_into_the_statement() {
+        let db = open_db();
+        // The wrapping quotes used to be unescaped, so a key carrying its own
+        // quote extended the column list.
+        let hostile = json!({ "issue_key\",\"connection_id": "x" });
+        let err = try_insert(&db, "favorite_issues", vec![hostile]).unwrap_err();
+        assert!(
+            matches!(err, rusqlite::Error::InvalidColumnName(_)),
+            "a name the schema doesn't have must be refused: {err:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_column_is_named_rather_than_hitting_the_parser() {
+        let db = open_db();
+        let err = try_insert(&db, "app_settings", vec![json!({ "nope": 1 })]).unwrap_err();
+        match err {
+            rusqlite::Error::InvalidColumnName(name) => assert_eq!(name, "nope"),
+            other => panic!("expected the column to be named, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn real_columns_still_insert() {
+        let db = open_db();
+        let n = try_insert(
+            &db,
+            "app_settings",
+            vec![json!({ "key": "k", "value": "v" })],
+        )
+        .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]
