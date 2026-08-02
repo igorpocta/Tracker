@@ -10,6 +10,25 @@
  * Soubor je `.xlsx` (native Excel binary), takže žádné kódování a oddělovače
  * neřešíme. Náhrada za starší TSV variantu, která Excel vyžadovala
  * importovat ručně.
+ *
+ * ## `xlsx` a jeho známé zranitelnosti
+ *
+ * `npm audit` hlásí u balíku `xlsx` dvě „high" chyby — prototype pollution
+ * (GHSA-4r6h-8v6p-xvw6) a ReDoS (GHSA-5pgg-2g8v-p4x9) — a k tomu
+ * *No fix available*. Není to přehlédnutí: SheetJS balík na npm registry
+ * opustil na verzi 0.18.5 a opravené verze vydává jen přes vlastní CDN, takže
+ * `npm audit fix` nemá co nabídnout.
+ *
+ * Obě chyby se týkají **parsování** cizího sešitu. Tracker žádný sešit nečte —
+ * v celém repozitáři není jediné volání `XLSX.read`, jen zápis přes
+ * `json_to_sheet` a `writeFile` nad daty z naší vlastní databáze. Tím pádem na
+ * ně dnes není cesta.
+ *
+ * **Než sem kdokoli přidá import XLSX, musí se tohle vyřešit napřed** —
+ * čtením cizího souboru se obě zranitelnosti okamžitě zpřístupní. Volby jsou
+ * tři: přejít na `xlsx` ze SheetJS CDN (posune se tím ale dodavatelský řetězec
+ * mimo npm registry, což se dotkne i `npm ci` v CI), vyměnit balík za
+ * udržovanou alternativu, nebo import nedělat.
  */
 import { Download } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
