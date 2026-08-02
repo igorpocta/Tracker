@@ -61,6 +61,22 @@ async function getToken() {
   return (token || "").trim();
 }
 
+/**
+ * Default ceiling on a bridge call. Every request must be bounded: the focus
+ * long-poll deliberately holds a connection open, and a desktop that stops
+ * answering without closing the socket would otherwise leave the `await`
+ * pending forever -- taking the sync loop, and with it the failsafe that
+ * clears blocking rules, down with it.
+ */
+const BRIDGE_TIMEOUT_MS = 10_000;
+
+/** `AbortSignal.timeout` is unavailable on older engines; degrade, don't throw. */
+function timeoutSignal(ms) {
+  return typeof AbortSignal !== "undefined" && AbortSignal.timeout
+    ? AbortSignal.timeout(ms)
+    : undefined;
+}
+
 async function bridge(path, opts = {}) {
   const token = await getToken();
   if (!token) throw new Error("Chybí bridge token — vlož ho v okně rozšíření.");
@@ -71,6 +87,7 @@ async function bridge(path, opts = {}) {
       Authorization: `Bearer ${token}`,
     },
     body: opts.body,
+    signal: timeoutSignal(opts.timeoutMs ?? BRIDGE_TIMEOUT_MS),
   });
   if (res.status === 401) throw new Error("Neplatný token (401).");
   if (!res.ok) throw new Error(`Bridge vrátil HTTP ${res.status}.`);
@@ -228,7 +245,11 @@ async function focusSyncOnce(waitSeconds) {
   if (focusGeneration !== null) params.set("gen", String(focusGeneration));
 
   try {
-    const state = await bridge(`/focus/state?${params.toString()}`);
+    // The bridge parks the request for `waitSeconds`; allow that plus slack so
+    // a healthy long-poll is never mistaken for a hung one.
+    const state = await bridge(`/focus/state?${params.toString()}`, {
+      timeoutMs: (waitSeconds + 10) * 1000,
+    });
     focusFailures = 0;
     if (state && state.generation !== focusGeneration) {
       focusGeneration = state.generation;
