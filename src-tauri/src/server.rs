@@ -148,6 +148,18 @@ pub struct ServerState<R: Runtime = tauri::Wry> {
     /// Last ticket the browser extension reported as "currently visible".
     /// The extension is expected to `POST /visible-ticket` periodically.
     pub visible_ticket: Arc<RwLock<Option<VisibleTicket>>>,
+    /// Secret embedded in the block page and required by `POST /focus/allow`.
+    ///
+    /// The block page is served without a bearer token — it has to be, a
+    /// browser landing on it cannot present one. That is harmless while the
+    /// page only *reads*, but allow-listing a site is a mutation, and any
+    /// local web page can `fetch` loopback. Without a check, a page could
+    /// simply un-block itself.
+    ///
+    /// The nonce closes that: it lives in the page body, and the response
+    /// carries no CORS headers, so a cross-origin script cannot read it back.
+    /// Only something that can actually see the block page can act on it.
+    pub page_nonce: Arc<String>,
 }
 
 impl<R: Runtime> Clone for ServerState<R> {
@@ -156,6 +168,7 @@ impl<R: Runtime> Clone for ServerState<R> {
             app: self.app.clone(),
             last_heartbeat: self.last_heartbeat.clone(),
             visible_ticket: self.visible_ticket.clone(),
+            page_nonce: self.page_nonce.clone(),
         }
     }
 }
@@ -167,6 +180,7 @@ impl<R: Runtime> ServerState<R> {
             app,
             last_heartbeat: Arc::new(RwLock::new(None)),
             visible_ticket: Arc::new(RwLock::new(None)),
+            page_nonce: Arc::new(uuid::Uuid::new_v4().to_string()),
         }
     }
 
@@ -275,6 +289,7 @@ pub fn build_router<R: Runtime>(state: ServerState<R>, bearer_token: Arc<String>
     let public = Router::new()
         .route("/blocked", get(blocked_page_handler::<R>))
         .route("/focus/ping", get(focus_ping_handler::<R>))
+        .route("/focus/allow", post(focus_allow_handler::<R>))
         .with_state(state);
 
     authenticated.merge(public)
@@ -668,6 +683,69 @@ async fn focus_ping_handler<R: Runtime>(State(state): State<ServerState<R>>) -> 
     Json(serde_json::json!({ "active": active })).into_response()
 }
 
+/// Header carrying the block page's nonce on an allow-list request.
+const FOCUS_NONCE_HEADER: &str = "x-focus-nonce";
+
+#[derive(Debug, Deserialize)]
+pub struct AllowRequest {
+    /// Pattern to allow, as edited by the user on the block page.
+    pub pattern: String,
+}
+
+/// `POST /focus/allow` — add an allow rule from the block page.
+///
+/// Gated on the nonce rather than the bearer token: the browser cannot
+/// present the token, but it *can* echo back a value it read out of the page
+/// it is displaying. See [`ServerState::page_nonce`].
+async fn focus_allow_handler<R: Runtime>(
+    State(state): State<ServerState<R>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AllowRequest>,
+) -> Response {
+    let provided = headers
+        .get(FOCUS_NONCE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !constant_time_eq(provided.as_bytes(), state.page_nonce.as_bytes()) {
+        return err_response(StatusCode::FORBIDDEN, "neplatný požadavek");
+    }
+
+    let Some(app_state) = state.app.try_state::<AppState>() else {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, "app state missing");
+    };
+
+    // Same validation the Settings panel goes through, so a rule added here
+    // is indistinguishable from one typed in the app.
+    let normalized =
+        crate::commands::focus::normalize_rule_input("site", "allow", &req.pattern, "hide");
+    let (kind, mode, pattern, action) = match normalized {
+        Ok(v) => v,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
+
+    let insert = crate::cache::focus::upsert(
+        &app_state.db,
+        crate::cache::focus::NewFocusRule {
+            kind: &kind,
+            mode: &mode,
+            pattern: &pattern,
+            label: None,
+            action: &action,
+            enabled: true,
+        },
+        Utc::now().timestamp(),
+    );
+    if let Err(e) = insert {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+
+    // Wakes the extension's long-poll and invalidates the engine's rule
+    // snapshot, so the page the user is looking at unblocks immediately.
+    crate::focus::engine::bump_generation(&state.app, &app_state);
+
+    Json(serde_json::json!({ "ok": true, "pattern": pattern })).into_response()
+}
+
 /// One "go here instead" tile on the block page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedTile {
@@ -800,6 +878,7 @@ pub fn render_blocked_page(
     ends_at: Option<i64>,
     tiles: &[BlockedTile],
     theme: &PageTheme,
+    nonce: &str,
 ) -> String {
     let host = original_url
         .and_then(|u| crate::focus::rules::split_url(u).map(|(host, _)| host))
@@ -810,6 +889,27 @@ pub fn render_blocked_page(
         format!(
             "<p class=\"host\">Stránka <strong>{}</strong> je teď zablokovaná.</p>",
             html_escape(&host)
+        )
+    };
+
+    // Deliberately understated: a text link, not a button. Un-blocking should
+    // be available without being the thing the page invites you to do. Only
+    // offered when we know which host to prefill.
+    let allow_html = if host.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<div class=\"allow\">\
+             <button type=\"button\" id=\"allow-toggle\" class=\"linkish\">Povolit tuto stránku</button>\
+             <form id=\"allow-form\" hidden>\
+             <input id=\"allow-pattern\" value=\"{host}\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\">\
+             <button type=\"submit\" class=\"allow-go\">Povolit</button>\
+             </form>\
+             <p id=\"allow-msg\" class=\"allow-msg\"></p>\
+             <p class=\"allow-hint\">Uloží se jako trvalé pravidlo. Pro celou doménu napište *.{host_bare}</p>\
+             </div>",
+            host = html_escape(&host),
+            host_bare = html_escape(host.trim_start_matches("www.")),
         )
     };
 
@@ -850,6 +950,9 @@ pub fn render_blocked_page(
         .map(|json| escape_json_for_script(&json))
         .unwrap_or_else(|| "null".to_string());
 
+    let nonce_json = serde_json::to_string(nonce)
+        .map(|j| escape_json_for_script(&j))
+        .unwrap_or_else(|_| "\"\"".to_string());
     let surface_css = theme.surface_css();
     let accent = html_escape(&theme.accent);
     let accent_soft = theme.accent_rgba(0.15);
@@ -908,6 +1011,27 @@ pub fn render_blocked_page(
   }}
   .tile-label {{ font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
   footer {{ margin-top: 28px; font-size: 12px; color: var(--muted); }}
+  .allow {{ margin-top: 26px; }}
+  .linkish {{
+    background: none; border: 0; padding: 0; font: inherit; font-size: 12px;
+    color: var(--muted); text-decoration: underline; cursor: pointer;
+  }}
+  .linkish:hover {{ color: var(--accent); }}
+  #allow-form {{
+    display: flex; gap: 8px; justify-content: center; margin-top: 12px;
+  }}
+  #allow-pattern {{
+    flex: 0 1 260px; padding: 7px 10px; border-radius: 8px; font: inherit;
+    font-size: 13px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border);
+  }}
+  #allow-pattern:focus {{ outline: none; border-color: var(--accent); }}
+  .allow-go {{
+    padding: 7px 14px; border-radius: 8px; border: 0; cursor: pointer;
+    font: inherit; font-size: 13px; background: var(--accent); color: #fff;
+  }}
+  .allow-msg {{ margin: 10px 0 0; font-size: 12px; color: var(--accent); min-height: 1em; }}
+  .allow-hint {{ margin: 6px 0 0; font-size: 11px; color: var(--muted); }}
 </style>
 </head>
 <body>
@@ -918,6 +1042,7 @@ pub fn render_blocked_page(
   {countdown}
   {tiles_html}
   <footer>Až Focus skončí, stránka se sama vrátí zpět.</footer>
+  {allow_html}
 </main>
 <script>
   var RETURN_TO = {return_target};
@@ -933,6 +1058,33 @@ pub fn render_blocked_page(
     render();
     setInterval(render, 1000);
   }}
+  var NONCE = {nonce_json};
+  var toggle = document.getElementById('allow-toggle');
+  var form = document.getElementById('allow-form');
+  if (toggle && form) {{
+    toggle.addEventListener('click', function () {{
+      form.hidden = !form.hidden;
+      if (!form.hidden) document.getElementById('allow-pattern').focus();
+    }});
+    form.addEventListener('submit', function (e) {{
+      e.preventDefault();
+      var msg = document.getElementById('allow-msg');
+      msg.textContent = 'Ukládám…';
+      fetch('/focus/allow', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json', 'X-Focus-Nonce': NONCE }},
+        body: JSON.stringify({{ pattern: document.getElementById('allow-pattern').value }})
+      }})
+        .then(function (r) {{ return r.json().then(function (d) {{ return {{ ok: r.ok, data: d }}; }}); }})
+        .then(function (res) {{
+          if (!res.ok) {{ msg.textContent = (res.data && res.data.error) || 'Nepodařilo se povolit.'; return; }}
+          msg.textContent = 'Povoleno: ' + res.data.pattern;
+          if (RETURN_TO) {{ setTimeout(function () {{ location.replace(RETURN_TO); }}, 500); }}
+        }})
+        .catch(function () {{ msg.textContent = 'Tracker neodpovídá.'; }});
+    }});
+  }}
+
   setInterval(function () {{
     fetch('/focus/ping', {{ cache: 'no-store' }})
       .then(function (r) {{ return r.json(); }})
@@ -975,7 +1127,13 @@ async fn blocked_page_handler<R: Runtime>(
         None => (None, Vec::new(), PageTheme::default()),
     };
 
-    let html = render_blocked_page(original.as_deref(), ends_at, &tiles, &theme);
+    let html = render_blocked_page(
+        original.as_deref(),
+        ends_at,
+        &tiles,
+        &theme,
+        &state.page_nonce,
+    );
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -1059,6 +1217,7 @@ mod focus_tests {
             None,
             &[],
             &PageTheme::default(),
+            "test-nonce",
         );
         assert!(!html.contains("<img src=x"));
         assert!(html.contains("x.com"));
@@ -1066,8 +1225,13 @@ mod focus_tests {
 
     #[test]
     fn rendered_page_embeds_the_return_url_as_json() {
-        let html =
-            render_blocked_page(Some("https://x.com/a\"b"), None, &[], &PageTheme::default());
+        let html = render_blocked_page(
+            Some("https://x.com/a\"b"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
         assert!(html.contains(r#"var RETURN_TO = "https://x.com/a\"b""#));
     }
 
@@ -1078,6 +1242,7 @@ mod focus_tests {
             None,
             &[],
             &PageTheme::default(),
+            "test-nonce",
         );
         assert!(!html.contains("</script><img"));
         assert!(html.contains("\\u003c/script\\u003e"));
@@ -1092,6 +1257,7 @@ mod focus_tests {
             None,
             &[],
             &PageTheme::default(),
+            "test-nonce",
         );
         assert!(html.contains("var RETURN_TO = null"));
     }
@@ -1102,7 +1268,7 @@ mod focus_tests {
             accent: "#EAB308".into(),
             mode: "auto".into(),
         };
-        let html = render_blocked_page(Some("https://reddit.com"), None, &[], &theme);
+        let html = render_blocked_page(Some("https://reddit.com"), None, &[], &theme, "test-nonce");
         assert!(html.contains("--accent: #EAB308"));
         assert!(html.contains("rgba(234, 179, 8, 0.15)"));
     }
@@ -1113,7 +1279,7 @@ mod focus_tests {
             mode: "dark".into(),
             ..PageTheme::default()
         };
-        let html = render_blocked_page(None, None, &[], &dark);
+        let html = render_blocked_page(None, None, &[], &dark, "test-nonce");
         assert!(html.contains("color-scheme: dark"));
         assert!(
             !html.contains("prefers-color-scheme"),
@@ -1121,7 +1287,7 @@ mod focus_tests {
         );
 
         let auto = PageTheme::default();
-        let html = render_blocked_page(None, None, &[], &auto);
+        let html = render_blocked_page(None, None, &[], &auto, "test-nonce");
         assert!(html.contains("prefers-color-scheme: dark"));
     }
 
@@ -1132,6 +1298,61 @@ mod focus_tests {
             mode: "auto".into(),
         };
         assert_eq!(theme.accent_rgba(0.15), "rgba(20, 184, 166, 0.15)");
+    }
+
+    #[test]
+    fn the_allow_control_is_prefilled_with_the_blocked_host() {
+        let html = render_blocked_page(
+            Some("https://www.qadata.cz/x"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
+        assert!(html.contains("id=\"allow-pattern\" value=\"www.qadata.cz\""));
+        // The hint offers the wildcard form without the `www.` label, since
+        // that is what covers the whole domain.
+        assert!(html.contains("*.qadata.cz"));
+    }
+
+    #[test]
+    fn the_allow_control_carries_the_nonce_the_endpoint_demands() {
+        let html = render_blocked_page(
+            Some("https://reddit.com"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "s3cr3t-nonce",
+        );
+        assert!(html.contains("var NONCE = \"s3cr3t-nonce\""));
+        assert!(html.contains("X-Focus-Nonce"));
+    }
+
+    #[test]
+    fn a_page_without_a_known_host_offers_nothing_to_allow() {
+        let html = render_blocked_page(None, None, &[], &PageTheme::default(), "test-nonce");
+        // The stylesheet always carries the selector; it is the markup that
+        // must be absent.
+        assert!(!html.contains("id=\"allow-pattern\""));
+        assert!(!html.contains("id=\"allow-toggle\""));
+    }
+
+    #[test]
+    fn a_hostile_host_cannot_break_out_of_the_prefilled_input() {
+        // The quote lands in the authority, so it reaches the `value`
+        // attribute rather than the path.
+        let html = render_blocked_page(
+            Some("https://x.com\" onfocus=alert(1) z=\"/"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
+        assert!(
+            !html.contains("value=\"x.com\" onfocus="),
+            "the quote must not close the attribute"
+        );
+        assert!(html.contains("&quot;"), "it should arrive escaped instead");
     }
 
     #[test]
@@ -1151,6 +1372,7 @@ mod focus_tests {
             Some(1_700_000_000),
             &tiles,
             &PageTheme::default(),
+            "test-nonce",
         );
         assert!(html.contains("https://team.atlassian.net"));
         assert!(html.contains("https://docs.rs"));
@@ -1159,8 +1381,13 @@ mod focus_tests {
 
     #[test]
     fn page_without_tiles_omits_the_section() {
-        let html =
-            render_blocked_page(Some("https://reddit.com"), None, &[], &PageTheme::default());
+        let html = render_blocked_page(
+            Some("https://reddit.com"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
         assert!(!html.contains("Kam můžete"));
         assert!(html.contains("Focus mode je aktivní"));
     }
