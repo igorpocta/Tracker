@@ -767,13 +767,6 @@ async fn focus_allow_handler<R: Runtime>(
     Json(serde_json::json!({ "ok": true, "pattern": pattern })).into_response()
 }
 
-/// One "go here instead" tile on the block page.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockedTile {
-    pub label: String,
-    pub url: String,
-}
-
 /// Minimal HTML entity escaping. The block page interpolates a URL the user
 /// was redirected from, which is attacker-influenced in the sense that any
 /// page can link to a nasty URL and get it echoed back here.
@@ -807,20 +800,6 @@ pub fn escape_json_for_script(json: &str) -> String {
         .replace('&', "\\u0026")
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
-}
-
-/// Tiles for the allow-listed sites, so a blocked tab offers somewhere useful
-/// to go instead of being a dead end.
-pub fn blocked_tiles(app_state: &AppState) -> Vec<BlockedTile> {
-    crate::cache::focus::list_enabled(&app_state.db)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|r| r.kind == "site" && r.mode == "allow")
-        .map(|r| BlockedTile {
-            label: r.label.unwrap_or_else(|| r.pattern.clone()),
-            url: format!("https://{}", r.pattern),
-        })
-        .collect()
 }
 
 /// Colours the block page should paint itself with, so it matches whatever
@@ -897,7 +876,6 @@ impl PageTheme {
 pub fn render_blocked_page(
     original_url: Option<&str>,
     ends_at: Option<i64>,
-    tiles: &[BlockedTile],
     theme: &PageTheme,
     nonce: &str,
 ) -> String {
@@ -954,30 +932,6 @@ pub fn render_blocked_page(
         None => "<p class=\"countdown\">Běží, dokud ho nezastavíte.</p>".to_string(),
     };
 
-    let tiles_html = if tiles.is_empty() {
-        String::new()
-    } else {
-        let items: String = tiles
-            .iter()
-            .map(|tile| {
-                let initial = tile
-                    .label
-                    .chars()
-                    .next()
-                    .map(|c| c.to_uppercase().to_string())
-                    .unwrap_or_else(|| "?".into());
-                format!(
-                    "<a class=\"tile\" href=\"{url}\"><span class=\"mono\">{initial}</span>\
-                     <span class=\"tile-label\">{label}</span></a>",
-                    url = html_escape(&tile.url),
-                    initial = html_escape(&initial),
-                    label = html_escape(&tile.label),
-                )
-            })
-            .collect();
-        format!("<h2>Kam můžete</h2><div class=\"tiles\">{items}</div>")
-    };
-
     let return_target = original_url
         .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
         .and_then(|u| serde_json::to_string(u).ok())
@@ -1030,29 +984,6 @@ pub fn render_blocked_page(
     margin: 0 0 10px;
   }}
   .host, .countdown {{ margin: 0 0 6px; color: var(--muted); font-size: 14px; }}
-  h2 {{
-    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--muted); margin: 28px 0 12px;
-  }}
-  /* `auto-fit` + `justify-content: center` so a couple of tiles sit in the
-     middle instead of hugging the left edge of the card. */
-  .tiles {{
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 200px));
-    gap: 10px; justify-content: center;
-  }}
-  .tile {{
-    display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 12px;
-    border: 1px solid var(--border); border-radius: 10px; text-decoration: none;
-    color: var(--text); background: var(--bg); overflow: hidden;
-  }}
-  .tile {{ transition: border-color .15s, transform .15s; }}
-  .tile:hover {{ border-color: var(--accent); transform: translateY(-1px); }}
-  .mono {{
-    flex: 0 0 28px; height: 28px; border-radius: 8px; background: var(--accent);
-    color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 600; font-size: 13px;
-  }}
-  .tile-label {{ font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
   footer {{ margin-top: 24px; font-size: 12px; color: var(--muted); }}
   .allow {{ margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }}
   .linkish {{
@@ -1092,7 +1023,6 @@ pub fn render_blocked_page(
   <h1>Focus mode je aktivní</h1>
   {host_line}
   {countdown}
-  {tiles_html}
   <footer>Až Focus skončí, stránka se sama vrátí zpět.</footer>
   {allow_html}
 </main>
@@ -1169,29 +1099,19 @@ async fn blocked_page_handler<R: Runtime>(
     RawQuery(raw): RawQuery,
 ) -> Response {
     let original = raw.as_deref().and_then(extract_u_param);
-    let (ends_at, tiles, theme) = match state.app.try_state::<AppState>() {
+    let (ends_at, theme) = match state.app.try_state::<AppState>() {
         Some(app_state) => {
             let ends_at = app_state
                 .focus
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .ends_at;
-            (
-                ends_at,
-                blocked_tiles(&app_state),
-                PageTheme::load(&app_state),
-            )
+            (ends_at, PageTheme::load(&app_state))
         }
-        None => (None, Vec::new(), PageTheme::default()),
+        None => (None, PageTheme::default()),
     };
 
-    let html = render_blocked_page(
-        original.as_deref(),
-        ends_at,
-        &tiles,
-        &theme,
-        &state.page_nonce,
-    );
+    let html = render_blocked_page(original.as_deref(), ends_at, &theme, &state.page_nonce);
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -1273,7 +1193,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://x.com/<img src=x onerror=alert(1)>"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1286,7 +1205,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://x.com/a\"b"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1298,7 +1216,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://x.com/</script><img src=x onerror=alert(1)>"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1313,7 +1230,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("javascript:alert(1)"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1326,7 +1242,7 @@ mod focus_tests {
             accent: "#EAB308".into(),
             mode: "auto".into(),
         };
-        let html = render_blocked_page(Some("https://reddit.com"), None, &[], &theme, "test-nonce");
+        let html = render_blocked_page(Some("https://reddit.com"), None, &theme, "test-nonce");
         assert!(html.contains("--accent: #EAB308"));
         assert!(html.contains("rgba(234, 179, 8, 0.15)"));
     }
@@ -1337,7 +1253,7 @@ mod focus_tests {
             mode: "dark".into(),
             ..PageTheme::default()
         };
-        let html = render_blocked_page(None, None, &[], &dark, "test-nonce");
+        let html = render_blocked_page(None, None, &dark, "test-nonce");
         assert!(html.contains("color-scheme: dark"));
         assert!(
             !html.contains("prefers-color-scheme"),
@@ -1345,7 +1261,7 @@ mod focus_tests {
         );
 
         let auto = PageTheme::default();
-        let html = render_blocked_page(None, None, &[], &auto, "test-nonce");
+        let html = render_blocked_page(None, None, &auto, "test-nonce");
         assert!(html.contains("prefers-color-scheme: dark"));
     }
 
@@ -1363,7 +1279,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://www.qadata.cz/x"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1377,7 +1292,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://qadata.cz/"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1414,7 +1328,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://www.qadata.cz/"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1437,7 +1350,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://reddit.com"),
             None,
-            &[],
             &PageTheme::default(),
             "s3cr3t-nonce",
         );
@@ -1447,7 +1359,7 @@ mod focus_tests {
 
     #[test]
     fn a_page_without_a_known_host_offers_nothing_to_allow() {
-        let html = render_blocked_page(None, None, &[], &PageTheme::default(), "test-nonce");
+        let html = render_blocked_page(None, None, &PageTheme::default(), "test-nonce");
         // The stylesheet always carries the selector; it is the markup that
         // must be absent.
         assert!(!html.contains("id=\"allow-pattern\""));
@@ -1461,7 +1373,6 @@ mod focus_tests {
         let html = render_blocked_page(
             Some("https://x.com\" onfocus=alert(1) z=\"/"),
             None,
-            &[],
             &PageTheme::default(),
             "test-nonce",
         );
@@ -1473,39 +1384,20 @@ mod focus_tests {
     }
 
     #[test]
-    fn tiles_render_a_link_per_allowed_site() {
-        let tiles = vec![
-            BlockedTile {
-                label: "Jira".into(),
-                url: "https://team.atlassian.net".into(),
-            },
-            BlockedTile {
-                label: "Docs".into(),
-                url: "https://docs.rs".into(),
-            },
-        ];
+    fn an_end_time_is_handed_to_the_countdown_script() {
         let html = render_blocked_page(
             Some("https://reddit.com"),
             Some(1_700_000_000),
-            &tiles,
             &PageTheme::default(),
             "test-nonce",
         );
-        assert!(html.contains("https://team.atlassian.net"));
-        assert!(html.contains("https://docs.rs"));
         assert!(html.contains("data-ends-at=\"1700000000\""));
-    }
 
-    #[test]
-    fn page_without_tiles_omits_the_section() {
-        let html = render_blocked_page(
-            Some("https://reddit.com"),
-            None,
-            &[],
-            &PageTheme::default(),
-            "test-nonce",
-        );
-        assert!(!html.contains("Kam můžete"));
-        assert!(html.contains("Focus mode je aktivní"));
+        let open_ended =
+            render_blocked_page(Some("https://reddit.com"), None, &PageTheme::default(), "n");
+        // The script names the attribute in its selector, so match on the
+        // assignment — that only exists in the markup.
+        assert!(!open_ended.contains("data-ends-at=\""));
+        assert!(open_ended.contains("Focus mode je aktivní"));
     }
 }
