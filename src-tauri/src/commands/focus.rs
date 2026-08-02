@@ -64,9 +64,16 @@ pub fn normalize_rule_input(
         let parsed = rules::normalize_site_pattern(pattern).ok_or_else(|| {
             format!("„{pattern}\" není platná adresa. Zadejte doménu, např. seznam.cz, *.seznam.cz nebo reddit.com/r/rust.")
         })?;
-        // The `*.` marker is part of the rule, not decoration — dropping it
-        // here would silently turn a subdomain rule into an exact-host one.
-        let prefix = if parsed.wildcard { "*." } else { "" };
+        // Keep `*.` only where it changes the meaning. On a registrable
+        // domain, subdomains are already implied, so `*.seznam.cz` and
+        // `seznam.cz` are the same rule and canonicalise to the shorter form —
+        // which also stops the two spellings sitting in the list as
+        // duplicates that behave identically.
+        let prefix = if parsed.covers_subdomains && !rules::is_registrable_domain(&parsed.host) {
+            "*."
+        } else {
+            ""
+        };
         let suffix = if parsed.path == "/" { "" } else { &parsed.path };
         format!("{prefix}{}{suffix}", parsed.host)
     } else {
@@ -314,17 +321,28 @@ mod tests {
     }
 
     #[test]
-    fn a_wildcard_pattern_keeps_its_marker_through_canonicalisation() {
+    fn a_redundant_wildcard_on_a_domain_is_dropped() {
+        // `*.seznam.cz` and `seznam.cz` already mean the same thing; storing
+        // both spellings would put two identical rules in the list.
         let (_, _, pattern, _) =
             normalize_rule_input("site", "block", " *.Seznam.CZ ", "hide").unwrap();
-        assert_eq!(pattern, "*.seznam.cz");
+        assert_eq!(pattern, "seznam.cz");
     }
 
     #[test]
-    fn a_wildcard_pattern_keeps_its_path_too() {
+    fn a_wildcard_that_changes_the_meaning_is_kept() {
+        // On a host that is not a registrable domain, `*.` is the only way to
+        // ask for subdomains, so it has to survive.
         let (_, _, pattern, _) =
-            normalize_rule_input("site", "block", "*.reddit.com/r/rust", "hide").unwrap();
-        assert_eq!(pattern, "*.reddit.com/r/rust");
+            normalize_rule_input("site", "block", "*.mail.seznam.cz", "hide").unwrap();
+        assert_eq!(pattern, "*.mail.seznam.cz");
+    }
+
+    #[test]
+    fn a_path_survives_canonicalisation() {
+        let (_, _, pattern, _) =
+            normalize_rule_input("site", "block", "reddit.com/r/rust", "hide").unwrap();
+        assert_eq!(pattern, "reddit.com/r/rust");
     }
 
     #[test]

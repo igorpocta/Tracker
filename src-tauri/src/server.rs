@@ -593,11 +593,16 @@ fn focus_rules_response(app_state: &AppState) -> FocusRulesResponse {
     let settings = crate::focus::engine::load_settings(&app_state.db);
     let rules = crate::cache::focus::list_enabled(&app_state.db).unwrap_or_default();
 
+    // The extension only understands an explicit `*.` prefix. Whether a bare
+    // pattern sweeps subdomains is decided here, by `normalize_site_pattern`,
+    // so the rule lives in exactly one place — expand it on the way out rather
+    // than teaching the browser half to work it out again and risk the two
+    // disagreeing about what is blocked.
     let collect = |mode: &str| -> Vec<String> {
         rules
             .iter()
             .filter(|r| r.kind == "site" && r.mode == mode)
-            .map(|r| r.pattern.clone())
+            .map(|r| expand_site_pattern(&r.pattern))
             .collect()
     };
 
@@ -612,6 +617,22 @@ fn focus_rules_response(app_state: &AppState) -> FocusRulesResponse {
         block: collect("block"),
         allow,
         blocked_page: format!("http://127.0.0.1:{SERVER_PORT}/blocked"),
+    }
+}
+
+/// Rewrite a stored pattern into the form the extension matches on: `*.host`
+/// when subdomains are covered, plain `host` when they are not.
+///
+/// Falls back to the pattern verbatim if it cannot be parsed — the extension
+/// then drops it, which is the safe direction.
+pub fn expand_site_pattern(pattern: &str) -> String {
+    match crate::focus::rules::normalize_site_pattern(pattern) {
+        Some(p) => {
+            let prefix = if p.covers_subdomains { "*." } else { "" };
+            let path = if p.path == "/" { "" } else { &p.path };
+            format!("{prefix}{}{path}", p.host)
+        }
+        None => pattern.to_string(),
     }
 }
 
@@ -898,6 +919,18 @@ pub fn render_blocked_page(
     let allow_html = if host.is_empty() {
         String::new()
     } else {
+        // Only worth suggesting the broader form when it differs from what is
+        // already in the box — telling someone who blocked `qadata.cz` to
+        // write `qadata.cz` reads like a bug.
+        let broader = host.trim_start_matches("www.");
+        let hint = if broader == host {
+            "Uloží se jako trvalé pravidlo.".to_string()
+        } else {
+            format!(
+                "Uloží se jako trvalé pravidlo. Pro celý web napište {}",
+                html_escape(broader)
+            )
+        };
         format!(
             "<div class=\"allow\">\
              <button type=\"button\" id=\"allow-toggle\" class=\"linkish\">Povolit tuto stránku</button>\
@@ -907,10 +940,10 @@ pub fn render_blocked_page(
              <button type=\"submit\" class=\"allow-go\">Povolit</button>\
              </form>\
              <p id=\"allow-msg\" class=\"allow-msg\"></p>\
-             <p class=\"allow-hint\">Uloží se jako trvalé pravidlo. Pro celou doménu napište *.{host_bare}</p>\
+             <p class=\"allow-hint\">{hint}</p>\
              </div></div>",
             host = html_escape(&host),
-            host_bare = html_escape(host.trim_start_matches("www.")),
+            hint = hint,
         )
     };
 
@@ -1335,9 +1368,45 @@ mod focus_tests {
             "test-nonce",
         );
         assert!(html.contains("id=\"allow-pattern\" value=\"www.qadata.cz\""));
-        // The hint offers the wildcard form without the `www.` label, since
-        // that is what covers the whole domain.
-        assert!(html.contains("*.qadata.cz"));
+        // The hint points at the domain, which is what covers the whole site.
+        assert!(html.contains("Pro celý web napište qadata.cz"));
+    }
+
+    #[test]
+    fn a_domain_is_not_told_to_write_itself() {
+        let html = render_blocked_page(
+            Some("https://qadata.cz/"),
+            None,
+            &[],
+            &PageTheme::default(),
+            "test-nonce",
+        );
+        assert!(html.contains("Uloží se jako trvalé pravidlo."));
+        assert!(
+            !html.contains("Pro celý web"),
+            "the box already holds the broadest form"
+        );
+    }
+
+    #[test]
+    fn a_domain_reaches_the_extension_as_an_explicit_wildcard() {
+        // The browser half only understands `*.`; the desktop decides.
+        assert_eq!(expand_site_pattern("seznam.cz"), "*.seznam.cz");
+        assert_eq!(expand_site_pattern("*.seznam.cz"), "*.seznam.cz");
+    }
+
+    #[test]
+    fn a_named_host_reaches_the_extension_unchanged() {
+        assert_eq!(expand_site_pattern("www.seznam.cz"), "www.seznam.cz");
+        assert_eq!(
+            expand_site_pattern("reddit.com/r/rust"),
+            "*.reddit.com/r/rust"
+        );
+    }
+
+    #[test]
+    fn an_unparseable_pattern_is_passed_through_for_the_extension_to_drop() {
+        assert_eq!(expand_site_pattern("nonsense"), "nonsense");
     }
 
     #[test]

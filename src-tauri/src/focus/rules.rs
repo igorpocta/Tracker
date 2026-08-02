@@ -291,23 +291,61 @@ pub struct SitePattern {
     pub host: String,
     /// Path prefix, or `/` when the pattern named no path.
     pub path: String,
-    /// Whether the pattern was written `*.host`, i.e. covers subdomains.
-    pub wildcard: bool,
+    /// Whether subdomains of [`Self::host`] are covered too.
+    pub covers_subdomains: bool,
+}
+
+/// Public registries that take a second label, so `example.co.uk` is a
+/// registrable domain rather than a subdomain of `co.uk`.
+///
+/// This is a curated shortlist, not the Public Suffix List. Getting it wrong
+/// costs a rule that is narrower or wider than the user expected on those
+/// TLDs; `*.example.co.uk` states the intent explicitly and always wins, so
+/// there is an escape hatch. A full PSL is ~250 KB of embedded data for a
+/// personal time tracker — worth revisiting if anyone actually trips on it.
+const MULTI_LABEL_SUFFIXES: &[&str] = &[
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "net.uk", "sch.uk", "co.jp", "or.jp", "ne.jp",
+    "ac.jp", "com.au", "net.au", "org.au", "edu.au", "gov.au", "co.nz", "net.nz", "org.nz",
+    "com.br", "net.br", "org.br", "co.za", "org.za", "com.tr", "com.cn", "com.mx", "com.ar",
+    "com.sg", "com.hk", "co.in", "co.kr", "co.il",
+];
+
+/// Does `host` name a registrable domain (`seznam.cz`) rather than a specific
+/// host under one (`www.seznam.cz`)?
+///
+/// This is what decides whether a bare pattern sweeps subdomains: naming the
+/// domain means "this site", naming a host means "this host".
+pub fn is_registrable_domain(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+    if labels.len() < 2 {
+        return false;
+    }
+    let tail = labels[labels.len() - 2..].join(".");
+    if MULTI_LABEL_SUFFIXES.contains(&tail.as_str()) {
+        return labels.len() == 3;
+    }
+    labels.len() == 2
 }
 
 /// Normalise a user-typed site pattern.
 ///
-/// The host is taken literally. `seznam.cz` matches `seznam.cz` and nothing
-/// else — not `www.seznam.cz`, not `email.seznam.cz`. Subdomains are opt-in
-/// through `*.seznam.cz`, which covers the apex and every subdomain under it.
+/// Whether subdomains come along is decided by what the user wrote:
 ///
-/// An earlier version matched subdomains implicitly and stripped a leading
-/// `www.`. That made a rule for one host silently cover every sibling host on
-/// the domain: blocking `www.seznam.cz` also blocked `email.seznam.cz`, with
-/// no way to express the narrower intent.
+/// * `seznam.cz` — a registrable domain, so it means the whole site:
+///   `seznam.cz`, `email.seznam.cz`, `seznam.cz/email`.
+/// * `www.seznam.cz` — a specific host, so only that host. `email.seznam.cz`
+///   stays reachable.
+/// * `*.seznam.cz` — states "and subdomains" explicitly. Redundant for a
+///   registrable domain, but the way to force it on a host that is not one.
+///
+/// Two earlier versions got this wrong from opposite ends. The first matched
+/// subdomains always, so a rule for one host silently swallowed its siblings.
+/// The second matched nothing but the exact host, which broke the common case:
+/// most sites redirect their apex to `www`, so a plain `seznam.cz` rule never
+/// fired at all.
 pub fn normalize_site_pattern(raw: &str) -> Option<SitePattern> {
     let (parsed_host, path) = split_url(raw)?;
-    let (host, wildcard) = match parsed_host.strip_prefix("*.") {
+    let (host, explicit_wildcard) = match parsed_host.strip_prefix("*.") {
         Some(rest) => (rest.to_string(), true),
         None => (parsed_host, false),
     };
@@ -316,10 +354,11 @@ pub fn normalize_site_pattern(raw: &str) -> Option<SitePattern> {
         // and silently look broken.
         return None;
     }
+    let covers_subdomains = explicit_wildcard || is_registrable_domain(&host);
     Some(SitePattern {
         host,
         path,
-        wildcard,
+        covers_subdomains,
     })
 }
 
@@ -329,7 +368,7 @@ pub fn site_matches(host: &str, path: &str, pattern: &str) -> bool {
     let Some(p) = normalize_site_pattern(pattern) else {
         return false;
     };
-    let host_ok = if p.wildcard {
+    let host_ok = if p.covers_subdomains {
         host == p.host || host.ends_with(&format!(".{}", p.host))
     } else {
         host == p.host
@@ -458,11 +497,33 @@ mod tests {
     // ----- Site matching -----------------------------------------------------
 
     #[test]
-    fn a_plain_pattern_matches_only_that_exact_host() {
+    fn naming_the_domain_covers_the_whole_site() {
         assert!(site_matches("seznam.cz", "/", "seznam.cz"));
-        // Siblings and subdomains are NOT covered — that is the whole point.
-        assert!(!site_matches("www.seznam.cz", "/", "seznam.cz"));
-        assert!(!site_matches("email.seznam.cz", "/", "seznam.cz"));
+        assert!(site_matches("www.seznam.cz", "/", "seznam.cz"));
+        assert!(site_matches("email.seznam.cz", "/", "seznam.cz"));
+        assert!(site_matches("seznam.cz", "/email", "seznam.cz"));
+    }
+
+    #[test]
+    fn a_registrable_domain_is_told_apart_from_a_host_under_one() {
+        assert!(is_registrable_domain("seznam.cz"));
+        assert!(is_registrable_domain("qadata.cz"));
+        assert!(!is_registrable_domain("www.seznam.cz"));
+        assert!(!is_registrable_domain("email.seznam.cz"));
+        assert!(!is_registrable_domain("localhost"));
+    }
+
+    #[test]
+    fn a_two_part_public_suffix_does_not_look_like_a_subdomain() {
+        // `example.co.uk` is a site, not a host under `co.uk`.
+        assert!(is_registrable_domain("example.co.uk"));
+        assert!(!is_registrable_domain("www.example.co.uk"));
+        assert!(site_matches("mail.example.co.uk", "/", "example.co.uk"));
+        assert!(!site_matches(
+            "mail.example.co.uk",
+            "/",
+            "www.example.co.uk"
+        ));
     }
 
     #[test]
@@ -482,10 +543,11 @@ mod tests {
 
     #[test]
     fn site_pattern_does_not_match_unrelated_suffix() {
+        // A domain sweeps its subdomains, never a lookalike sibling.
         assert!(!site_matches("notreddit.com", "/", "reddit.com"));
         assert!(!site_matches("reddit.com.evil.test", "/", "reddit.com"));
-        assert!(!site_matches("notseznam.cz", "/", "*.seznam.cz"));
-        assert!(!site_matches("seznam.cz.evil.test", "/", "*.seznam.cz"));
+        assert!(!site_matches("notseznam.cz", "/", "seznam.cz"));
+        assert!(!site_matches("seznam.cz.evil.test", "/", "seznam.cz"));
     }
 
     #[test]
@@ -499,14 +561,17 @@ mod tests {
     }
 
     #[test]
-    fn the_wildcard_marker_survives_normalisation() {
-        let plain = normalize_site_pattern("example.com").unwrap();
-        assert_eq!(plain.host, "example.com");
-        assert!(!plain.wildcard);
+    fn a_domain_covers_subdomains_but_a_named_host_does_not() {
+        let domain = normalize_site_pattern("example.com").unwrap();
+        assert!(domain.covers_subdomains, "a domain means the whole site");
 
-        let wild = normalize_site_pattern("*.example.com").unwrap();
-        assert_eq!(wild.host, "example.com");
-        assert!(wild.wildcard);
+        let host = normalize_site_pattern("www.example.com").unwrap();
+        assert!(!host.covers_subdomains, "a named host means that host");
+
+        // `*.` forces it on a host that would not get it otherwise.
+        let forced = normalize_site_pattern("*.www.example.com").unwrap();
+        assert_eq!(forced.host, "www.example.com");
+        assert!(forced.covers_subdomains);
     }
 
     #[test]

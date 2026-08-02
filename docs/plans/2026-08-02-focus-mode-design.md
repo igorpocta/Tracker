@@ -72,9 +72,11 @@ obou platformách:
 3. shoda s `block` pravidlem → blokováno zvolenou akcí
 4. přísný režim → blokováno (`hide`), jinak povoleno
 
-Weby — vzor je `doména`, `doména/cesta` nebo `*.doména`. Host se porovnává
-přesně; `*.doména` je jediný způsob, jak zahrnout subdomény (a pokrývá i
-samotnou doménu):
+Weby — o záběru rozhoduje to, co uživatel napsal. Registrovatelná doména
+(`seznam.cz`) znamená celý web včetně subdomén; konkrétní host
+(`www.seznam.cz`) platí jen pro něj. `*.host` vynutí subdomény i tam, kde by
+je host sám nedostal. Dvouúrovňové sufixy (`example.co.uk`) řeší krátký
+vestavěný seznam, ne plný Public Suffix List:
 
 1. loopback (`localhost`, `127.0.0.1`, `[::1]`) → povoleno
 2. shoda s `allow` pravidlem → povoleno
